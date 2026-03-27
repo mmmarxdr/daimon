@@ -82,71 +82,7 @@ type anthropicResponse struct {
 }
 
 func (p *AnthropicProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-	apiReq := anthropicRequest{
-		Model:     p.config.Model,
-		MaxTokens: req.MaxTokens,
-		System:    req.SystemPrompt,
-	}
-
-	if apiReq.MaxTokens == 0 {
-		apiReq.MaxTokens = 4096
-	}
-	if apiReq.Model == "" {
-		apiReq.Model = "claude-3-5-sonnet-20241022"
-	}
-
-	for _, m := range req.Messages {
-		if m.Role == "tool" {
-			block := map[string]any{
-				"type":        "tool_result",
-				"tool_use_id": m.ToolCallID,
-				"content":     m.Content,
-			}
-			if len(apiReq.Messages) > 0 && apiReq.Messages[len(apiReq.Messages)-1].Role == "user" {
-				prev := apiReq.Messages[len(apiReq.Messages)-1]
-				switch v := prev.Content.(type) {
-				case string:
-					apiReq.Messages[len(apiReq.Messages)-1].Content = []any{
-						map[string]any{"type": "text", "text": v},
-						block,
-					}
-				case []any:
-					apiReq.Messages[len(apiReq.Messages)-1].Content = append(v, block)
-				}
-			} else {
-				apiReq.Messages = append(apiReq.Messages, anthropicMessage{
-					Role:    "user",
-					Content: []any{block},
-				})
-			}
-		} else if m.Role == "assistant" && len(m.ToolCalls) > 0 {
-			var content []any
-			if m.Content != "" {
-				content = append(content, map[string]any{"type": "text", "text": m.Content})
-			}
-			for _, tc := range m.ToolCalls {
-				content = append(content, map[string]any{
-					"type":  "tool_use",
-					"id":    tc.ID,
-					"name":  tc.Name,
-					"input": json.RawMessage(tc.Input),
-				})
-			}
-			apiReq.Messages = append(apiReq.Messages, anthropicMessage{
-				Role:    "assistant",
-				Content: content,
-			})
-		} else {
-			apiReq.Messages = append(apiReq.Messages, anthropicMessage{
-				Role:    m.Role,
-				Content: m.Content,
-			})
-		}
-	}
-
-	for _, t := range req.Tools {
-		apiReq.Tools = append(apiReq.Tools, anthropicTool(t))
-	}
+	apiReq := p.buildAnthropicRequest(req)
 
 	bodyBytes, err := json.Marshal(apiReq)
 	if err != nil {

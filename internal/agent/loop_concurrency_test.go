@@ -45,7 +45,7 @@ func TestAgent_Semaphore_Capacity(t *testing.T) {
 	ch := &mockChannel{}
 	st := &mockStore{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, blockingProv, st, audit.NoopAuditor{}, nil, nil, maxConcurrent)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, blockingProv, st, audit.NoopAuditor{}, nil, nil, maxConcurrent, false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

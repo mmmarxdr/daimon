@@ -97,12 +97,37 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	loopCtx, cancelLoop := context.WithTimeout(ctx, totalTimeout)
 	defer cancelLoop()
 
+	// Detect streaming capabilities once before the loop.
+	var streamingProv provider.StreamingProvider
+	var streamSender channel.StreamSender
+	if a.stream {
+		if sp, ok := a.provider.(provider.StreamingProvider); ok {
+			streamingProv = sp
+		}
+		if ss, ok := a.channel.(channel.StreamSender); ok {
+			streamSender = ss
+		} else {
+			slog.Debug("streaming enabled but channel does not implement StreamSender; server-side streaming with buffered display")
+		}
+	}
+
 	for i := 0; i < maxIters; i++ {
 		req := a.buildContext(conv, memories)
 
 		slog.Debug("calling LLM", "iteration", i, "messages", len(req.Messages))
 		llmStart := time.Now()
-		resp, err := a.provider.Chat(loopCtx, req)
+
+		var resp *provider.ChatResponse
+		var textStreamed bool
+
+		if streamingProv != nil {
+			resp, textStreamed, err = a.processStreamingCall(
+				loopCtx, streamingProv, streamSender, req, msg.ChannelID, i, llmStart,
+			)
+		} else {
+			resp, err = a.provider.Chat(loopCtx, req)
+		}
+
 		llmDuration := time.Since(llmStart)
 		if err != nil {
 			_ = a.auditor.Emit(ctx, audit.AuditEvent{
@@ -124,7 +149,8 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			StopReason: resp.StopReason, Iteration: i,
 		})
 
-		if resp.Content != "" {
+		// Send text to channel only if it wasn't already streamed.
+		if resp.Content != "" && !textStreamed {
 			_ = a.channel.Send(ctx, channel.OutgoingMessage{
 				ChannelID: msg.ChannelID,
 				Text:      resp.Content,

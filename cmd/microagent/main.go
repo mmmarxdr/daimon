@@ -83,6 +83,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		cfgPath := extractFlagValue(os.Args[2:], "--config", "-config")
+		if err := runConfigCommand(os.Args[2:], cfgPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	flag.Parse()
 
 	if *showVersion {
@@ -323,7 +332,7 @@ func main() {
 
 	mux := channel.NewMultiplexChannel(channels)
 
-	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, skillContents, cfg.Cron.MaxConcurrent)
+	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, skillContents, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream))
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

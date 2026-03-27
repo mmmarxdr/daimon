@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -36,3 +37,26 @@ type Channel interface {
 	// Stop gracefully shuts down the channel.
 	Stop() error
 }
+
+// StreamWriter writes incremental text to an active stream.
+// Created by StreamSender.BeginStream and consumed by the agent loop.
+type StreamWriter interface {
+	// WriteChunk sends a partial text fragment to the user.
+	WriteChunk(text string) error
+
+	// Finalize marks the stream as complete. Called after the last chunk.
+	Finalize() error
+
+	// Abort terminates the stream with an error notice.
+	Abort(err error) error
+}
+
+// StreamSender is an optional interface for channels that support
+// progressive/streaming output. Checked via type assertion at runtime;
+// channels that don't support streaming simply don't implement it.
+type StreamSender interface {
+	BeginStream(ctx context.Context, channelID string) (StreamWriter, error)
+}
+
+// ErrStreamNotSupported is returned when a channel does not support streaming.
+var ErrStreamNotSupported = errors.New("channel does not support streaming")

@@ -25,6 +25,7 @@ type Agent struct {
 	tools     map[string]tool.Tool
 	skills    []skill.SkillContent
 	sem       chan struct{} // concurrency semaphore
+	stream    bool         // true when streaming is enabled and provider supports it
 }
 
 func New(
@@ -38,10 +39,21 @@ func New(
 	tools map[string]tool.Tool,
 	skills []skill.SkillContent,
 	maxConcurrent int,
+	stream bool,
 ) *Agent {
 	if maxConcurrent <= 0 {
 		maxConcurrent = 4
 	}
+
+	// Only enable streaming if the provider actually implements StreamingProvider.
+	enableStream := stream
+	if enableStream {
+		if _, ok := prov.(provider.StreamingProvider); !ok {
+			slog.Warn("streaming enabled in config but provider does not implement StreamingProvider, falling back to sync")
+			enableStream = false
+		}
+	}
+
 	return &Agent{
 		config:    cfg,
 		limits:    limits,
@@ -53,6 +65,7 @@ func New(
 		tools:     tools,
 		skills:    skills,
 		sem:       make(chan struct{}, maxConcurrent),
+		stream:    enableStream,
 	}
 }
 

@@ -39,6 +39,7 @@ provider:
   # api_key: ${OPENROUTER_API_KEY} # alternative: read from env var
   timeout: 60s
   max_retries: 3
+  stream: true                    # streaming is enabled by default; set to false to disable
   # Optional fallback provider activated on rate-limit / unavailability:
   # fallback:
   #   type: openrouter

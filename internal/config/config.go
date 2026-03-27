@@ -74,6 +74,7 @@ type FallbackConfig struct {
 	APIKey  string        `yaml:"api_key"            json:"api_key"`
 	BaseURL string        `yaml:"base_url,omitempty" json:"base_url,omitempty"`
 	Timeout time.Duration `yaml:"timeout"            json:"timeout"`
+	Stream  *bool         `yaml:"stream"             json:"stream"`
 }
 
 type ProviderConfig struct {
@@ -83,6 +84,7 @@ type ProviderConfig struct {
 	BaseURL    string          `yaml:"base_url"`
 	Timeout    time.Duration   `yaml:"timeout"`
 	MaxRetries int             `yaml:"max_retries"`
+	Stream     *bool           `yaml:"stream"`
 	Fallback   *FallbackConfig `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
@@ -191,6 +193,10 @@ func (c *Config) applyDefaults() {
 	if c.Agent.MaxTokensPerTurn == 0 {
 		c.Agent.MaxTokensPerTurn = 4096
 	}
+	if c.Provider.Stream == nil {
+		t := true
+		c.Provider.Stream = &t
+	}
 	if c.Provider.Timeout == 0 {
 		c.Provider.Timeout = 60 * time.Second
 	}
@@ -256,6 +262,14 @@ func (c *Config) applyDefaults() {
 	if c.Filter.Enabled && !c.Filter.Levels.Generic {
 		c.Filter.Levels.Generic = true
 	}
+}
+
+// BoolVal safely dereferences a *bool, returning false if nil.
+func BoolVal(b *bool) bool {
+	if b == nil {
+		return false
+	}
+	return *b
 }
 
 func expandTilde(path string) string {
