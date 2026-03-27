@@ -381,6 +381,12 @@ func buildProvider(cfg config.ProviderConfig) (provider.Provider, error) {
 		return provider.NewGeminiProvider(cfg), nil
 	case "openrouter":
 		return provider.NewOpenRouterProvider(cfg), nil
+	case "openai", "ollama":
+		p, err := provider.NewOpenAIProvider(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize openai provider: %w", err)
+		}
+		return p, nil
 	default:
 		// Anthropic is the default (covers "" and "anthropic")
 		return provider.NewAnthropicProvider(cfg), nil

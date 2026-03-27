@@ -224,6 +224,9 @@ func (c *Config) applyDefaults() {
 	if c.Provider.MaxRetries == 0 {
 		c.Provider.MaxRetries = 3
 	}
+	if (c.Provider.Type == "openai" || c.Provider.Type == "ollama") && c.Provider.Model == "" {
+		c.Provider.Model = "gpt-4o"
+	}
 	if c.Tools.File.MaxFileSize == "" {
 		c.Tools.File.MaxFileSize = "1MB"
 	}
@@ -326,7 +329,10 @@ func (c *Config) resolvePaths() {
 }
 
 func (c *Config) validate() error {
-	if c.Provider.APIKey == "" && c.Provider.Type != "ollama" {
+	// Allow empty api_key for Ollama (type "ollama") and for OpenAI-compatible
+	// endpoints with a custom base_url (e.g. local Ollama via type "openai").
+	openAIWithCustomBase := c.Provider.Type == "openai" && c.Provider.BaseURL != ""
+	if c.Provider.APIKey == "" && c.Provider.Type != "ollama" && !openAIWithCustomBase {
 		return fmt.Errorf("provider.api_key is required")
 	}
 	switch c.Provider.Type {
