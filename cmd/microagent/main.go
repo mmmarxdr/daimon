@@ -299,6 +299,20 @@ func main() {
 				os.Exit(1)
 			}
 			channels = append(channels, t)
+		case "whatsapp":
+			wa, err := channel.NewWhatsAppChannel(cfg.Channel)
+			if err != nil {
+				slog.Error("failed to initialize whatsapp channel", "error", err)
+				os.Exit(1)
+			}
+			channels = append(channels, wa)
+		case "discord":
+			d, err := channel.NewDiscordChannel(cfg.Channel)
+			if err != nil {
+				slog.Error("failed to initialize discord channel", "error", err)
+				os.Exit(1)
+			}
+			channels = append(channels, d)
 		case "cli", "":
 			channels = append(channels, channel.NewCLIChannelDefault(cfg.Channel))
 		default:

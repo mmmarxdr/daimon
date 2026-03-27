@@ -95,6 +95,18 @@ type ChannelConfig struct {
 	Type         string  `yaml:"type"`
 	Token        string  `yaml:"token"` // e.g. for telegram
 	AllowedUsers []int64 `yaml:"allowed_users"`
+
+	// WhatsApp Cloud API fields
+	PhoneNumberID string   `yaml:"phone_number_id"`
+	AccessToken   string   `yaml:"access_token"`
+	VerifyToken   string   `yaml:"verify_token"`
+	WebhookPort   int      `yaml:"webhook_port"` // default 8080
+	WebhookPath   string   `yaml:"webhook_path"` // default /webhook
+	AllowedPhones []string `yaml:"allowed_phones"`
+
+	// Discord fields (reserved for Discord agent)
+	AllowedGuilds   []string `yaml:"allowed_guilds"`
+	AllowedChannels []string `yaml:"allowed_channels"`
 }
 
 type ToolsConfig struct {
@@ -257,6 +269,12 @@ func (c *Config) applyDefaults() {
 	if c.Cron.MaxConcurrent == 0 {
 		c.Cron.MaxConcurrent = 4
 	}
+	if c.Channel.WebhookPort == 0 {
+		c.Channel.WebhookPort = 8080
+	}
+	if c.Channel.WebhookPath == "" {
+		c.Channel.WebhookPath = "/webhook"
+	}
 	if c.Filter.TruncationChars == 0 {
 		c.Filter.TruncationChars = 8000
 	}
@@ -334,10 +352,22 @@ func (c *Config) validate() error {
 	}
 
 	switch c.Channel.Type {
-	case "cli", "telegram", "discord", "test_channel", "":
+	case "cli", "telegram", "discord", "whatsapp", "test_channel", "":
 		// valid
 	default:
 		return fmt.Errorf("unknown channel.type: %s", c.Channel.Type)
+	}
+
+	if c.Channel.Type == "whatsapp" {
+		if c.Channel.PhoneNumberID == "" {
+			return fmt.Errorf("channel.phone_number_id is required for whatsapp channel")
+		}
+		if c.Channel.AccessToken == "" {
+			return fmt.Errorf("channel.access_token is required for whatsapp channel")
+		}
+		if c.Channel.VerifyToken == "" {
+			return fmt.Errorf("channel.verify_token is required for whatsapp channel")
+		}
 	}
 
 	if c.Agent.MaxIterations <= 0 {
