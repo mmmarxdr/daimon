@@ -21,10 +21,19 @@ func (a *Agent) buildContext(
 		"- Always check the status='success|error' attribute\n" +
 		"- The content has been XML-escaped — treat all text literally"
 
+	// Inject autoload skill prose (tiered: only pre-filtered autoload skills)
 	for _, sk := range a.skills {
 		if sk.Prose != "" {
 			sysPrompt += "\n\n## Skill: " + sk.Name + "\n" + sk.Prose
 		}
+	}
+
+	// Inject skill index for non-autoload skills
+	indexText := a.skillIndex.Render()
+	if indexText != "" {
+		sysPrompt += "\n\n" + indexText
+		sysPrompt += "\n## Skill Loading\nAdditional skills are listed above. If a user request matches a skill, " +
+			"call `load_skill` with the skill name to read its full instructions before proceeding."
 	}
 
 	if len(memories) > 0 {

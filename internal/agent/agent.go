@@ -15,17 +15,18 @@ import (
 )
 
 type Agent struct {
-	config    config.AgentConfig
-	limits    config.LimitsConfig
-	filterCfg config.FilterConfig
-	channel   channel.Channel
-	provider  provider.Provider
-	store     store.Store
-	auditor   audit.Auditor
-	tools     map[string]tool.Tool
-	skills    []skill.SkillContent
-	sem       chan struct{} // concurrency semaphore
-	stream    bool         // true when streaming is enabled and provider supports it
+	config     config.AgentConfig
+	limits     config.LimitsConfig
+	filterCfg  config.FilterConfig
+	channel    channel.Channel
+	provider   provider.Provider
+	store      store.Store
+	auditor    audit.Auditor
+	tools      map[string]tool.Tool
+	skills     []skill.SkillContent
+	skillIndex skill.SkillIndex
+	sem        chan struct{} // concurrency semaphore
+	stream     bool          // true when streaming is enabled and provider supports it
 }
 
 func New(
@@ -38,6 +39,7 @@ func New(
 	auditor audit.Auditor,
 	tools map[string]tool.Tool,
 	skills []skill.SkillContent,
+	skillIndex skill.SkillIndex,
 	maxConcurrent int,
 	stream bool,
 ) *Agent {
@@ -55,17 +57,18 @@ func New(
 	}
 
 	return &Agent{
-		config:    cfg,
-		limits:    limits,
-		filterCfg: filterCfg,
-		channel:   ch,
-		provider:  prov,
-		store:     st,
-		auditor:   auditor,
-		tools:     tools,
-		skills:    skills,
-		sem:       make(chan struct{}, maxConcurrent),
-		stream:    enableStream,
+		config:     cfg,
+		limits:     limits,
+		filterCfg:  filterCfg,
+		channel:    ch,
+		provider:   prov,
+		store:      st,
+		auditor:    auditor,
+		tools:      tools,
+		skills:     skills,
+		skillIndex: skillIndex,
+		sem:        make(chan struct{}, maxConcurrent),
+		stream:     enableStream,
 	}
 }
 

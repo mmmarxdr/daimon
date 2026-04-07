@@ -28,6 +28,7 @@ type frontmatter struct {
 	Description string `yaml:"description"`
 	Version     string `yaml:"version"`
 	Author      string `yaml:"author"`
+	Autoload    bool   `yaml:"autoload"`
 }
 
 // openFence reports whether a line opens a yaml tool block.
@@ -206,6 +207,7 @@ func parseSkillContent(path string, content string) (SkillContent, []ToolDef, []
 		Name:        name,
 		Description: fm.Description,
 		Prose:       prose,
+		Autoload:    fm.Autoload,
 	}
 
 	return skillContent, tools, errs

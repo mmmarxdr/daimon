@@ -10,6 +10,7 @@ import (
 	"microagent/internal/channel"
 	"microagent/internal/config"
 	"microagent/internal/provider"
+	"microagent/internal/skill"
 	"microagent/internal/tool"
 )
 
@@ -51,7 +52,7 @@ func TestInjectionDetection_WarningPrependedInToolResult(t *testing.T) {
 		ch, prov, st,
 		audit.NoopAuditor{},
 		map[string]tool.Tool{"fetch_tool": mt},
-		nil, 4, false,
+		nil, skill.SkillIndex{}, 4, false,
 	)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "fetch something"})
 
@@ -101,7 +102,7 @@ func TestInjectionDetection_CleanContentPassesThrough(t *testing.T) {
 		ch, prov, st,
 		audit.NoopAuditor{},
 		map[string]tool.Tool{"search_tool": mt},
-		nil, 4, false,
+		nil, skill.SkillIndex{}, 4, false,
 	)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "search"})
 
@@ -146,7 +147,7 @@ func TestInjectionDetection_Disabled(t *testing.T) {
 		ch, prov, st,
 		audit.NoopAuditor{},
 		map[string]tool.Tool{"fetch_tool": mt},
-		nil, 4, false,
+		nil, skill.SkillIndex{}, 4, false,
 	)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "fetch"})
 
@@ -192,7 +193,7 @@ func TestXMLEscaping_PreventsFakeTagInjection(t *testing.T) {
 		ch, prov, st,
 		audit.NoopAuditor{},
 		map[string]tool.Tool{"fetch_tool": mt},
-		nil, 4, false,
+		nil, skill.SkillIndex{}, 4, false,
 	)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "fetch"})
 
@@ -254,7 +255,7 @@ func TestXMLEscaping_AttributeInjection(t *testing.T) {
 		ch, prov, st,
 		audit.NoopAuditor{},
 		map[string]tool.Tool{"tool": mt},
-		nil, 4, false,
+		nil, skill.SkillIndex{}, 4, false,
 	)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "go"})
 

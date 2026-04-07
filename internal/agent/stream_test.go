@@ -13,6 +13,7 @@ import (
 	"microagent/internal/channel"
 	"microagent/internal/config"
 	"microagent/internal/provider"
+	"microagent/internal/skill"
 	"microagent/internal/tool"
 )
 
@@ -22,8 +23,8 @@ import (
 
 // mockStreamingProvider implements both Provider and StreamingProvider.
 type mockStreamingProvider struct {
-	mockProvider                                                                           // embeds sync mock
-	streamFunc func(ctx context.Context, req provider.ChatRequest) (*provider.StreamResult, error)
+	mockProvider // embeds sync mock
+	streamFunc   func(ctx context.Context, req provider.ChatRequest) (*provider.StreamResult, error)
 }
 
 func (m *mockStreamingProvider) ChatStream(ctx context.Context, req provider.ChatRequest) (*provider.StreamResult, error) {
@@ -119,7 +120,7 @@ func TestProcessStreamingCall_TextOnly_WithWriter(t *testing.T) {
 	}
 	sCh := &mockStreamChannel{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
 		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -173,7 +174,7 @@ func TestProcessStreamingCall_TextOnly_WithoutWriter(t *testing.T) {
 
 	// Use a plain mockChannel that does NOT implement StreamSender.
 	ch := &mockChannel{}
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
 		context.Background(), sp, nil, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -215,7 +216,7 @@ func TestProcessStreamingCall_ToolOnly(t *testing.T) {
 	}
 	sCh := &mockStreamChannel{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
 		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -267,7 +268,7 @@ func TestProcessStreamingCall_TextThenTools(t *testing.T) {
 	}
 	sCh := &mockStreamChannel{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
 		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -314,7 +315,7 @@ func TestProcessStreamingCall_Error(t *testing.T) {
 	}
 	sCh := &mockStreamChannel{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, _, err := ag.processStreamingCall(
 		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -349,7 +350,7 @@ func TestProcessStreamingCall_PreStreamError(t *testing.T) {
 	}
 	sCh := &mockStreamChannel{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, _, err := ag.processStreamingCall(
 		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(),
@@ -387,7 +388,7 @@ func TestProcessStreamingCall_ContextCancel(t *testing.T) {
 		},
 	}
 	sCh := &mockStreamChannel{}
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	done := make(chan struct{})
 	go func() {
@@ -440,7 +441,7 @@ func TestProcessMessage_StreamEnabled_TextOnly(t *testing.T) {
 	sCh := &mockStreamChannel{}
 	st := &mockStore{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, st, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "hello"})
 
 	// Text was streamed, so channel.Send() should NOT have been called with the response text.
@@ -511,7 +512,7 @@ func TestProcessMessage_StreamEnabled_WithToolCalls(t *testing.T) {
 	mt := &mockTool{name: "mock_tool", result: tool.ToolResult{Content: "tool result"}}
 
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, st, audit.NoopAuditor{},
-		map[string]tool.Tool{"mock_tool": mt}, nil, 4, true)
+		map[string]tool.Tool{"mock_tool": mt}, nil, skill.SkillIndex{}, 4, true)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "do something"})
 
 	// Two streaming calls should have been made.
@@ -544,7 +545,7 @@ func TestProcessMessage_StreamFallbackToSync(t *testing.T) {
 	st := &mockStore{}
 
 	// stream=true but mockProvider does NOT implement StreamingProvider.
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, 4, true)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	// The constructor should have set stream=false since the provider doesn't support it.
 	if ag.stream {

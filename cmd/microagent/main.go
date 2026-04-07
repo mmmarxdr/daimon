@@ -195,6 +195,15 @@ func main() {
 		}
 	}
 
+	// Build skill index + budget check, create load_skill tool.
+	autoloadSkills, skillIndex := agent.InitSkillInjection(skillContents, cfg.Agent.MaxContextTokens)
+	skillMap := make(map[string]tool.SkillContent, len(skillContents))
+	for _, s := range skillContents {
+		skillMap[s.Name] = tool.SkillContent{Name: s.Name, Prose: s.Prose}
+	}
+	loadSkillTool := tool.NewSkillLoaderTool(skillMap)
+	toolsRegistry[loadSkillTool.Name()] = loadSkillTool
+
 	// Connect to MCP servers and merge their tools into the registry.
 	// Built-in and skill tools win on name collision.
 	if cfg.Tools.MCP.Enabled {
@@ -353,7 +362,7 @@ func main() {
 
 	mux := channel.NewMultiplexChannel(channels)
 
-	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, skillContents, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream))
+	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream))
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

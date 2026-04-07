@@ -10,6 +10,7 @@ import (
 	"microagent/internal/channel"
 	"microagent/internal/config"
 	"microagent/internal/provider"
+	"microagent/internal/skill"
 )
 
 // TestAgent_Semaphore_Capacity verifies that at most maxConcurrent messages
@@ -45,7 +46,7 @@ func TestAgent_Semaphore_Capacity(t *testing.T) {
 	ch := &mockChannel{}
 	st := &mockStore{}
 
-	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, blockingProv, st, audit.NoopAuditor{}, nil, nil, maxConcurrent, false)
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, blockingProv, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, maxConcurrent, false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

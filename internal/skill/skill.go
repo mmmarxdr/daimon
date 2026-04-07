@@ -8,6 +8,7 @@ type SkillContent struct {
 	Name        string // from frontmatter; fallback: filename stem (no extension)
 	Description string // from frontmatter; optional, informational only
 	Prose       string // everything except frontmatter and ```yaml tool blocks
+	Autoload    bool   // from frontmatter; if true, skill is loaded automatically
 }
 
 // ToolDef is the parsed representation of a ```yaml tool fenced block.

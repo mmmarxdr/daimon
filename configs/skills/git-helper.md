@@ -3,6 +3,7 @@ name: git-helper
 description: "Git workflow and status tools for daily development"
 version: 1.0.0
 author: marc
+autoload: true
 ---
 
 # Git Helper

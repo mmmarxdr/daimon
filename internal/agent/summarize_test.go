@@ -12,6 +12,7 @@ import (
 	"microagent/internal/channel"
 	"microagent/internal/config"
 	"microagent/internal/provider"
+	"microagent/internal/skill"
 	"microagent/internal/store"
 )
 
@@ -220,7 +221,7 @@ func TestManageContextTokens_UnderBudget(t *testing.T) {
 		SummaryTokens:    500,
 	}
 	prov := &mockProvider{responses: []provider.ChatResponse{{Content: "summary"}}}
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 
 	msgs := []provider.ChatMessage{
 		{Role: "user", Content: "hello"},
@@ -245,7 +246,7 @@ func TestManageContextTokens_ToolCompression(t *testing.T) {
 		SummaryTokens:    100,
 	}
 	prov := &mockProvider{responses: []provider.ChatResponse{{Content: "summary"}}}
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 
 	// Create messages with a large tool result that should get compressed
 	bigToolContent := strings.Repeat("x", 2000)
@@ -280,7 +281,7 @@ func TestManageContextTokens_SummarizationFallback(t *testing.T) {
 	prov := &mockProvider{
 		errs: []error{fmt.Errorf("api down")},
 	}
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, prov, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 
 	msgs := make([]provider.ChatMessage, 20)
 	for i := range msgs {
@@ -315,7 +316,7 @@ func TestManageContextTokens_ZeroBudget(t *testing.T) {
 	cfg := config.AgentConfig{
 		MaxContextTokens: 0, // disabled
 	}
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, &mockProvider{}, &mockStore{}, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, &mockChannel{}, &mockProvider{}, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 
 	msgs := []provider.ChatMessage{
 		{Role: "user", Content: "hello"},
@@ -369,7 +370,7 @@ func TestProcessMessage_TokenBasedTruncation(t *testing.T) {
 		},
 	}
 
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "new message"})
 
 	if st.conv == nil {
@@ -418,7 +419,7 @@ func TestProcessMessage_LegacyFallback(t *testing.T) {
 		},
 	}
 
-	ag := New(cfg, defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, 4, false)
+	ag := New(cfg, defaultLimits(), config.FilterConfig{}, ch, prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Text: "new"})
 
 	// The legacy path should have been used; verify summarization call happened
