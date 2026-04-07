@@ -336,7 +336,7 @@ func TestLoadSkills_EmptyPaths(t *testing.T) {
 	}
 
 	// Also test empty slice
-	contents, tools, warns = LoadSkills([]string{}, config.ShellToolConfig{}, config.LimitsConfig{})
+	contents, tools, _ = LoadSkills([]string{}, config.ShellToolConfig{}, config.LimitsConfig{})
 	if contents != nil {
 		t.Errorf("expected nil contents for empty slice, got %v", contents)
 	}

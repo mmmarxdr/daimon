@@ -94,9 +94,5 @@ func extractName(line string) string {
 	}
 	// list_files style: "filename (N bytes)" — strip the annotation
 	name := fields[0]
-	if strings.HasSuffix(name, "(") {
-		// "filename" "(" — join is odd; just return first field trimmed of "("
-		name = strings.TrimSuffix(name, "(")
-	}
-	return name
+	return strings.TrimSuffix(name, "(")
 }

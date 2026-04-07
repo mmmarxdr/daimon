@@ -56,11 +56,6 @@ func (m *mockProvider) callCount() int {
 	return m.calls
 }
 
-func (m *mockProvider) lastRequest() provider.ChatRequest {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.lastReq
-}
 
 type mockChannel struct {
 	mu       sync.Mutex

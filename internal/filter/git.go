@@ -37,10 +37,7 @@ func shouldDropStatusLine(line string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(line, "hint:") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(line, "hint:")
 }
 
 // FormatDiff retains changed lines (+/-), hunk headers (@@), and file headers.

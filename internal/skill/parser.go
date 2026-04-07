@@ -114,8 +114,6 @@ func parseSkillContent(path string, content string) (SkillContent, []ToolDef, []
 	var proseSegments []string
 	var currentSegment []string
 	var toolBlockLines []string
-	st := stBody
-
 	i := 0
 
 	// Check for frontmatter: first line must be exactly "---"
@@ -146,7 +144,7 @@ func parseSkillContent(path string, content string) (SkillContent, []ToolDef, []
 	}
 
 	// Process body lines
-	st = stBody
+	st := stBody
 	for ; i < len(lines); i++ {
 		line := lines[i]
 		switch st {

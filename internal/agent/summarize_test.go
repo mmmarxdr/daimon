@@ -429,6 +429,8 @@ func TestProcessMessage_LegacyFallback(t *testing.T) {
 }
 
 // makeTestMessages creates n alternating user/assistant messages.
+//
+//nolint:unused // kept for future summarization tests
 func makeTestMessages(n int) []provider.ChatMessage {
 	msgs := make([]provider.ChatMessage, n)
 	for i := range msgs {

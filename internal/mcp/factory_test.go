@@ -94,6 +94,8 @@ func mockConnectorCapture(lc listableClient, captured *config.MCPServerConfig) C
 }
 
 // errorConnector returns a ConnectorFunc that always returns the given error.
+//
+//nolint:unused // kept for future error-path tests
 func errorConnector(err error) ConnectorFunc {
 	return func(_ context.Context, _ config.MCPServerConfig) (listableClient, error) {
 		return nil, err

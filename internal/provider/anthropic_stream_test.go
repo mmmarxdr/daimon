@@ -622,7 +622,7 @@ func TestAnthropicStream_ContextCancellation(t *testing.T) {
 	}
 
 	// Response should return an error (stream interrupted).
-	_, err = sr.Response()
+	_, _ = sr.Response()
 	// The goroutine may complete with a parse error from the broken connection,
 	// or it may have no events after message_start and return a partial response.
 	// Either way, it should not hang.

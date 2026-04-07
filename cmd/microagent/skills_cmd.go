@@ -412,10 +412,7 @@ func skillDeriveDisplayName(path string) string {
 		if idx := strings.LastIndex(base, "/"); idx >= 0 {
 			base = base[idx+1:]
 		}
-		if strings.HasSuffix(base, ".md") {
-			base = base[:len(base)-3]
-		}
-		return base
+		return strings.TrimSuffix(base, ".md")
 	}
 	return content.Name
 }
