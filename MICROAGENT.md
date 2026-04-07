@@ -11,7 +11,7 @@
 - **License**: TBD (likely MIT)
 - **Author**: Marc Dechand
 - **Repository**: Private GitLab (org: JPH Lions, user: MarcDechand) — will move to GitHub for public release
-- **Status**: Pre-MVP, architecture phase
+- **Status**: Post-MVP, production hardening phase
 
 **One-line summary**: An ultra-lightweight, single-binary personal AI agent written in Go — designed to be extensible, local-first, and memory-efficient.
 

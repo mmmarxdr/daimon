@@ -1,27 +1,56 @@
 # Skill Registry
 
-As your FIRST step before starting any work, identify and load skills relevant to your task from this registry.
+**Delegator use only.** Any agent that launches sub-agents reads this registry to resolve compact rules, then injects them directly into sub-agent prompts. Sub-agents do NOT read this registry or individual SKILL.md files.
 
-## User Skills (global)
+See `_shared/skill-resolver.md` for the full resolution protocol.
 
-| Trigger | Skill | Path |
-|---------|-------|------|
-| Library/framework docs lookup via Context7 MCP | context7-mcp | /home/mde/.claude/skills/context7-mcp/SKILL.md |
-| Writing Go tests, Bubbletea TUI testing, table-driven tests | go-testing | /home/mde/.claude/skills/go-testing/SKILL.md |
-| Creating new AI agent skills, documenting patterns for AI | skill-creator | /home/mde/.claude/skills/skill-creator/SKILL.md |
-
-## Project Skills
+## User Skills
 
 | Trigger | Skill | Path |
 |---------|-------|------|
-| Idiomatic Go patterns, best practices, conventions | golang-patterns | /home/mde/workspace/Microclaw/.agents/skills/golang-patterns/SKILL.md |
-| Concurrent Go, goroutines, channels, gRPC, microservices, generics, benchmarks | golang-pro | /home/mde/workspace/Microclaw/.agents/skills/golang-pro/SKILL.md |
+| PR creation workflow for Agent Teams Lite | branch-pr | ~/.claude/skills/branch-pr/SKILL.md |
+| Asks about libraries, frameworks, API references | context7-mcp | ~/.claude/skills/context7-mcp/SKILL.md |
+| Helps users discover and install agent skills | find-skills | ~/.agents/skills/find-skills/SKILL.md |
+| When writing Go tests, using teatest, or adding test coverage | go-testing | ~/.config/opencode/skills/go-testing/SKILL.md |
+| Idiomatic Go patterns, best practices, and conventions | golang-patterns | .agents/skills/golang-patterns/SKILL.md |
+| Invoke for goroutines, channels, Go generics, gRPC | golang-pro | .agents/skills/golang-pro/SKILL.md |
+| When creating a GitHub issue, reporting a bug, or requesting a feature | issue-creation | ~/.claude/skills/issue-creation/SKILL.md |
+| When user says "judgment day", "review adversarial", "dual review" | judgment-day | ~/.claude/skills/judgment-day/SKILL.md |
+| When user asks to create a new skill, add agent instructions | skill-creator | ~/.config/opencode/skills/skill-creator/SKILL.md |
+
+## Compact Rules
+
+### go-testing
+- Standard Go pattern for multiple test cases (table-driven)
+- Write Go unit tests using `testing`
+- Test Bubbletea TUI components using `teatest`
+- Use golden file testing
+
+### golang-patterns
+- Favor simplicity over cleverness; code should be obvious
+- Write idiomatic Go patterns for robust applications
+
+### golang-pro
+- Run `go vet ./...` before proceeding
+- Run `golangci-lint run` and fix all reported issues before proceeding
+- Confirm race detector passes before committing (`-race` flag)
+- Use table-driven tests and ensure 80%+ coverage
+
+### context7-mcp
+- Use context7 to query library docs, specific frameworks
+- Verify accurate code generation involving external libraries
+
+### branch-pr
+- Branch/PR workflow per issue-first enforcement
+
+### judgment-day
+- Review targets independently with blind judge sub-agents
+- Apply fixes and re-judge until both pass or escalate
 
 ## Project Conventions
 
 | File | Path | Notes |
 |------|------|-------|
-| MICROAGENT.md | /home/mde/workspace/Microclaw/MICROAGENT.md | Architecture bible - MUST read before code changes |
-| TESTS.md | /home/mde/workspace/Microclaw/TESTS.md | Full test plan mapped to DoD |
-
-Read the convention files listed above for project-specific patterns and rules.
+| MICROAGENT.md | MICROAGENT.md | Primary AI Context Document, single source of truth |
+| TESTS.md | TESTS.md | Defines all tests for the MVP and DoD |
+| TUI_IMPROVEMENTS.md | TUI_IMPROVEMENTS.md | TUI-specific improvement plans |

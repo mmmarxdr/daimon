@@ -167,7 +167,7 @@ The agent searches for config in order: `--config` flag → `~/.microagent/confi
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | string | `"file"` | Storage backend (`file`; `sqlite` planned) |
+| `type` | string | `"file"` | Storage backend (`file` or `sqlite`) |
 | `path` | string | `"~/.microagent/data"` | Root directory for file store |
 
 ### `logging`
@@ -237,8 +237,10 @@ cron:
 | Name | `type` | Env var | Default model | Notes |
 |------|--------|---------|---------------|-------|
 | OpenRouter | `openrouter` | `OPENROUTER_API_KEY` | `openrouter/auto` | Routes to best available model |
-| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022` | Direct Anthropic API |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | Direct Anthropic API |
 | Gemini | `gemini` | `GEMINI_API_KEY` | `gemini-2.0-flash` | Google Gemini API |
+| OpenAI | `openai` | `OPENAI_API_KEY` | `gpt-4o` | OpenAI-compatible API |
+| Ollama | `openai` | — | `llama3` | Local models via OpenAI-compatible endpoint |
 
 A **fallback provider** can be configured under `provider.fallback`. It uses the same fields and is activated when the primary returns a rate-limit or unavailability error.
 
@@ -250,6 +252,8 @@ A **fallback provider** can be configured under `provider.fallback`. It uses the
 |------|--------|-----------------|-------|
 | CLI | `cli` | None | Reads stdin, writes stdout |
 | Telegram | `telegram` | `token`, `allowed_users` | Requires a Bot API token from @BotFather |
+| Discord | `discord` | `token`, `allowed_users` | Discord bot via WebSocket gateway |
+| WhatsApp | `whatsapp` | `token`, `verify_token`, `phone_number_id`, `allowed_phones` | WhatsApp Cloud API webhook |
 
 ---
 
@@ -595,7 +599,21 @@ microagent/
 
 ## Roadmap
 
-- **Skill registry** — `microagent skills add git-helper` short-name installs from a hosted registry
-- **Discord channel** — Discord bot integration alongside CLI and Telegram
-- **OpenAI / Ollama providers** — OpenAI-compatible API support and local model inference via Ollama
-- **CI/CD pipeline** — Dockerfile, GitLab CI, and Fly.io pre-production environment
+### Completed
+
+- ~~Skill registry~~ — short-name installs, remote fetch, search
+- ~~Discord channel~~ — discordgo WebSocket bot with streaming
+- ~~WhatsApp channel~~ — Cloud API webhook, 4000-char chunking
+- ~~OpenAI / Ollama providers~~ — OpenAI-compatible API support
+- ~~CI/CD pipeline~~ — GitHub Actions, Dockerfile, goreleaser
+- ~~Skill router~~ — tiered lazy loading, autoload/on-demand, 20% token budget
+- ~~Token-aware summarization~~ — 3-pass compression for long conversations
+- ~~Prompt injection guard~~ — 8 regex patterns, XML escaping
+- ~~Tool input validation~~ — JSON schema validation before dispatch
+- ~~Memory budget~~ — 15% context cap for memory entries
+
+### Planned
+
+- **Conversation persistence & native memory** — semantic search, cross-session learning, engram-like native memory system
+- **Multi-user isolation** — separate agent instances per user for shared channels
+- **Observability** — metrics, health checks, production dashboard
