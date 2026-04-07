@@ -136,7 +136,13 @@ func (m *mockStore) LoadConversation(ctx context.Context, id string) (*store.Con
 	if m.conv == nil {
 		return nil, store.ErrNotFound
 	}
-	return m.conv, nil
+	// Return a deep copy to avoid shared-slice races when multiple
+	// processMessage goroutines load the same conversation concurrently
+	// (mirrors real store behavior where each load returns independent data).
+	cp := *m.conv
+	cp.Messages = make([]provider.ChatMessage, len(m.conv.Messages))
+	copy(cp.Messages, m.conv.Messages)
+	return &cp, nil
 }
 
 func (m *mockStore) ListConversations(ctx context.Context, channelID string, limit int) ([]store.Conversation, error) {
