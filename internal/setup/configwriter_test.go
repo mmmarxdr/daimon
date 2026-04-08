@@ -113,6 +113,114 @@ func TestDefaultConfigPath_ReturnsHomeBased(t *testing.T) {
 	}
 }
 
+func TestDetectConfigPath_DetectsLocalConfig(t *testing.T) {
+	// Create a temporary directory and simulate being in it
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+
+	// Change to temp directory
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+
+	// Create a local config.yaml
+	localConfigPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(localConfigPath, []byte("# test config"), 0644); err != nil {
+		t.Fatalf("write local config.yaml: %v", err)
+	}
+
+	path, err := DetectConfigPath()
+	if err != nil {
+		t.Fatalf("DetectConfigPath: %v", err)
+	}
+
+	// Should detect local config.yaml and return it
+	expected := localConfigPath
+	if path != expected {
+		t.Errorf("DetectConfigPath() = %q, want %q (local config.yaml)", path, expected)
+	}
+}
+
+func TestDetectConfigPath_FallsBackToDefaultWhenNoLocalConfig(t *testing.T) {
+	// Create a temporary directory without config.yaml
+	tmpDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+
+	// Change to temp directory
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+
+	path, err := DetectConfigPath()
+	if err != nil {
+		t.Fatalf("DetectConfigPath: %v", err)
+	}
+
+	// Should return default path
+	defaultPath, _ := DefaultConfigPath()
+	if path != defaultPath {
+		t.Errorf("DetectConfigPath() = %q, want default %q", path, defaultPath)
+	}
+}
+
+func TestDetectConfigPath_UsesXDGWhenSet(t *testing.T) {
+	// Save original env var
+	originalXDG := os.Getenv("XDG_CONFIG_HOME")
+	defer os.Setenv("XDG_CONFIG_HOME", originalXDG)
+
+	// Create temp dir for XDG_CONFIG_HOME
+	tmpDir := t.TempDir()
+	os.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	path, err := DetectConfigPath()
+	if err != nil {
+		t.Fatalf("DetectConfigPath: %v", err)
+	}
+
+	// Should use XDG path
+	expected := filepath.Join(tmpDir, "microagent", "config.yaml")
+	if path != expected {
+		t.Errorf("DetectConfigPath() = %q, want XDG path %q", path, expected)
+	}
+}
+
+func TestDetectConfigPath_PrefersLocalOverXDG(t *testing.T) {
+	// Save original env var
+	originalXDG := os.Getenv("XDG_CONFIG_HOME")
+	defer os.Setenv("XDG_CONFIG_HOME", originalXDG)
+
+	// Create temp dir for XDG_CONFIG_HOME
+	xdgDir := t.TempDir()
+	os.Setenv("XDG_CONFIG_HOME", xdgDir)
+
+	// Create another temp dir with local config.yaml
+	localDir := t.TempDir()
+	originalWd, _ := os.Getwd()
+	defer os.Chdir(originalWd)
+
+	if err := os.Chdir(localDir); err != nil {
+		t.Fatalf("chdir to local dir: %v", err)
+	}
+
+	// Create a local config.yaml
+	localConfigPath := filepath.Join(localDir, "config.yaml")
+	if err := os.WriteFile(localConfigPath, []byte("# local config"), 0644); err != nil {
+		t.Fatalf("write local config.yaml: %v", err)
+	}
+
+	path, err := DetectConfigPath()
+	if err != nil {
+		t.Fatalf("DetectConfigPath: %v", err)
+	}
+
+	// Should prefer local config.yaml over XDG
+	if path != localConfigPath {
+		t.Errorf("DetectConfigPath() = %q, want local config %q", path, localConfigPath)
+	}
+}
+
 func TestWriteConfig_AllowedUsersInYAML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")

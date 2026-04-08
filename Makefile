@@ -35,4 +35,4 @@ clean:
 	rm -rf bin/ dist/
 
 dev-run:
-	./dev.sh run $(ARGS)
+	go run ./cmd/microagent $(ARGS)

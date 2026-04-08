@@ -36,8 +36,8 @@ cd micro-claw
 cp configs/default.yaml.example configs/default.yaml
 # Edit configs/default.yaml and replace every REPLACE_ME value (see below)
 
-# 3. Run via the developer script — it picks up configs/default.yaml automatically
-./dev.sh run
+# 3. Run the microagent — it picks up configs/default.yaml automatically
+go run ./cmd/microagent
 ```
 
 ### Setting up `configs/default.yaml`
@@ -59,13 +59,13 @@ cp configs/default.yaml.example configs/default.yaml
 
 3. Run:
    ```bash
-   ./dev.sh run
+   go run ./cmd/microagent
    ```
 
-> **Alternative — environment variables:** export the key before running and `dev.sh` will use it without reading the file:
+> **Alternative — environment variables:** export the key before running and the agent will use it without reading the file:
 > ```bash
 > export OPENROUTER_API_KEY="sk-or-v1-..."
-> ./dev.sh run
+> go run ./cmd/microagent
 > ```
 
 Minimal config for a CLI agent with OpenRouter:
@@ -426,6 +426,7 @@ Without this skill, the agent has no instructions to recognize scheduling intent
 | `-version` | Print version and exit |
 | `-dashboard` | Open read-only TUI dashboard and exit |
 | `-setup` | Run the interactive setup wizard and exit |
+| `-daemon` | Run as background daemon (no interactive channel; cron only) |
 
 ### Subcommands
 
@@ -446,6 +447,9 @@ microagent cron list              # list scheduled cron jobs
 microagent cron info <id>         # show job details and last results
 microagent cron delete <id>       # delete a scheduled job
 microagent --daemon               # run in background mode (cron only)
+
+microagent setup                   # run the interactive setup wizard
+microagent doctor [--config <path>] # validate config, env vars, and store path
 ```
 
 All subcommands accept `--config <path>` to override the config file location.
@@ -488,6 +492,8 @@ To re-run the wizard at any time (e.g. to change provider or fix a broken config
 
 ```bash
 ./microagent --setup
+# or use the subcommand:
+./microagent setup
 ```
 
 **Non-interactive mode:** if stdin is not a terminal (e.g. piped input, CI), the wizard does not launch. The process prints a message and exits:
@@ -495,6 +501,39 @@ To re-run the wizard at any time (e.g. to change provider or fix a broken config
 ```
 No config file found. Create one at ~/.microagent/config.yaml before running in non-interactive mode.
 ```
+
+### Configuration Validation
+
+The `microagent doctor` command validates your configuration file, environment variables, and store path accessibility without starting the agent or making any API calls.
+
+```bash
+# Check default config file locations
+microagent doctor
+
+# Check a specific config file
+microagent doctor --config /path/to/config.yaml
+```
+
+**What doctor checks:**
+1. **Config file** — exists and contains valid YAML syntax
+2. **Environment variables** — all `${VAR}` placeholders in the config reference environment variables that are actually set
+3. **Store path** — the `store.path` directory exists, is a directory (not a file), and is writable
+
+**Example output:**
+```
+✓ Config loaded successfully from /home/user/.microagent/config.yaml
+✓ Store path "/home/user/.microagent/data" is accessible  
+✓ All environment variables set: OPENROUTER_API_KEY, TELEGRAM_TOKEN
+```
+
+If issues are found, doctor reports them with clear error messages:
+
+```
+✗ Missing environment variables referenced in config: OPENROUTER_API_KEY
+✗ Store path "/home/user/.microagent/data" does not exist
+```
+
+Use `microagent doctor` to troubleshoot configuration issues before running the agent.
 
 ### Dashboard
 

@@ -21,6 +21,34 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(home, ".microagent", "config.yaml"), nil
 }
 
+// DetectConfigPath returns the appropriate config file path based on:
+// 1. If ./config.yaml exists in current directory, use it
+// 2. If XDG_CONFIG_HOME is set, use $XDG_CONFIG_HOME/microagent/config.yaml
+// 3. Otherwise, return DefaultConfigPath()
+func DetectConfigPath() (string, error) {
+	// Check for local config.yaml
+	cwd, err := os.Getwd()
+	if err != nil {
+		// If we can't get cwd, fall back to default
+		return DefaultConfigPath()
+	}
+
+	localConfig := filepath.Join(cwd, "config.yaml")
+	if _, err := os.Stat(localConfig); err == nil {
+		// Local config.yaml exists
+		return localConfig, nil
+	}
+
+	// Check for XDG_CONFIG_HOME
+	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
+		xdgConfigPath := filepath.Join(xdgConfigHome, "microagent", "config.yaml")
+		return xdgConfigPath, nil
+	}
+
+	// No local config or XDG, use default
+	return DefaultConfigPath()
+}
+
 // WriteConfig atomically writes cfg as annotated YAML to path with 0600
 // permissions. Creates parent directories as needed.
 func WriteConfig(path string, cfg *config.Config) error {

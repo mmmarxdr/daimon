@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -86,6 +88,20 @@ func TestPrevStep_StorePathWithDiscord(t *testing.T) {
 	got := prevStep(stepStorePath, "discord")
 	if got != stepChannelExtra {
 		t.Errorf("prevStep(stepStorePath, discord) = %v, want %v (stepChannelExtra)", got, stepChannelExtra)
+	}
+}
+
+func TestNextStep_WhatsAppIncludesChannelExtra(t *testing.T) {
+	got := nextStep(stepChannel, "whatsapp")
+	if got != stepChannelExtra {
+		t.Errorf("nextStep(stepChannel, whatsapp) = %v, want %v (stepChannelExtra)", got, stepChannelExtra)
+	}
+}
+
+func TestPrevStep_StorePathWithWhatsApp(t *testing.T) {
+	got := prevStep(stepStorePath, "whatsapp")
+	if got != stepChannelExtra {
+		t.Errorf("prevStep(stepStorePath, whatsapp) = %v, want %v (stepChannelExtra)", got, stepChannelExtra)
 	}
 }
 
@@ -315,8 +331,13 @@ func TestAdvance_CredentialsNonOllama_RequiresAPIKey(t *testing.T) {
 
 	model, _ := m.advance()
 	wm := model.(WizardModel)
-	if wm.step != stepCredentials {
-		t.Error("advance() should NOT have advanced when apiKey is empty for non-ollama provider")
+	// With warning-only validation, advance should proceed
+	if wm.step != stepChannel {
+		t.Error("advance() should advance with warning when apiKey is empty for non-ollama provider")
+	}
+	// Should have warning
+	if !strings.Contains(wm.warningMsg, "API key is empty") {
+		t.Error("should have warning about empty API key")
 	}
 }
 
@@ -350,6 +371,64 @@ func TestYAMLPreview_RedactsAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(wm.yamlPreview, "***") {
 		t.Error("yamlPreview should contain '***' redaction for api key")
+	}
+}
+
+func TestWizard_DetectsLocalConfigYAML(t *testing.T) {
+	// Create a temporary directory with a config.yaml
+	tmpDir := t.TempDir()
+	localConfigPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(localConfigPath, []byte("# existing config"), 0644); err != nil {
+		t.Fatalf("write local config.yaml: %v", err)
+	}
+
+	// Save original working directory and change to temp dir
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+
+	// Create a wizard model and advance to stepConfirm
+	m := newWizardModel()
+	m.providerSelector = selectorModel{
+		choices: []string{"anthropic", "gemini", "openrouter", "openai", "ollama"},
+		cursor:  0, // anthropic
+	}
+	m.modelSelector = newModelSelectorModel("anthropic", 80)
+	m.modelSelector.cursor = 0
+	apiKeyInput := textinput.New()
+	apiKeyInput.SetValue("sk-test")
+	m.apiKeyInput = apiKeyInput
+	m.channelSelector = selectorModel{
+		choices: []string{"cli", "telegram", "discord"},
+		cursor:  0, // cli
+	}
+	m.storePathInput.SetValue("~/.microagent/data")
+	m.step = stepStorePath
+
+	// Advance to stepConfirm
+	model, _ := m.advance()
+	wm := model.(WizardModel)
+
+	if wm.step != stepConfirm {
+		t.Fatalf("expected stepConfirm, got step %d", wm.step)
+	}
+
+	// Check that the wizard detected local config.yaml
+	// The view should mention local config.yaml
+	view := wm.View()
+	if !strings.Contains(view, "config.yaml") {
+		t.Error("wizard view should mention config.yaml when local file exists")
+	}
+
+	// The view should show local path, not ~/.microagent/config.yaml
+	if strings.Contains(view, "~/.microagent/config.yaml") {
+		t.Error("wizard should not show default path when local config.yaml exists")
 	}
 }
 
@@ -576,11 +655,123 @@ func TestAdvance_ShowsValidationError(t *testing.T) {
 			tc.setup(&m)
 			result, _ := m.advance()
 			wm := result.(WizardModel)
-			if wm.validationErr != tc.wantErr {
-				t.Errorf("validationErr = %q, want %q", wm.validationErr, tc.wantErr)
+
+			// Special handling for API key warning (non-blocking warning instead of error)
+			if tc.name == "credentials: missing api key" {
+				// Should have warning, not validation error
+				if wm.validationErr != "" {
+					t.Errorf("validationErr should be empty for warning case, got %q", wm.validationErr)
+				}
+				if !strings.Contains(wm.warningMsg, "API key is empty") {
+					t.Errorf("warningMsg = %q, should contain 'API key is empty'", wm.warningMsg)
+				}
+			} else {
+				// All other cases: validation error should be set
+				if wm.validationErr != tc.wantErr {
+					t.Errorf("validationErr = %q, want %q", wm.validationErr, tc.wantErr)
+				}
 			}
 		})
 	}
+}
+
+// TestWizardWarnsWhenAPIKeyEmptyForNonOllama tests that the wizard shows a warning
+// (not an error) when API key is empty for non-ollama providers, but still allows advance.
+func TestWizardWarnsWhenAPIKeyEmptyForNonOllama(t *testing.T) {
+	// Test for anthropic (non-ollama)
+	t.Run("anthropic with empty API key shows warning", func(t *testing.T) {
+		m := newWizardModel()
+		m.step = stepCredentials
+		m.providerSelector = selectorModel{
+			choices: []string{"anthropic", "gemini", "openrouter", "openai", "ollama"},
+			cursor:  0, // anthropic
+		}
+		m.modelSelector = newModelSelectorModel("anthropic", 80)
+		m.modelSelector.cursor = 0 // valid model
+		m.apiKeyInput.SetValue("") // empty API key
+
+		// Check that warning is shown in the view when on credentials step
+		view := m.View()
+		if !strings.Contains(view, "API key is empty") {
+			t.Error("View should show API key warning when API key is empty")
+		}
+
+		// Should advance without blocking
+		result, _ := m.advance()
+		wm := result.(WizardModel)
+
+		// Should have no validation error (not blocked)
+		if wm.validationErr != "" {
+			t.Errorf("validationErr should be empty for warning case, got %q", wm.validationErr)
+		}
+
+		// Should have advanced to next step
+		if wm.step != stepChannel {
+			t.Errorf("step = %v, want %v (should advance despite warning)", wm.step, stepChannel)
+		}
+	})
+
+	// Test for ollama (should have no warning even with empty API key)
+	t.Run("ollama with empty API key has no warning", func(t *testing.T) {
+		m := newWizardModel()
+		m.step = stepCredentials
+		m.providerSelector = selectorModel{
+			choices: []string{"anthropic", "gemini", "openrouter", "openai", "ollama"},
+			cursor:  4, // ollama
+		}
+		m.modelSelector = newModelSelectorModel("ollama", 80)
+		m.modelSelector.cursor = 0 // valid model
+		m.apiKeyInput.SetValue("") // empty API key (allowed for ollama)
+
+		result, _ := m.advance()
+		wm := result.(WizardModel)
+
+		// Should have no validation error
+		if wm.validationErr != "" {
+			t.Errorf("validationErr should be empty for ollama, got %q", wm.validationErr)
+		}
+
+		// Should have no warning
+		if wm.warningMsg != "" {
+			t.Errorf("warningMsg should be empty for ollama, got %q", wm.warningMsg)
+		}
+
+		// Should have advanced to next step
+		if wm.step != stepChannel {
+			t.Errorf("step = %v, want %v", wm.step, stepChannel)
+		}
+	})
+
+	// Test for non-ollama with non-empty API key (should have no warning)
+	t.Run("anthropic with non-empty API key has no warning", func(t *testing.T) {
+		m := newWizardModel()
+		m.step = stepCredentials
+		m.providerSelector = selectorModel{
+			choices: []string{"anthropic", "gemini", "openrouter", "openai", "ollama"},
+			cursor:  0, // anthropic
+		}
+		m.modelSelector = newModelSelectorModel("anthropic", 80)
+		m.modelSelector.cursor = 0             // valid model
+		m.apiKeyInput.SetValue("sk-valid-key") // non-empty API key
+
+		result, _ := m.advance()
+		wm := result.(WizardModel)
+
+		// Should have no validation error
+		if wm.validationErr != "" {
+			t.Errorf("validationErr should be empty, got %q", wm.validationErr)
+		}
+
+		// Should have no warning
+		if wm.warningMsg != "" {
+			t.Errorf("warningMsg should be empty for non-empty API key, got %q", wm.warningMsg)
+		}
+
+		// Should have advanced to next step
+		if wm.step != stepChannel {
+			t.Errorf("step = %v, want %v", wm.step, stepChannel)
+		}
+	})
 }
 
 func TestParseAllowedUsers(t *testing.T) {
@@ -605,5 +796,84 @@ func TestParseAllowedUsers(t *testing.T) {
 				t.Errorf("parseAllowedUsers(%q) = %v, want %v", tc.input, got, tc.want)
 			}
 		})
+	}
+}
+
+func indexOf(s string, slice []string) int {
+	for i, v := range slice {
+		if v == s {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestBuildConfig_StoreTypeIsFileForAllChannels(t *testing.T) {
+	tests := []struct {
+		name    string
+		channel string
+	}{
+		{"CLI", "cli"},
+		{"Telegram", "telegram"},
+		{"Discord", "discord"},
+		{"WhatsApp", "whatsapp"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a minimal WizardModel with the channel selected
+			m := WizardModel{
+				channelSelector: selectorModel{
+					cursor:  0,
+					choices: []string{"cli", "telegram", "discord", "whatsapp"},
+				},
+				storePathInput: textinput.New(),
+			}
+			// Set the channel selection
+			m.channelSelector.cursor = indexOf(tc.channel, m.channelSelector.choices)
+
+			cfg := m.buildConfig()
+
+			if cfg.Store.Type != "file" {
+				t.Errorf("buildConfig() with channel=%q produced store.type=%q, want \"file\"", tc.channel, cfg.Store.Type)
+			}
+
+			// Also check audit.type
+			if cfg.Audit.Type != "file" {
+				t.Errorf("buildConfig() with channel=%q produced audit.type=%q, want \"file\"", tc.channel, cfg.Audit.Type)
+			}
+		})
+	}
+}
+
+func TestBuildConfig_WhatsAppFieldsPresent(t *testing.T) {
+	// Create a minimal WizardModel with WhatsApp selected
+	tokenInput := textinput.New()
+	tokenInput.SetValue("whatsapp-access-token-123")
+
+	allowedUsersInput := textinput.New()
+	allowedUsersInput.SetValue("123456789012")
+
+	m := WizardModel{
+		channelSelector: selectorModel{
+			cursor:  3, // whatsapp is 4th choice (0=cli, 1=telegram, 2=discord, 3=whatsapp)
+			choices: []string{"cli", "telegram", "discord", "whatsapp"},
+		},
+		tokenInput:        tokenInput,
+		allowedUsersInput: allowedUsersInput,
+		storePathInput:    textinput.New(),
+	}
+
+	cfg := m.buildConfig()
+
+	// Check that WhatsApp-specific fields are populated
+	if cfg.Channel.AccessToken != "whatsapp-access-token-123" {
+		t.Errorf("buildConfig() with channel=whatsapp produced AccessToken=%q, want %q", cfg.Channel.AccessToken, "whatsapp-access-token-123")
+	}
+	if cfg.Channel.PhoneNumberID != "123456789012" {
+		t.Errorf("buildConfig() with channel=whatsapp produced PhoneNumberID=%q, want %q", cfg.Channel.PhoneNumberID, "123456789012")
+	}
+	if cfg.Channel.VerifyToken != "" {
+		t.Errorf("buildConfig() with channel=whatsapp produced VerifyToken=%q, want empty string", cfg.Channel.VerifyToken)
 	}
 }

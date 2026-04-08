@@ -30,7 +30,7 @@ const (
 func nextStep(current wizardStep, channelType string) wizardStep {
 	switch current {
 	case stepChannel:
-		if channelType == "telegram" || channelType == "discord" {
+		if channelType == "telegram" || channelType == "discord" || channelType == "whatsapp" {
 			return stepChannelExtra
 		}
 		return stepStorePath
@@ -46,7 +46,7 @@ func nextStep(current wizardStep, channelType string) wizardStep {
 func prevStep(current wizardStep, channelType string) wizardStep {
 	switch current {
 	case stepStorePath:
-		if channelType == "telegram" || channelType == "discord" {
+		if channelType == "telegram" || channelType == "discord" || channelType == "whatsapp" {
 			return stepChannelExtra
 		}
 		return stepChannel
@@ -352,6 +352,7 @@ type wizardStyles struct {
 	selected  lipgloss.Style
 	inactive  lipgloss.Style
 	errStyle  lipgloss.Style
+	warnStyle lipgloss.Style
 }
 
 func newWizardStyles() wizardStyles {
@@ -365,6 +366,7 @@ func newWizardStyles() wizardStyles {
 		selected:  lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")),
 		inactive:  lipgloss.NewStyle().Faint(true),
 		errStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
+		warnStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true),
 	}
 }
 
@@ -403,6 +405,9 @@ type WizardModel struct {
 	// validation feedback — set when advance() is blocked by missing input
 	validationErr string
 
+	// warning feedback — non-blocking warnings shown to user
+	warningMsg string
+
 	// terminal dimensions
 	width  int
 	height int
@@ -435,7 +440,7 @@ func newWizardModel() WizardModel {
 		focusSelectorActive: true,
 		apiKeyInput:         apiKeyInput,
 		channelSelector: selectorModel{
-			choices: []string{"cli", "telegram", "discord"},
+			choices: []string{"cli", "telegram", "discord", "whatsapp"},
 		},
 		tokenInput:        tokenInput,
 		allowedUsersInput: allowedUsersInput,
@@ -553,8 +558,11 @@ func (m WizardModel) advance() (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.TrimSpace(m.apiKeyInput.Value()) == "" {
-				m.validationErr = "API key is required"
-				return m, nil
+				// Non-blocking warning for empty API key on non-ollama providers
+				m.warningMsg = "API key is empty — this provider requires a key"
+			} else {
+				// Clear warning if API key is non-empty
+				m.warningMsg = ""
 			}
 		}
 	case stepChannelExtra:
@@ -569,19 +577,23 @@ func (m WizardModel) advance() (tea.Model, tea.Cmd) {
 		}
 	case stepConfirm:
 		// Write the config file with real (unredacted) values
-		path, err := DefaultConfigPath()
-		if err != nil {
-			m.writeErr = err
-			m.step = stepDone
-			return m, nil
+		// configPath should already be set from when we built yamlPreview
+		if m.configPath == "" {
+			// Fallback in case configPath wasn't set
+			path, err := DetectConfigPath()
+			if err != nil {
+				m.writeErr = err
+				m.step = stepDone
+				return m, nil
+			}
+			m.configPath = path
 		}
 		cfg := m.buildConfig()
-		if werr := WriteConfig(path, cfg); werr != nil {
+		if werr := WriteConfig(m.configPath, cfg); werr != nil {
 			m.writeErr = werr
 			m.step = stepDone
 			return m, nil
 		}
-		m.configPath = path
 		m.step = stepDone
 		return m, nil
 	case stepDone:
@@ -590,6 +602,7 @@ func (m WizardModel) advance() (tea.Model, tea.Cmd) {
 
 	// Clear any validation error on successful advance
 	m.validationErr = ""
+	// Warning messages persist until cleared by user action (typing in field or changing step)
 
 	// Initialize model selector when advancing from provider step
 	if m.step == stepProvider {
@@ -618,6 +631,14 @@ func (m WizardModel) advance() (tea.Model, tea.Cmd) {
 		} else {
 			m.yamlPreview = string(data)
 		}
+
+		// Calculate config path for display
+		path, err := DetectConfigPath()
+		if err != nil {
+			// If we can't determine path, use default for display
+			path = "~/.microagent/config.yaml"
+		}
+		m.configPath = path
 	}
 
 	// Focus the appropriate input for the new step
@@ -721,13 +742,21 @@ func (m WizardModel) buildConfig() *config.Config {
 		cfg.Channel.Token = m.tokenInput.Value()
 		cfg.Channel.AllowedUsers = parseAllowedUsers(m.allowedUsersInput.Value())
 	}
-	cfg.Store.Type = "sqlite"
+	if channel == "whatsapp" {
+		cfg.Channel.AccessToken = m.tokenInput.Value()
+		// For Phase 1 quick fix: use allowedUsersInput for phone_number_id
+		// Users will need to add verify_token manually
+		cfg.Channel.PhoneNumberID = m.allowedUsersInput.Value()
+		// verify_token will be empty - users must add it manually
+		cfg.Channel.VerifyToken = ""
+	}
+	cfg.Store.Type = "file"
 	cfg.Store.Path = m.storePathInput.Value()
 	if cfg.Store.Path == "" {
 		cfg.Store.Path = "~/.microagent/data"
 	}
 	cfg.Audit.Enabled = true
-	cfg.Audit.Type = "sqlite"
+	cfg.Audit.Type = "file"
 	cfg.Audit.Path = "~/.microagent/audit"
 	return cfg
 }
@@ -838,6 +867,12 @@ func (m WizardModel) viewCredentials() string {
 	if m.validationErr != "" {
 		sb.WriteString("\n" + m.styles.errStyle.Render("⚠ "+m.validationErr))
 	}
+	// Show warning if API key is empty for non-ollama provider
+	if provider != "ollama" && strings.TrimSpace(m.apiKeyInput.Value()) == "" {
+		sb.WriteString("\n" + m.styles.warnStyle.Render("⚠ API key is empty — this provider requires a key"))
+	} else if m.warningMsg != "" {
+		sb.WriteString("\n" + m.styles.warnStyle.Render("⚠ "+m.warningMsg))
+	}
 	return m.styles.border.Render(sb.String())
 }
 
@@ -892,7 +927,14 @@ func (m WizardModel) viewConfirm() string {
 	var sb strings.Builder
 	sb.WriteString(m.styles.title.Render("Step 5/5: Confirm Configuration"))
 	sb.WriteString("\n\n")
-	sb.WriteString(m.styles.dimLabel.Render("The following will be written to ~/.microagent/config.yaml:"))
+
+	// Show where config will be written
+	displayPath := m.configPath
+	if displayPath == "" {
+		// Fallback if configPath not set yet
+		displayPath = "~/.microagent/config.yaml"
+	}
+	sb.WriteString(m.styles.dimLabel.Render(fmt.Sprintf("The following will be written to %s:", displayPath)))
 	sb.WriteString("\n\n")
 	sb.WriteString(m.yamlPreview)
 	sb.WriteString("\n")
