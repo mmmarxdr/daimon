@@ -228,6 +228,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		Auditor:     aud,
 		Config:      cfg,
 		ModelLister: ml,
+		Tools:       toolsRegistry,
 		StartedAt:   time.Now(),
 		Version:     version,
 		WebChannel:  webCh,

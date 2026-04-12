@@ -12,6 +12,7 @@ import (
 	"microagent/internal/mcp"
 	"microagent/internal/provider"
 	"microagent/internal/store"
+	"microagent/internal/tool"
 )
 
 // MCPLister is the interface for listing MCP server statuses.
@@ -25,7 +26,8 @@ type ServerDeps struct {
 	Auditor     audit.Auditor
 	Config      *config.Config
 	MCPService  MCPLister
-	ModelLister provider.ModelLister // nil if provider doesn't support model listing
+	ModelLister provider.ModelLister   // nil if provider doesn't support model listing
+	Tools       map[string]tool.Tool   // registered tool instances
 	StartedAt   time.Time
 	Version     string
 	WebChannel  *channel.WebChannel // nil disables the /ws/chat endpoint
@@ -93,6 +95,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/metrics/history", s.handleGetMetricsHistory)
 	s.mux.HandleFunc("GET /api/mcp/servers", s.handleListMCPServers)
 	s.mux.HandleFunc("GET /api/models", s.handleListModels)
+	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	// WebSocket endpoints.
 	s.mux.HandleFunc("/ws/metrics", s.handleMetricsWebSocket)
 	s.mux.HandleFunc("/ws/logs", s.handleLogsWebSocket)

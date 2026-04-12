@@ -466,6 +466,7 @@ func main() {
 			Auditor:     auditor,
 			Config:      cfg,
 			ModelLister: ml,
+			Tools:       toolsRegistry,
 			StartedAt:   time.Now(),
 			Version:     version,
 			WebChannel:  webCh,
