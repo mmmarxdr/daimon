@@ -79,7 +79,7 @@ func hasMedia(msg *tgbotapi.Message) bool {
 
 // processUpdate handles a single Telegram update and returns the IncomingMessage to enqueue
 // plus a boolean indicating whether it should be enqueued. Returns false when the update
-// should be silently skipped (whitelist rejection, /ping, nil message, etc.).
+// should be silently skipped (whitelist rejection, nil message, etc.).
 func (t *TelegramChannel) processUpdate(ctx context.Context, update tgbotapi.Update) (IncomingMessage, bool) {
 	if update.Message == nil {
 		return IncomingMessage{}, false
@@ -109,18 +109,6 @@ func (t *TelegramChannel) processUpdate(ctx context.Context, update tgbotapi.Upd
 		"chat_id", msg.Chat.ID,
 		"text", msg.Text,
 	)
-
-	// Built-in /ping health check — handled entirely at the channel layer,
-	// no LLM call needed. Validates: bot token, polling, whitelist, Send().
-	if msg.Text == "/ping" {
-		reply := tgbotapi.NewMessage(msg.Chat.ID, "pong ✅ — micro-claw is alive")
-		if _, err := t.bot.Send(reply); err != nil {
-			slog.Error("failed to send ping reply", "error", err)
-		} else {
-			slog.Info("ping replied", "chat_id", msg.Chat.ID)
-		}
-		return IncomingMessage{}, false
-	}
 
 	scopeID := fmt.Sprintf("telegram:%d", msg.Chat.ID)
 	ts := time.Unix(int64(msg.Date), 0)

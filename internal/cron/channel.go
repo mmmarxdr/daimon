@@ -23,17 +23,21 @@ type OriginalSender func(ctx context.Context, msg channel.OutgoingMessage) error
 //
 // ChannelID format: "cron:<job_id>"
 type CronChannel struct {
-	scheduler  SchedulerIface
-	cronStore  store.CronStore
-	origSender OriginalSender
+	scheduler          SchedulerIface
+	cronStore          store.CronStore
+	origSender         OriginalSender
+	notifyOnCompletion bool
 }
 
 // NewCronChannel creates a CronChannel.
-func NewCronChannel(scheduler SchedulerIface, cronStore store.CronStore, origSender OriginalSender) *CronChannel {
+// When notifyOnCompletion is true, successful outputs are prefixed with a
+// "📋 Scheduled task '<prompt>':" header so the user knows which task ran.
+func NewCronChannel(scheduler SchedulerIface, cronStore store.CronStore, origSender OriginalSender, notifyOnCompletion bool) *CronChannel {
 	return &CronChannel{
-		scheduler:  scheduler,
-		cronStore:  cronStore,
-		origSender: origSender,
+		scheduler:          scheduler,
+		cronStore:          cronStore,
+		origSender:         origSender,
+		notifyOnCompletion: notifyOnCompletion,
 	}
 }
 
@@ -49,6 +53,10 @@ func (c *CronChannel) Start(ctx context.Context, inbox chan<- channel.IncomingMe
 // Send receives a completed job response from the agent, saves it to cron_results,
 // and calls origSender to deliver the text to the user's original channel.
 // ChannelID must be "cron:<job_id>".
+//
+// Metadata keys understood by Send:
+//   - "cron_error": "true" — message is an error notification; always forwarded
+//     with an "⚠️ Task '<prompt>' failed:" prefix instead of the completion header.
 func (c *CronChannel) Send(ctx context.Context, msg channel.OutgoingMessage) error {
 	// Strip "cron:" prefix to get job ID.
 	jobID := strings.TrimPrefix(msg.ChannelID, "cron:")
@@ -56,12 +64,18 @@ func (c *CronChannel) Send(ctx context.Context, msg channel.OutgoingMessage) err
 		return fmt.Errorf("cron channel: unexpected ChannelID format %q (want \"cron:<id>\")", msg.ChannelID)
 	}
 
-	// Persist result.
+	isError := msg.Metadata["cron_error"] == "true"
+
+	// Persist result (errors are stored with ErrorMsg set; output is empty for pure error msgs).
 	result := store.CronResult{
-		ID:     uuid.New().String(),
-		JobID:  jobID,
-		RanAt:  time.Now().UTC(),
-		Output: msg.Text,
+		ID:    uuid.New().String(),
+		JobID: jobID,
+		RanAt: time.Now().UTC(),
+	}
+	if isError {
+		result.ErrorMsg = msg.Text
+	} else {
+		result.Output = msg.Text
 	}
 	if err := c.cronStore.SaveResult(ctx, result); err != nil {
 		slog.Warn("cron: failed to save result", "job_id", jobID, "err", err)
@@ -76,9 +90,10 @@ func (c *CronChannel) Send(ctx context.Context, msg channel.OutgoingMessage) err
 			return nil
 		}
 		if job.ChannelID != "" {
+			text := c.formatForwardText(msg.Text, job.Prompt, isError)
 			fwdMsg := channel.OutgoingMessage{
 				ChannelID: job.ChannelID,
-				Text:      msg.Text,
+				Text:      text,
 				Metadata:  msg.Metadata,
 			}
 			if err := c.origSender(ctx, fwdMsg); err != nil {
@@ -89,6 +104,30 @@ func (c *CronChannel) Send(ctx context.Context, msg channel.OutgoingMessage) err
 	}
 
 	return nil
+}
+
+// formatForwardText builds the text to forward to the user's originating channel.
+// Error messages are always prefixed with a warning header.
+// Success messages are prefixed with a scheduled-task header when notifyOnCompletion
+// is enabled; otherwise the raw LLM output is forwarded as-is.
+func (c *CronChannel) formatForwardText(text, prompt string, isError bool) string {
+	short := truncatePrompt(prompt, 50)
+	if isError {
+		return fmt.Sprintf("⚠️ Task '%s' failed: %s", short, text)
+	}
+	if c.notifyOnCompletion {
+		return fmt.Sprintf("📋 Scheduled task '%s':\n\n%s", short, text)
+	}
+	return text
+}
+
+// truncatePrompt shortens a prompt to at most n runes, appending "..." if truncated.
+func truncatePrompt(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "..."
 }
 
 // Stop gracefully stops the scheduler and returns nil.

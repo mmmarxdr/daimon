@@ -651,10 +651,10 @@ func (s *SQLiteStore) CreateJob(ctx context.Context, job CronJob) (CronJob, erro
 		enabledInt = 1
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO cron_jobs (id, schedule, schedule_human, prompt, channel_id, enabled, created_at, last_run_at, next_run_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO cron_jobs (id, schedule, schedule_human, prompt, channel_id, description, enabled, created_at, last_run_at, next_run_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Schedule, job.ScheduleHuman, job.Prompt, job.ChannelID,
-		enabledInt, job.CreatedAt.Unix(), lastRunAt, nextRunAt,
+		job.Description, enabledInt, job.CreatedAt.Unix(), lastRunAt, nextRunAt,
 	)
 	if err != nil {
 		return CronJob{}, fmt.Errorf("creating cron job %s: %w", job.ID, err)
@@ -665,7 +665,7 @@ func (s *SQLiteStore) CreateJob(ctx context.Context, job CronJob) (CronJob, erro
 // ListJobs returns all enabled cron jobs ordered by created_at ascending.
 func (s *SQLiteStore) ListJobs(ctx context.Context) ([]CronJob, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, schedule, schedule_human, prompt, channel_id, enabled, created_at, last_run_at, next_run_at
+		`SELECT id, schedule, schedule_human, prompt, channel_id, description, enabled, created_at, last_run_at, next_run_at
 		 FROM cron_jobs WHERE enabled = 1 ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -693,7 +693,7 @@ func (s *SQLiteStore) ListJobs(ctx context.Context) ([]CronJob, error) {
 // GetJob retrieves a single CronJob by ID. Returns ErrNotFound (wrapped) if not present.
 func (s *SQLiteStore) GetJob(ctx context.Context, id string) (CronJob, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, schedule, schedule_human, prompt, channel_id, enabled, created_at, last_run_at, next_run_at
+		`SELECT id, schedule, schedule_human, prompt, channel_id, description, enabled, created_at, last_run_at, next_run_at
 		 FROM cron_jobs WHERE id = ?`, id,
 	)
 	job, err := scanCronJobRow(row)
@@ -820,6 +820,15 @@ func (s *SQLiteStore) UpdateJobRunTimes(ctx context.Context, id string, lastRunA
 	return nil
 }
 
+// CountResults returns the total number of results stored for a given jobID.
+func (s *SQLiteStore) CountResults(ctx context.Context, jobID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM cron_results WHERE job_id = ?`, jobID,
+	).Scan(&count)
+	return count, err
+}
+
 // ─── CronJob scan helpers ─────────────────────────────────────────────────────
 
 type cronJobScanner interface {
@@ -834,7 +843,7 @@ func scanCronJob(s cronJobScanner) (CronJob, error) {
 
 	if err := s.Scan(
 		&job.ID, &job.Schedule, &job.ScheduleHuman, &job.Prompt, &job.ChannelID,
-		&enabledInt, &createdAtUnix, &lastRunAtUnix, &nextRunAtUnix,
+		&job.Description, &enabledInt, &createdAtUnix, &lastRunAtUnix, &nextRunAtUnix,
 	); err != nil {
 		return CronJob{}, err
 	}
@@ -859,7 +868,7 @@ func scanCronJobRow(row *sql.Row) (CronJob, error) {
 
 	if err := row.Scan(
 		&job.ID, &job.Schedule, &job.ScheduleHuman, &job.Prompt, &job.ChannelID,
-		&enabledInt, &createdAtUnix, &lastRunAtUnix, &nextRunAtUnix,
+		&job.Description, &enabledInt, &createdAtUnix, &lastRunAtUnix, &nextRunAtUnix,
 	); err != nil {
 		return CronJob{}, err
 	}

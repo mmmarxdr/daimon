@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
 	schedule_human TEXT NOT NULL,
 	prompt         TEXT NOT NULL,
 	channel_id     TEXT NOT NULL,
+	description    TEXT NOT NULL DEFAULT '',
 	enabled        INTEGER NOT NULL DEFAULT 1,
 	created_at     INTEGER NOT NULL,
 	last_run_at    INTEGER,
@@ -112,6 +113,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 	if version < 5 {
 		if err := s.migrateV5(); err != nil {
 			return fmt.Errorf("migration v5: %w", err)
+		}
+	}
+	if version < 6 {
+		if err := s.migrateV6(); err != nil {
+			return fmt.Errorf("migration v6: %w", err)
 		}
 	}
 
@@ -276,6 +282,53 @@ func (s *SQLiteStore) migrateV4() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 4"); err != nil {
 		return fmt.Errorf("updating schema version to 4: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV6 adds the description column to cron_jobs for existing databases.
+// New databases get the column via the base schema. Advances schema_version to 6.
+func (s *SQLiteStore) migrateV6() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Check if description column already exists (guard for any edge case where
+	// base schema was applied fresh and migration version counter was reset).
+	rows, err := tx.Query(`PRAGMA table_info(cron_jobs)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for cron_jobs: %w", err)
+	}
+	hasDescription := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		if name == "description" {
+			hasDescription = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !hasDescription {
+		if _, err := tx.Exec(`ALTER TABLE cron_jobs ADD COLUMN description TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("adding description column to cron_jobs: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 6"); err != nil {
+		return fmt.Errorf("updating schema version to 6: %w", err)
 	}
 
 	return tx.Commit()

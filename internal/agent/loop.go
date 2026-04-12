@@ -21,6 +21,12 @@ import (
 	"microagent/internal/tool"
 )
 
+// isCronMessage returns true when a ChannelID was created by the cron scheduler
+// (format: "cron:<job_id>"). Used to gate cron-specific error metadata.
+func isCronMessage(channelID string) bool {
+	return len(channelID) > 5 && channelID[:5] == "cron:"
+}
+
 func userScope(channelID, senderID string) string {
 	if senderID == "" {
 		return channelID
@@ -35,6 +41,37 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		"has_media", msg.Content.HasMedia(),
 		"channel_id", msg.ChannelID,
 	)
+
+	// Slash command dispatch — intercept before LLM.
+	if cmdText := msg.Content.TextOnly(); cmdText != "" {
+		if name, args, isCmd := parseCommand(cmdText); isCmd {
+			if handler, found := a.commands.Lookup(name); found {
+				slog.Info("slash command dispatched", "command", name)
+				cc := CommandContext{
+					Ctx:          ctx,
+					ChannelID:    msg.ChannelID,
+					SenderID:     msg.SenderID,
+					Args:         args,
+					Store:        a.store,
+					Config:       &a.config,
+					Reply:        a.makeReply(ctx, msg.ChannelID),
+					Registry:     a.commands,
+					ProviderName: a.provider.Name(),
+					ChannelName:  a.channelName,
+					StartedAt:    a.startedAt,
+					Inbox:        a.inbox,
+				}
+				if err := handler(cc); err != nil {
+					slog.Error("command handler failed", "command", name, "error", err)
+					cc.Reply("Command failed: " + err.Error())
+				}
+				return
+			}
+			// Unknown command — inform the user.
+			a.makeReply(ctx, msg.ChannelID)("Unknown command /" + name + ". Type /help for available commands.")
+			return
+		}
+	}
 
 	scope := userScope(msg.ChannelID, msg.SenderID)
 	convID := "conv_" + scope
@@ -137,10 +174,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				Iteration: i, StopReason: "error",
 			})
 			slog.Error("provider chat failed", "error", err, "channel_id", msg.ChannelID)
-			_ = a.channel.Send(ctx, channel.OutgoingMessage{
+			errMsg := channel.OutgoingMessage{
 				ChannelID: msg.ChannelID,
-				Text:      "⚠️ The AI provider returned an error. Please try again in a moment.",
-			})
+				Text:      "The AI provider returned an error. Please try again in a moment.",
+			}
+			if isCronMessage(msg.ChannelID) {
+				errMsg.Metadata = map[string]string{"cron_error": "true"}
+			}
+			_ = a.channel.Send(ctx, errMsg)
 			return
 		}
 		_ = a.auditor.Emit(ctx, audit.AuditEvent{

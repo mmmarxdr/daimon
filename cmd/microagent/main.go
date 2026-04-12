@@ -388,9 +388,11 @@ func main() {
 	}
 
 	// Build cron subsystem if enabled.
+	var cronScheduler cronpkg.SchedulerIface
 	if cfg.Cron.Enabled {
 		tz, _ := time.LoadLocation(cfg.Cron.Timezone)
 		scheduler := cronpkg.NewScheduler(cronSt, tz, cfg.Cron.RetentionDays, cfg.Cron.MaxResultsPerJob)
+		cronScheduler = scheduler
 
 		// origSender delivers cron results back to the user's real channel.
 		// It's nil-safe: if channels is empty (daemon mode), Send is skipped by CronChannel.
@@ -400,7 +402,7 @@ func main() {
 			origSender = userCh.Send
 		}
 
-		cronChannel := cronpkg.NewCronChannel(scheduler, cronSt, origSender)
+		cronChannel := cronpkg.NewCronChannel(scheduler, cronSt, origSender, cfg.Cron.NotifyOnCompletion)
 		channels = append(channels, cronChannel)
 
 		// Merge cron tools into registry.
@@ -419,7 +421,8 @@ func main() {
 
 	mux := channel.NewMultiplexChannel(channels)
 
-	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream))
+	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream)).
+		WithCronCommands(cronScheduler, cronSt)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)

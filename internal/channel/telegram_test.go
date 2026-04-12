@@ -525,3 +525,26 @@ func TestProcessUpdate_Document_Allowed(t *testing.T) {
 		t.Errorf("expected BlockDocument with filename, got: %+v", result.Content)
 	}
 }
+
+// TestProcessUpdate_PingNotHandledLocally verifies that /ping is no longer intercepted
+// at the channel layer — it must be enqueued to the inbox like any regular message,
+// so the agent's slash-command registry handles it.
+func TestProcessUpdate_PingNotHandledLocally(t *testing.T) {
+	ms := newFakeMediaStore()
+	mediaCfg := buildMediaConfig(1024*1024, 10*1024*1024, []string{"image/"})
+	tc := newTestChannel(mediaCfg, ms, "http://irrelevant")
+
+	msg := makeMsg()
+	msg.Text = "/ping"
+
+	result, enqueue := tc.processUpdate(context.Background(), makeUpdate(msg))
+	if !enqueue {
+		t.Fatal("expected /ping to be enqueued (handled by agent), not swallowed by channel")
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("expected non-empty content in enqueued /ping message")
+	}
+	if result.Content[0].Text != "/ping" {
+		t.Errorf("expected content text '/ping', got %q", result.Content[0].Text)
+	}
+}

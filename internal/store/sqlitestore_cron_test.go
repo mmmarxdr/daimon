@@ -297,3 +297,109 @@ func TestCronStore_PruneResults_Atomicity(t *testing.T) {
 		t.Errorf("PruneResults on empty tables returned error: %v", err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T4.7 — CountResults tests
+// ---------------------------------------------------------------------------
+
+func TestCountResults_Zero(t *testing.T) {
+	s := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	job := CronJob{
+		ID:            "count-job-zero",
+		Schedule:      "* * * * *",
+		ScheduleHuman: "every minute",
+		Prompt:        "ping",
+		ChannelID:     "cli",
+		Enabled:       true,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, err := s.CreateJob(ctx, job); err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+
+	count, err := s.CountResults(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("CountResults: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected count=0 for new job, got %d", count)
+	}
+}
+
+func TestCountResults_Multiple(t *testing.T) {
+	s := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	job := CronJob{
+		ID:            "count-job-multi",
+		Schedule:      "* * * * *",
+		ScheduleHuman: "every minute",
+		Prompt:        "check",
+		ChannelID:     "cli",
+		Enabled:       true,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if _, err := s.CreateJob(ctx, job); err != nil {
+		t.Fatalf("CreateJob: %v", err)
+	}
+
+	base := time.Now().UTC().Truncate(time.Second)
+	for i := 0; i < 3; i++ {
+		r := CronResult{
+			ID:     fmt.Sprintf("count-res-%d", i),
+			JobID:  job.ID,
+			RanAt:  base.Add(time.Duration(i) * time.Minute),
+			Output: fmt.Sprintf("output %d", i),
+		}
+		if err := s.SaveResult(ctx, r); err != nil {
+			t.Fatalf("SaveResult %d: %v", i, err)
+		}
+	}
+
+	count, err := s.CountResults(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("CountResults: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected count=3 after inserting 3 results, got %d", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.8 — Description column migration test
+// ---------------------------------------------------------------------------
+
+func TestMigrateV6_DescriptionColumn(t *testing.T) {
+	// A fresh store already has the description column (via base schema + v6 migration).
+	// Verify it exists by querying PRAGMA table_info.
+	s := newTestSQLiteStore(t)
+
+	rows, err := s.db.Query("PRAGMA table_info(cron_jobs)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info: %v", err)
+	}
+	defer rows.Close()
+
+	hasDescription := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("Scan: %v", err)
+		}
+		if name == "description" {
+			hasDescription = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err: %v", err)
+	}
+
+	if !hasDescription {
+		t.Error("expected 'description' column to exist in cron_jobs after v6 migration")
+	}
+}

@@ -17,6 +17,14 @@ import (
 // ErrJobNotFound is returned when an operation targets a job ID not in the scheduler.
 var ErrJobNotFound = errors.New("cron: job not found in scheduler")
 
+// ActiveJob describes a currently scheduled job along with its next and last
+// run times as known by the robfig/cron engine and the store.
+type ActiveJob struct {
+	Job     store.CronJob
+	NextRun time.Time
+	LastRun time.Time
+}
+
 // SchedulerIface is the subset of Scheduler used by CronChannel and the cron tools.
 // It allows testing without a real cron process.
 type SchedulerIface interface {
@@ -24,6 +32,7 @@ type SchedulerIface interface {
 	Stop()
 	AddJob(ctx context.Context, job store.CronJob) error
 	RemoveJob(ctx context.Context, jobID string) error
+	ListActiveJobs(ctx context.Context) ([]ActiveJob, error)
 }
 
 // Scheduler wraps robfig/cron/v3 and bridges cron job fires to the agent inbox.
@@ -112,6 +121,45 @@ func (s *Scheduler) RemoveJob(_ context.Context, jobID string) error {
 	s.cron.Remove(entryID)
 	delete(s.entryIDs, jobID)
 	return nil
+}
+
+// ListActiveJobs returns all currently tracked jobs with their next and last run times.
+// Next run is read from the robfig cron entry; last run is sourced from the store.
+func (s *Scheduler) ListActiveJobs(ctx context.Context) ([]ActiveJob, error) {
+	s.mu.Lock()
+	ids := make(map[string]robfigcron.EntryID, len(s.entryIDs))
+	for k, v := range s.entryIDs {
+		ids[k] = v
+	}
+	s.mu.Unlock()
+
+	result := make([]ActiveJob, 0, len(ids))
+	for jobID, entryID := range ids {
+		job, err := s.cronStore.GetJob(ctx, jobID)
+		if err != nil {
+			slog.Warn("cron: ListActiveJobs could not load job", "job_id", jobID, "err", err)
+			continue
+		}
+
+		var nextRun time.Time
+		if s.cron != nil {
+			if entry := s.cron.Entry(entryID); entry.ID != 0 {
+				nextRun = entry.Next
+			}
+		}
+
+		var lastRun time.Time
+		if job.LastRunAt != nil {
+			lastRun = *job.LastRunAt
+		}
+
+		result = append(result, ActiveJob{
+			Job:     job,
+			NextRun: nextRun,
+			LastRun: lastRun,
+		})
+	}
+	return result, nil
 }
 
 // registerJob adds a single job to the robfig cron instance and tracks its entry ID.

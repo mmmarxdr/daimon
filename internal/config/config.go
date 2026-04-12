@@ -71,11 +71,12 @@ type ContextModeConfig struct {
 
 // CronConfig holds configuration for the cron scheduling subsystem.
 type CronConfig struct {
-	Enabled          bool   `yaml:"enabled"`
-	Timezone         string `yaml:"timezone"`
-	RetentionDays    int    `yaml:"retention_days"`
-	MaxResultsPerJob int    `yaml:"max_results_per_job"`
-	MaxConcurrent    int    `yaml:"max_concurrent"`
+	Enabled            bool   `yaml:"enabled"`
+	Timezone           string `yaml:"timezone"`
+	RetentionDays      int    `yaml:"retention_days"`
+	MaxResultsPerJob   int    `yaml:"max_results_per_job"`
+	MaxConcurrent      int    `yaml:"max_concurrent"`
+	NotifyOnCompletion bool   `yaml:"notify_on_completion"`
 }
 
 // AgentConfig holds all agent-level configuration.

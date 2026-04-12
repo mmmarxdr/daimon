@@ -63,6 +63,8 @@ func (s *stubCronStore) ListResults(_ context.Context, _ string, _ int) ([]store
 
 func (s *stubCronStore) PruneResults(_ context.Context, _, _ int) error { return nil }
 
+func (s *stubCronStore) CountResults(_ context.Context, _ string) (int, error) { return 0, nil }
+
 func (s *stubCronStore) UpdateJobRunTimes(_ context.Context, id string, _, _ time.Time) error {
 	return nil
 }
@@ -220,6 +222,74 @@ func TestScheduler_Stop_NoRace(t *testing.T) {
 	}
 
 	sched.Stop() // Must not race.
+}
+
+// ---------------------------------------------------------------------------
+// T4.9 — ListActiveJobs tests
+// ---------------------------------------------------------------------------
+
+// TestListActiveJobs_WithJobs verifies that ListActiveJobs returns all
+// registered jobs with correct fields after Start + AddJob.
+func TestListActiveJobs_WithJobs(t *testing.T) {
+	st := newStubStore()
+	ctx := context.Background()
+
+	job1 := makeJob("list-job-1", "0 9 * * *")
+	job2 := makeJob("list-job-2", "0 18 * * *")
+	st.jobs["list-job-1"] = job1
+	st.jobs["list-job-2"] = job2
+
+	sched := NewScheduler(st, time.UTC, 30, 50)
+	inbox := makeInbox()
+
+	if err := sched.Start(ctx, inbox); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sched.Stop()
+
+	activeJobs, err := sched.ListActiveJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveJobs: %v", err)
+	}
+
+	if len(activeJobs) != 2 {
+		t.Errorf("expected 2 active jobs, got %d", len(activeJobs))
+	}
+
+	// Verify job IDs are present
+	ids := make(map[string]bool)
+	for _, aj := range activeJobs {
+		ids[aj.Job.ID] = true
+	}
+	if !ids["list-job-1"] {
+		t.Error("expected 'list-job-1' in active jobs")
+	}
+	if !ids["list-job-2"] {
+		t.Error("expected 'list-job-2' in active jobs")
+	}
+}
+
+// TestListActiveJobs_Empty verifies that an empty scheduler returns an empty list.
+func TestListActiveJobs_Empty(t *testing.T) {
+	st := newStubStore()
+	ctx := context.Background()
+
+	sched := NewScheduler(st, time.UTC, 30, 50)
+	inbox := makeInbox()
+
+	if err := sched.Start(ctx, inbox); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sched.Stop()
+
+	activeJobs, err := sched.ListActiveJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveJobs: %v", err)
+	}
+
+	if len(activeJobs) != 0 {
+		t.Errorf("expected 0 active jobs for empty scheduler, got %d", len(activeJobs))
+	}
 }
 
 // TestScheduler_FireJob_SendsToInbox verifies that fireJob pushes an

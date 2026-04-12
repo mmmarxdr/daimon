@@ -67,10 +67,11 @@ type Store interface {
 // CronJob represents a scheduled recurring task.
 type CronJob struct {
 	ID            string
-	Schedule      string     // 5-field cron expression
-	ScheduleHuman string     // human-readable description
+	Schedule      string // 5-field cron expression
+	ScheduleHuman string // human-readable description
 	Prompt        string
 	ChannelID     string
+	Description   string
 	Enabled       bool
 	CreatedAt     time.Time
 	LastRunAt     *time.Time
@@ -96,6 +97,7 @@ type CronStore interface {
 	SaveResult(ctx context.Context, result CronResult) error
 	ListResults(ctx context.Context, jobID string, limit int) ([]CronResult, error)
 	PruneResults(ctx context.Context, retentionDays, maxPerJob int) error
+	CountResults(ctx context.Context, jobID string) (int, error)
 
 	// UpdateJobRunTimes sets last_run_at and next_run_at for a cron job.
 	// Best-effort: called after each job fire. No-op if job is absent.

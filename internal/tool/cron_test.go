@@ -10,6 +10,7 @@ import (
 
 	"microagent/internal/channel"
 	"microagent/internal/content"
+	cronpkg "microagent/internal/cron"
 	"microagent/internal/provider"
 	"microagent/internal/store"
 )
@@ -92,6 +93,8 @@ func (m *mockCronStore) ListResults(_ context.Context, jobID string, limit int) 
 func (m *mockCronStore) PruneResults(_ context.Context, _ int, _ int) error {
 	return nil
 }
+
+func (m *mockCronStore) CountResults(_ context.Context, _ string) (int, error) { return 0, nil }
 
 func (m *mockCronStore) UpdateJobRunTimes(_ context.Context, id string, lastRunAt, nextRunAt time.Time) error {
 	j, ok := m.jobs[id]
@@ -868,6 +871,10 @@ func (a *schedulerIfaceAdapter) AddJob(ctx context.Context, job store.CronJob) e
 
 func (a *schedulerIfaceAdapter) RemoveJob(ctx context.Context, id string) error {
 	return a.m.RemoveJob(ctx, id)
+}
+
+func (a *schedulerIfaceAdapter) ListActiveJobs(_ context.Context) ([]cronpkg.ActiveJob, error) {
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------

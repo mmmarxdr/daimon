@@ -89,6 +89,10 @@ type Agent struct {
 	enricher        *Enricher        // async tag enrichment worker; nil when disabled
 	embeddingWorker *EmbeddingWorker // async embedding worker; nil when disabled
 	indexWorker     *IndexingWorker  // async output indexing worker; nil when disabled
+	commands        *CommandRegistry
+	startedAt       time.Time
+	inbox           chan channel.IncomingMessage
+	channelName     string
 }
 
 func New(
@@ -152,6 +156,9 @@ func New(
 		idxWorker.Start(context.Background())
 	}
 
+	reg := NewCommandRegistry()
+	registerBuiltinCommands(reg)
+
 	return &Agent{
 		config:          cfg,
 		limits:          limits,
@@ -170,6 +177,8 @@ func New(
 		enricher:        NewEnricher(prov, st, cfg),
 		embeddingWorker: embWorker,
 		indexWorker:     idxWorker,
+		commands:        reg,
+		channelName:     ch.Name(),
 	}
 }
 
@@ -181,7 +190,9 @@ func (a *Agent) WithMediaConfig(cfg config.MediaConfig) *Agent {
 }
 
 func (a *Agent) Run(ctx context.Context) error {
+	a.startedAt = time.Now()
 	inbox := make(chan channel.IncomingMessage, 100)
+	a.inbox = inbox
 
 	if err := a.channel.Start(ctx, inbox); err != nil {
 		return err
