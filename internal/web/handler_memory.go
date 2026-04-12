@@ -9,6 +9,29 @@ import (
 	"microagent/internal/store"
 )
 
+// memoryEntryResponse is the API shape the frontend expects for a MemoryEntry.
+type memoryEntryResponse struct {
+	ID                   string   `json:"id"`
+	Content              string   `json:"content"`
+	Tags                 []string `json:"tags"`
+	SourceConversationID string   `json:"source_conversation_id"`
+	CreatedAt            string   `json:"created_at"`
+}
+
+func toMemoryEntryResponse(e store.MemoryEntry) memoryEntryResponse {
+	tags := e.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return memoryEntryResponse{
+		ID:                   e.ID,
+		Content:              e.Content,
+		Tags:                 tags,
+		SourceConversationID: e.Source,
+		CreatedAt:            e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+}
+
 func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 
@@ -25,7 +48,12 @@ func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"items": entries})
+	items := make([]memoryEntryResponse, 0, len(entries))
+	for _, e := range entries {
+		items = append(items, toMemoryEntryResponse(e))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (s *Server) handlePostMemory(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +68,7 @@ func (s *Server) handlePostMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, entry)
+	writeJSON(w, http.StatusCreated, toMemoryEntryResponse(entry))
 }
 
 func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {

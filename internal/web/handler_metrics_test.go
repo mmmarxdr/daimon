@@ -56,12 +56,14 @@ func TestHandleGetMetrics_withAuditReader(t *testing.T) {
 	aud := &fakeAuditReader{
 		today: audit.DailyMetrics{
 			Date:          "2026-04-11",
+			InputTokens:   700,
+			OutputTokens:  300,
 			TotalTokens:   1000,
 			EstimatedCost: 0.01,
 		},
 		history: []audit.DailyMetrics{
-			{TotalTokens: 500, EstimatedCost: 0.005},
-			{TotalTokens: 300, EstimatedCost: 0.003},
+			{InputTokens: 300, OutputTokens: 200, TotalTokens: 500, EstimatedCost: 0.005},
+			{InputTokens: 200, OutputTokens: 100, TotalTokens: 300, EstimatedCost: 0.003},
 		},
 	}
 
@@ -84,20 +86,36 @@ func TestHandleGetMetrics_withAuditReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if int(resp["tokens_today"].(float64)) != 1000 {
-		t.Errorf("expected tokens_today=1000, got %v", resp["tokens_today"])
+	today, ok := resp["today"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected today object, got %T: %v", resp["today"], resp["today"])
 	}
 
-	if resp["cost_today"].(float64) != 0.01 {
-		t.Errorf("expected cost_today=0.01, got %v", resp["cost_today"])
+	if today["input_tokens"].(float64) != 700 {
+		t.Errorf("expected today.input_tokens=700, got %v", today["input_tokens"])
+	}
+	if today["cost_usd"].(float64) != 0.01 {
+		t.Errorf("expected today.cost_usd=0.01, got %v", today["cost_usd"])
 	}
 
-	if int(resp["tokens_month"].(float64)) != 800 {
-		t.Errorf("expected tokens_month=800, got %v", resp["tokens_month"])
+	month, ok := resp["month"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected month object, got %T", resp["month"])
+	}
+	// month aggregates from history: 300+200=500 input, 200+100=300 output
+	if month["input_tokens"].(float64) != 500 {
+		t.Errorf("expected month.input_tokens=500, got %v", month["input_tokens"])
+	}
+	if month["cost_usd"].(float64) != 0.008 {
+		t.Errorf("expected month.cost_usd=0.008, got %v", month["cost_usd"])
 	}
 
-	if resp["memory_count"].(float64) != 3 {
-		t.Errorf("expected memory_count=3, got %v", resp["memory_count"])
+	history, ok := resp["history"].([]any)
+	if !ok {
+		t.Fatalf("expected history array, got %T", resp["history"])
+	}
+	if len(history) != 2 {
+		t.Errorf("expected 2 history entries, got %d", len(history))
 	}
 }
 
@@ -117,20 +135,23 @@ func TestHandleGetMetrics_noAuditReader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if resp["tokens_today"].(float64) != 0 {
-		t.Errorf("expected tokens_today=0, got %v", resp["tokens_today"])
+	today, ok := resp["today"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected today object, got %T", resp["today"])
 	}
-
-	if resp["cost_today"].(float64) != 0 {
-		t.Errorf("expected cost_today=0, got %v", resp["cost_today"])
+	if today["cost_usd"].(float64) != 0 {
+		t.Errorf("expected today.cost_usd=0, got %v", today["cost_usd"])
+	}
+	if today["input_tokens"].(float64) != 0 {
+		t.Errorf("expected today.input_tokens=0, got %v", today["input_tokens"])
 	}
 }
 
 func TestHandleGetMetricsHistory_withAuditReader(t *testing.T) {
 	aud := &fakeAuditReader{
 		history: []audit.DailyMetrics{
-			{Date: "2026-04-10", TotalTokens: 100},
-			{Date: "2026-04-11", TotalTokens: 200},
+			{Date: "2026-04-10", InputTokens: 60, OutputTokens: 40, TotalTokens: 100},
+			{Date: "2026-04-11", InputTokens: 120, OutputTokens: 80, TotalTokens: 200},
 		},
 	}
 
@@ -144,13 +165,17 @@ func TestHandleGetMetricsHistory_withAuditReader(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var items []map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+	var snap map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(items) != 2 {
-		t.Fatalf("expected 2 history items, got %d", len(items))
+	history, ok := snap["history"].([]any)
+	if !ok {
+		t.Fatalf("expected history array, got %T", snap["history"])
+	}
+	if len(history) != 2 {
+		t.Fatalf("expected 2 history items, got %d", len(history))
 	}
 }
 
@@ -165,13 +190,17 @@ func TestHandleGetMetricsHistory_noAuditReader(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var items []any
-	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil {
+	var snap map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &snap); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(items) != 0 {
-		t.Fatalf("expected empty array, got %d items", len(items))
+	history, ok := snap["history"].([]any)
+	if !ok {
+		t.Fatalf("expected history array, got %T", snap["history"])
+	}
+	if len(history) != 0 {
+		t.Fatalf("expected empty history array, got %d items", len(history))
 	}
 }
 

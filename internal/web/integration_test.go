@@ -144,7 +144,7 @@ func TestIntegration_AllEndpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("GET /api/metrics returns 200 with tokens_today", func(t *testing.T) {
+	t.Run("GET /api/metrics returns 200 with today/month/history shape", func(t *testing.T) {
 		resp, err := client.Get(ts.URL + "/api/metrics")
 		if err != nil {
 			t.Fatal(err)
@@ -160,12 +160,18 @@ func TestIntegration_AllEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, ok := body["tokens_today"]; !ok {
-			t.Error("expected 'tokens_today' field in response")
+		if _, ok := body["today"]; !ok {
+			t.Error("expected 'today' field in metrics response")
+		}
+		if _, ok := body["month"]; !ok {
+			t.Error("expected 'month' field in metrics response")
+		}
+		if _, ok := body["history"]; !ok {
+			t.Error("expected 'history' field in metrics response")
 		}
 	})
 
-	t.Run("GET /api/metrics/history?days=7 returns 200 with array", func(t *testing.T) {
+	t.Run("GET /api/metrics/history?days=7 returns 200 with snapshot shape", func(t *testing.T) {
 		resp, err := client.Get(ts.URL + "/api/metrics/history?days=7")
 		if err != nil {
 			t.Fatal(err)
@@ -176,11 +182,13 @@ func TestIntegration_AllEndpoints(t *testing.T) {
 			t.Fatalf("expected 200, got %d", resp.StatusCode)
 		}
 
-		var body []any
+		var body map[string]any
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		// body is an array (possibly empty) — no further assertions needed.
+		if _, ok := body["history"]; !ok {
+			t.Error("expected 'history' field in metrics history response")
+		}
 	})
 
 	t.Run("GET /api/mcp/servers returns 200 with servers array", func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 )
 
 type statusResponse struct {
+	Status        string `json:"status"` // "running" | "idle" | "error"
 	Name          string `json:"name"`
 	Provider      string `json:"provider"`
 	Model         string `json:"model"`
@@ -18,6 +19,7 @@ type statusResponse struct {
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	uptime := time.Since(s.deps.StartedAt)
 	resp := statusResponse{
+		Status:        "running",
 		Name:          s.deps.Config.Agent.Name,
 		Provider:      s.deps.Config.Provider.Type,
 		Model:         s.deps.Config.Provider.Model,
