@@ -40,7 +40,13 @@ func (s *Server) staticHandler() http.Handler {
 		}
 		f, err := sub.Open(path)
 		if err != nil {
-			// SPA fallback: serve index.html for non-API routes.
+			// Static assets (js/css/images) that don't exist should 404,
+			// not serve index.html — browsers enforce MIME type checking.
+			if strings.HasPrefix(path, "assets/") || strings.Contains(path, ".") {
+				http.NotFound(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for navigation routes.
 			r2 := r.Clone(r.Context())
 			r2.URL.Path = "/"
 			fileServer.ServeHTTP(w, r2)

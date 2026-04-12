@@ -31,6 +31,7 @@ frontend:
 copy-frontend:
 	@echo "Copying frontend dist to $(STATIC_DIR)/..."
 	rm -rf $(STATIC_DIR)/assets
+	cp $(FRONTEND_DIR)/dist/index.html $(STATIC_DIR)/index.html
 	cp -r $(FRONTEND_DIR)/dist/assets $(STATIC_DIR)/assets
 	@echo "Done. Frontend embedded."
 
