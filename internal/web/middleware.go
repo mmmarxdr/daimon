@@ -1,15 +1,26 @@
 package web
 
 import (
+	"bufio"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
 
 // responseWriter wraps http.ResponseWriter to capture the status code.
+// It also implements http.Hijacker so WebSocket upgrades work through middleware.
 type responseWriter struct {
 	http.ResponseWriter
 	status int
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 }
 
 func (rw *responseWriter) WriteHeader(code int) {
