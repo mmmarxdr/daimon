@@ -468,6 +468,7 @@ func main() {
 			Store:       st,
 			Auditor:     auditor,
 			Config:      cfg,
+			ConfigPath:  resolvedCfgPath,
 			MCPService:  mcpSvc,
 			ModelLister: ml,
 			Tools:       toolsRegistry,

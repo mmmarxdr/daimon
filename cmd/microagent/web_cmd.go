@@ -230,6 +230,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		Store:       st,
 		Auditor:     aud,
 		Config:      cfg,
+		ConfigPath:  resolvedCfgPath,
 		MCPService:  mcpSvc,
 		ModelLister: ml,
 		Tools:       toolsRegistry,

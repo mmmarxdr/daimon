@@ -28,6 +28,7 @@ type ServerDeps struct {
 	Store       store.Store
 	Auditor     audit.Auditor
 	Config      *config.Config
+	ConfigPath  string                 // resolved path to config.yaml (for MCP/skill operations)
 	MCPService  MCPManager
 	ModelLister provider.ModelLister   // nil if provider doesn't support model listing
 	Tools       map[string]tool.Tool   // registered tool instances
