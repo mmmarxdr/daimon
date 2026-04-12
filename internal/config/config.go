@@ -19,44 +19,44 @@ var ErrNoConfig = errors.New("no config file found")
 
 // WebConfig holds configuration for the optional HTTP dashboard server.
 type WebConfig struct {
-	Enabled   bool   `yaml:"enabled"`
-	Port      int    `yaml:"port"`
-	Host      string `yaml:"host"`
-	AuthToken string `yaml:"auth_token"` // Bearer token for API/WS auth. Auto-generated if empty.
+	Enabled   bool   `yaml:"enabled"    json:"enabled"`
+	Port      int    `yaml:"port"       json:"port"`
+	Host      string `yaml:"host"       json:"host"`
+	AuthToken string `yaml:"auth_token" json:"auth_token"` // Bearer token for API/WS auth. Auto-generated if empty.
 }
 
 type Config struct {
-	Agent             AgentConfig    `yaml:"agent"`
-	Provider          ProviderConfig `yaml:"provider"`
-	Channel           ChannelConfig  `yaml:"channel"`
-	Tools             ToolsConfig    `yaml:"tools"`
-	Store             StoreConfig    `yaml:"store"`
-	Logging           LoggingConfig  `yaml:"logging"`
-	Limits            LimitsConfig   `yaml:"limits"`
-	Audit             AuditConfig    `yaml:"audit"`
-	Cron              CronConfig     `yaml:"cron"`
-	Filter            FilterConfig   `yaml:"filter"`
-	Media             MediaConfig    `yaml:"media"`
-	Web               WebConfig      `yaml:"web"`
-	Skills            []string       `yaml:"skills"`
-	SkillsDir         string         `yaml:"skills_dir"`
-	SkillsRegistryURL string         `yaml:"skills_registry_url"`
+	Agent             AgentConfig    `yaml:"agent"               json:"agent"`
+	Provider          ProviderConfig `yaml:"provider"            json:"provider"`
+	Channel           ChannelConfig  `yaml:"channel"             json:"channel"`
+	Tools             ToolsConfig    `yaml:"tools"               json:"tools"`
+	Store             StoreConfig    `yaml:"store"               json:"store"`
+	Logging           LoggingConfig  `yaml:"logging"             json:"logging"`
+	Limits            LimitsConfig   `yaml:"limits"              json:"limits"`
+	Audit             AuditConfig    `yaml:"audit"               json:"audit"`
+	Cron              CronConfig     `yaml:"cron"                json:"cron"`
+	Filter            FilterConfig   `yaml:"filter"              json:"filter"`
+	Media             MediaConfig    `yaml:"media"               json:"media"`
+	Web               WebConfig      `yaml:"web"                 json:"web"`
+	Skills            []string       `yaml:"skills"              json:"skills"`
+	SkillsDir         string         `yaml:"skills_dir"          json:"skills_dir"`
+	SkillsRegistryURL string         `yaml:"skills_registry_url" json:"skills_registry_url"`
 }
 
 // FilterConfig controls post-execution tool output compression.
 // YAML key: filter
 type FilterConfig struct {
-	Enabled            bool         `yaml:"enabled"`          // default: false (opt-in)
-	TruncationChars    int          `yaml:"truncation_chars"` // default: 8000
-	Levels             FilterLevels `yaml:"levels"`
-	InjectionDetection *bool        `yaml:"injection_detection"` // default: true — detect prompt injection in tool results
+	Enabled            bool         `yaml:"enabled"             json:"enabled"`                           // default: false (opt-in)
+	TruncationChars    int          `yaml:"truncation_chars"    json:"truncation_chars"`                  // default: 8000
+	Levels             FilterLevels `yaml:"levels"              json:"levels"`
+	InjectionDetection *bool        `yaml:"injection_detection" json:"injection_detection,omitempty"` // default: true — detect prompt injection in tool results
 }
 
 // FilterLevels configures per-tool-type filter aggressiveness.
 type FilterLevels struct {
-	Shell    string `yaml:"shell"`     // "aggressive" (default) | "minimal" | "no"
-	FileRead string `yaml:"file_read"` // "minimal" (default) | "aggressive" | "no"
-	Generic  bool   `yaml:"generic"`   // true (default when enabled) — apply generic truncation to unmatched tools
+	Shell    string `yaml:"shell"     json:"shell"`     // "aggressive" (default) | "minimal" | "no"
+	FileRead string `yaml:"file_read" json:"file_read"` // "minimal" (default) | "aggressive" | "no"
+	Generic  bool   `yaml:"generic"   json:"generic"`   // true (default when enabled) — apply generic truncation to unmatched tools
 }
 
 // ContextMode controls the native context-mode behavior.
@@ -70,47 +70,47 @@ const (
 
 // ContextModeConfig configures context-mode behavior.
 type ContextModeConfig struct {
-	Mode             ContextMode   `yaml:"mode"`               // default: "off"
-	ShellMaxOutput   int           `yaml:"shell_max_output"`   // bytes, default 4096 (auto), 8192 (conservative)
-	SandboxTimeout   time.Duration `yaml:"sandbox_timeout"`    // default 30s
-	AutoIndexOutputs *bool         `yaml:"auto_index_outputs"` // default true in auto mode, false otherwise
-	SandboxKeepFirst int           `yaml:"sandbox_keep_first"` // default 20 lines
-	SandboxKeepLast  int           `yaml:"sandbox_keep_last"`  // default 10 lines
+	Mode             ContextMode   `yaml:"mode"               json:"mode"`                             // default: "off"
+	ShellMaxOutput   int           `yaml:"shell_max_output"   json:"shell_max_output"`                  // bytes, default 4096 (auto), 8192 (conservative)
+	SandboxTimeout   time.Duration `yaml:"sandbox_timeout"    json:"sandbox_timeout"`                   // default 30s
+	AutoIndexOutputs *bool         `yaml:"auto_index_outputs" json:"auto_index_outputs,omitempty"` // default true in auto mode, false otherwise
+	SandboxKeepFirst int           `yaml:"sandbox_keep_first" json:"sandbox_keep_first"`                // default 20 lines
+	SandboxKeepLast  int           `yaml:"sandbox_keep_last"  json:"sandbox_keep_last"`                 // default 10 lines
 }
 
 // CronConfig holds configuration for the cron scheduling subsystem.
 type CronConfig struct {
-	Enabled            bool   `yaml:"enabled"`
-	Timezone           string `yaml:"timezone"`
-	RetentionDays      int    `yaml:"retention_days"`
-	MaxResultsPerJob   int    `yaml:"max_results_per_job"`
-	MaxConcurrent      int    `yaml:"max_concurrent"`
-	NotifyOnCompletion bool   `yaml:"notify_on_completion"`
+	Enabled            bool   `yaml:"enabled"              json:"enabled"`
+	Timezone           string `yaml:"timezone"             json:"timezone"`
+	RetentionDays      int    `yaml:"retention_days"       json:"retention_days"`
+	MaxResultsPerJob   int    `yaml:"max_results_per_job"  json:"max_results_per_job"`
+	MaxConcurrent      int    `yaml:"max_concurrent"       json:"max_concurrent"`
+	NotifyOnCompletion bool   `yaml:"notify_on_completion" json:"notify_on_completion"`
 }
 
 // AgentConfig holds all agent-level configuration.
 type AgentConfig struct {
-	Name             string `yaml:"name"`
-	Personality      string `yaml:"personality"`
-	MaxIterations    int    `yaml:"max_iterations"`
-	MaxTokensPerTurn int    `yaml:"max_tokens_per_turn"`
-	HistoryLength    int    `yaml:"history_length"`
-	MemoryResults    int    `yaml:"memory_results"`
-	MaxContextTokens int    `yaml:"max_context_tokens"` // token budget for context; 0 = use HistoryLength only
-	SummaryTokens    int    `yaml:"summary_tokens"`     // max tokens for LLM-generated summaries
+	Name             string `yaml:"name"               json:"name"`
+	Personality      string `yaml:"personality"        json:"personality"`
+	MaxIterations    int    `yaml:"max_iterations"     json:"max_iterations"`
+	MaxTokensPerTurn int    `yaml:"max_tokens_per_turn" json:"max_tokens_per_turn"`
+	HistoryLength    int    `yaml:"history_length"     json:"history_length"`
+	MemoryResults    int    `yaml:"memory_results"     json:"memory_results"`
+	MaxContextTokens int    `yaml:"max_context_tokens" json:"max_context_tokens"` // token budget for context; 0 = use HistoryLength only
+	SummaryTokens    int    `yaml:"summary_tokens"     json:"summary_tokens"`     // max tokens for LLM-generated summaries
 
 	// Native memory — Layer 2: LLM tag enrichment.
-	EnrichMemory     bool   `yaml:"enrich_memory"`          // default: false — enables async tag enrichment
-	EnrichModel      string `yaml:"enrich_model"`           // optional override for auto-selected cheap model
-	EnrichRatePerMin int    `yaml:"enrich_rate_per_minute"` // default: 10 — enrichment calls per minute cap
+	EnrichMemory     bool   `yaml:"enrich_memory"          json:"enrich_memory"`          // default: false — enables async tag enrichment
+	EnrichModel      string `yaml:"enrich_model"           json:"enrich_model"`           // optional override for auto-selected cheap model
+	EnrichRatePerMin int    `yaml:"enrich_rate_per_minute" json:"enrich_rate_per_minute"` // default: 10 — enrichment calls per minute cap
 
 	// Native memory — pruning.
-	PruneInterval      time.Duration `yaml:"prune_interval"`       // default: 24h — how often to prune
-	PruneRetentionDays int           `yaml:"prune_retention_days"` // default: 30 — days before archived entries are hard-deleted
-	PruneThreshold     float64       `yaml:"prune_threshold"`      // default: 0.1 — minimum decay score to keep a memory
+	PruneInterval      time.Duration `yaml:"prune_interval"       json:"prune_interval"`       // default: 24h — how often to prune
+	PruneRetentionDays int           `yaml:"prune_retention_days" json:"prune_retention_days"` // default: 30 — days before archived entries are hard-deleted
+	PruneThreshold     float64       `yaml:"prune_threshold"      json:"prune_threshold"`      // default: 0.1 — minimum decay score to keep a memory
 
 	// Native context-mode — token optimization for tool outputs.
-	ContextMode ContextModeConfig `yaml:"context_mode"`
+	ContextMode ContextModeConfig `yaml:"context_mode" json:"context_mode"`
 }
 
 // FallbackConfig configures an optional secondary provider for resilience.
@@ -121,61 +121,61 @@ type FallbackConfig struct {
 	APIKey  string        `yaml:"api_key"            json:"api_key"`
 	BaseURL string        `yaml:"base_url,omitempty" json:"base_url,omitempty"`
 	Timeout time.Duration `yaml:"timeout"            json:"timeout"`
-	Stream  *bool         `yaml:"stream"             json:"stream"`
+	Stream  *bool         `yaml:"stream"             json:"stream,omitempty"`
 }
 
 type ProviderConfig struct {
-	Type       string          `yaml:"type"`
-	Model      string          `yaml:"model"`
-	APIKey     string          `yaml:"api_key"`
-	BaseURL    string          `yaml:"base_url"`
-	Timeout    time.Duration   `yaml:"timeout"`
-	MaxRetries int             `yaml:"max_retries"`
-	Stream     *bool           `yaml:"stream"`
+	Type       string          `yaml:"type"              json:"type"`
+	Model      string          `yaml:"model"             json:"model"`
+	APIKey     string          `yaml:"api_key"           json:"api_key"`
+	BaseURL    string          `yaml:"base_url"          json:"base_url"`
+	Timeout    time.Duration   `yaml:"timeout"           json:"timeout"`
+	MaxRetries int             `yaml:"max_retries"       json:"max_retries"`
+	Stream     *bool           `yaml:"stream"            json:"stream,omitempty"`
 	Fallback   *FallbackConfig `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
 type ChannelConfig struct {
-	Type         string  `yaml:"type"`
-	Token        string  `yaml:"token"` // e.g. for telegram
-	AllowedUsers []int64 `yaml:"allowed_users"`
+	Type         string  `yaml:"type"          json:"type"`
+	Token        string  `yaml:"token"         json:"token"` // e.g. for telegram
+	AllowedUsers []int64 `yaml:"allowed_users" json:"allowed_users"`
 
 	// WhatsApp Cloud API fields
-	PhoneNumberID string   `yaml:"phone_number_id"`
-	AccessToken   string   `yaml:"access_token"`
-	VerifyToken   string   `yaml:"verify_token"`
-	WebhookPort   int      `yaml:"webhook_port"` // default 8080
-	WebhookPath   string   `yaml:"webhook_path"` // default /webhook
-	AllowedPhones []string `yaml:"allowed_phones"`
+	PhoneNumberID string   `yaml:"phone_number_id" json:"phone_number_id"`
+	AccessToken   string   `yaml:"access_token"    json:"access_token"`
+	VerifyToken   string   `yaml:"verify_token"    json:"verify_token"`
+	WebhookPort   int      `yaml:"webhook_port"    json:"webhook_port"` // default 8080
+	WebhookPath   string   `yaml:"webhook_path"    json:"webhook_path"` // default /webhook
+	AllowedPhones []string `yaml:"allowed_phones"  json:"allowed_phones"`
 
 	// Discord fields (reserved for Discord agent)
-	AllowedGuilds   []string `yaml:"allowed_guilds"`
-	AllowedChannels []string `yaml:"allowed_channels"`
+	AllowedGuilds   []string `yaml:"allowed_guilds"   json:"allowed_guilds"`
+	AllowedChannels []string `yaml:"allowed_channels" json:"allowed_channels"`
 }
 
 type ToolsConfig struct {
-	Shell ShellToolConfig `yaml:"shell"`
-	File  FileToolConfig  `yaml:"file"`
-	HTTP  HTTPToolConfig  `yaml:"http"`
-	MCP   MCPConfig       `yaml:"mcp"`
+	Shell ShellToolConfig `yaml:"shell" json:"shell"`
+	File  FileToolConfig  `yaml:"file"  json:"file"`
+	HTTP  HTTPToolConfig  `yaml:"http"  json:"http"`
+	MCP   MCPConfig       `yaml:"mcp"   json:"mcp"`
 }
 
 // MCPConfig is the top-level config block for MCP client support.
 // YAML key: tools.mcp
 type MCPConfig struct {
-	Enabled        bool              `yaml:"enabled"`
-	ConnectTimeout time.Duration     `yaml:"connect_timeout"` // default: 10s
-	Servers        []MCPServerConfig `yaml:"servers"`
+	Enabled        bool              `yaml:"enabled"         json:"enabled"`
+	ConnectTimeout time.Duration     `yaml:"connect_timeout" json:"connect_timeout"` // default: 10s
+	Servers        []MCPServerConfig `yaml:"servers"         json:"servers"`
 }
 
 // MCPServerConfig describes one MCP server connection.
 type MCPServerConfig struct {
-	Name        string            `yaml:"name"`
-	Transport   string            `yaml:"transport"`     // "stdio" | "http"
-	Command     []string          `yaml:"command"`       // stdio only: [executable, args...]
-	URL         string            `yaml:"url"`           // http only
-	PrefixTools bool              `yaml:"prefix_tools"`  // prefix tool names with server name
-	Env         map[string]string `yaml:"env,omitempty"` // extra env vars injected into the subprocess (stdio) or passed to HTTP headers (future)
+	Name        string            `yaml:"name"                  json:"name"`
+	Transport   string            `yaml:"transport"             json:"transport"`     // "stdio" | "http"
+	Command     []string          `yaml:"command"               json:"command"`       // stdio only: [executable, args...]
+	URL         string            `yaml:"url"                   json:"url"`           // http only
+	PrefixTools bool              `yaml:"prefix_tools"          json:"prefix_tools"`  // prefix tool names with server name
+	Env         map[string]string `yaml:"env,omitempty"         json:"env,omitempty"` // extra env vars injected into the subprocess (stdio) or passed to HTTP headers (future)
 }
 
 // Validate returns an error if the server config is invalid.
@@ -197,52 +197,52 @@ func (s *MCPServerConfig) Validate() error {
 }
 
 type ShellToolConfig struct {
-	Enabled         bool     `yaml:"enabled"`
-	AllowedCommands []string `yaml:"allowed_commands"`
-	AllowAll        bool     `yaml:"allow_all"`
-	WorkingDir      string   `yaml:"working_dir"`
+	Enabled         bool     `yaml:"enabled"          json:"enabled"`
+	AllowedCommands []string `yaml:"allowed_commands" json:"allowed_commands"`
+	AllowAll        bool     `yaml:"allow_all"        json:"allow_all"`
+	WorkingDir      string   `yaml:"working_dir"      json:"working_dir"`
 }
 
 type FileToolConfig struct {
-	Enabled     bool   `yaml:"enabled"`
-	BasePath    string `yaml:"base_path"`
-	MaxFileSize string `yaml:"max_file_size"`
+	Enabled     bool   `yaml:"enabled"       json:"enabled"`
+	BasePath    string `yaml:"base_path"     json:"base_path"`
+	MaxFileSize string `yaml:"max_file_size" json:"max_file_size"`
 }
 
 type HTTPToolConfig struct {
-	Enabled         bool          `yaml:"enabled"`
-	Timeout         time.Duration `yaml:"timeout"`
-	MaxResponseSize string        `yaml:"max_response_size"`
-	BlockedDomains  []string      `yaml:"blocked_domains"`
+	Enabled         bool          `yaml:"enabled"           json:"enabled"`
+	Timeout         time.Duration `yaml:"timeout"           json:"timeout"`
+	MaxResponseSize string        `yaml:"max_response_size" json:"max_response_size"`
+	BlockedDomains  []string      `yaml:"blocked_domains"   json:"blocked_domains"`
 }
 
 // StoreConfig holds persistence layer configuration.
 type StoreConfig struct {
-	Type          string `yaml:"type"`
-	Path          string `yaml:"path"`
-	EncryptionKey string `yaml:"encryption_key,omitempty"` // hex-encoded 32-byte key; also read from MICROAGENT_SECRET_KEY env var
+	Type          string `yaml:"type"                     json:"type"`
+	Path          string `yaml:"path"                     json:"path"`
+	EncryptionKey string `yaml:"encryption_key,omitempty" json:"encryption_key,omitempty"` // hex-encoded 32-byte key; also read from MICROAGENT_SECRET_KEY env var
 
 	// Native memory — Layer 3: optional API embeddings.
 	// Requires store.type = "sqlite". When false (default), the embedding column
 	// is still created by the migration but remains NULL for all rows.
-	Embeddings bool `yaml:"embeddings"` // default: false
+	Embeddings bool `yaml:"embeddings" json:"embeddings"` // default: false
 }
 
 type LoggingConfig struct {
-	Level  string `yaml:"level"`
-	Format string `yaml:"format"`
-	File   string `yaml:"file"`
+	Level  string `yaml:"level"  json:"level"`
+	Format string `yaml:"format" json:"format"`
+	File   string `yaml:"file"   json:"file"`
 }
 
 type LimitsConfig struct {
-	ToolTimeout  time.Duration `yaml:"tool_timeout"`
-	TotalTimeout time.Duration `yaml:"total_timeout"`
+	ToolTimeout  time.Duration `yaml:"tool_timeout"  json:"tool_timeout"`
+	TotalTimeout time.Duration `yaml:"total_timeout" json:"total_timeout"`
 }
 
 type AuditConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Type    string `yaml:"type"` // "file" (default) | "sqlite"
-	Path    string `yaml:"path"`
+	Enabled bool   `yaml:"enabled" json:"enabled"`
+	Type    string `yaml:"type"    json:"type"` // "file" (default) | "sqlite"
+	Path    string `yaml:"path"    json:"path"`
 }
 
 // MediaConfig controls multimodal attachment handling.
@@ -252,12 +252,12 @@ type AuditConfig struct {
 // is distinguishable from the omitted/unset case (nil → default true).
 // Use BoolVal(cfg.Media.Enabled) to read the effective value.
 type MediaConfig struct {
-	Enabled             *bool         `yaml:"enabled"`
-	MaxAttachmentBytes  int64         `yaml:"max_attachment_bytes"`
-	MaxMessageBytes     int64         `yaml:"max_message_bytes"`
-	RetentionDays       int           `yaml:"retention_days"`
-	CleanupInterval     time.Duration `yaml:"cleanup_interval"`
-	AllowedMIMEPrefixes []string      `yaml:"allowed_mime_prefixes"`
+	Enabled             *bool         `yaml:"enabled"              json:"enabled,omitempty"`
+	MaxAttachmentBytes  int64         `yaml:"max_attachment_bytes" json:"max_attachment_bytes"`
+	MaxMessageBytes     int64         `yaml:"max_message_bytes"    json:"max_message_bytes"`
+	RetentionDays       int           `yaml:"retention_days"       json:"retention_days"`
+	CleanupInterval     time.Duration `yaml:"cleanup_interval"     json:"cleanup_interval"`
+	AllowedMIMEPrefixes []string      `yaml:"allowed_mime_prefixes" json:"allowed_mime_prefixes"`
 }
 
 func (c *Config) applyDefaults() {
