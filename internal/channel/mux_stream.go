@@ -30,5 +30,26 @@ func (m *MultiplexChannel) BeginStream(ctx context.Context, channelID string) (S
 	return nil, fmt.Errorf("mux: no channel found for channelID: %s", channelID)
 }
 
-// Compile-time assertion: MultiplexChannel implements StreamSender.
-var _ StreamSender = (*MultiplexChannel)(nil)
+// EmitTelemetry routes to the sub-channel that owns the given channelID.
+// If the sub-channel implements TelemetryEmitter, it delegates; otherwise no-op.
+func (m *MultiplexChannel) EmitTelemetry(ctx context.Context, channelID string, frame map[string]any) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, child := range m.children {
+		name := child.Name()
+		if strings.HasPrefix(channelID, name+":") || channelID == name {
+			if te, ok := child.(TelemetryEmitter); ok {
+				return te.EmitTelemetry(ctx, channelID, frame)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+// Compile-time assertions.
+var (
+	_ StreamSender     = (*MultiplexChannel)(nil)
+	_ TelemetryEmitter = (*MultiplexChannel)(nil)
+)
