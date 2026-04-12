@@ -260,6 +260,9 @@ type MediaConfig struct {
 }
 
 func (c *Config) applyDefaults() {
+	if c.Agent.Name == "" {
+		c.Agent.Name = "micro-claw"
+	}
 	if c.Agent.MaxIterations == 0 {
 		c.Agent.MaxIterations = 10
 	}

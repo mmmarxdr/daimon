@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"microagent/internal/audit"
+	"microagent/internal/store"
 )
 
 func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +30,10 @@ func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
 			resp.TokensMonth += d.TotalTokens
 			resp.CostMonth += d.EstimatedCost
 		}
+	}
+
+	if ws, ok := s.deps.Store.(store.WebStore); ok {
+		resp.ConversationCount, _ = ws.CountConversations(r.Context(), "")
 	}
 
 	entries, _ := s.deps.Store.SearchMemory(r.Context(), "", "", 0)
