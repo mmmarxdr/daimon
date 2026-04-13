@@ -34,6 +34,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string                                    { return "mock" }
+func (m *mockProvider) Model() string                                   { return "mock-model" }
 func (m *mockProvider) SupportsTools() bool                             { return true }
 func (m *mockProvider) SupportsMultimodal() bool                        { return m.supportsMultimodal }
 func (m *mockProvider) SupportsAudio() bool                             { return false }
@@ -662,6 +663,7 @@ type capturingProvider struct {
 }
 
 func (c *capturingProvider) Name() string             { return "capturing" }
+func (c *capturingProvider) Model() string            { return "mock-model" }
 func (c *capturingProvider) SupportsTools() bool      { return true }
 func (c *capturingProvider) SupportsMultimodal() bool { return true }
 func (c *capturingProvider) SupportsAudio() bool      { return false }

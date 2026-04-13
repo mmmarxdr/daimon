@@ -31,11 +31,34 @@ var modelPricing = map[string]struct{ InputPer1M, OutputPer1M float64 }{
 	"gemini-1.5-flash-8b":    {0.0375, 0.15},
 	"gemini-2.5-pro-preview": {1.25, 10.0},
 
-	// OpenRouter pass-through pricing (approximate)
+	// OpenRouter pass-through — Anthropic
+	"anthropic/claude-haiku-4-5":         {0.80, 4.0},
+	"anthropic/claude-sonnet-4-5":        {3.0, 15.0},
+	"anthropic/claude-opus-4-5":          {15.0, 75.0},
+	"anthropic/claude-sonnet-4-20250514": {3.0, 15.0},
+	"anthropic/claude-opus-4-20250514":   {15.0, 75.0},
+	"anthropic/claude-3.5-sonnet":        {3.0, 15.0},
+	"anthropic/claude-3.5-haiku":         {0.80, 4.0},
+
+	// OpenRouter pass-through — OpenAI
+	"openai/gpt-4o":      {2.50, 10.0},
+	"openai/gpt-4o-mini": {0.15, 0.60},
+	"openai/o1":          {15.0, 60.0},
+	"openai/o3-mini":     {1.10, 4.40},
+
+	// OpenRouter pass-through — Google
+	"google/gemini-2.0-flash-001":        {0.075, 0.30},
+	"google/gemini-2.5-pro-preview":      {1.25, 10.0},
+	"google/gemini-2.5-flash-preview":    {0.15, 0.60},
+
+	// OpenRouter pass-through — Meta, Mistral, etc.
 	"meta-llama/llama-3.1-8b-instruct":  {0.055, 0.055},
 	"meta-llama/llama-3.1-70b-instruct": {0.40, 0.40},
+	"meta-llama/llama-4-maverick":       {0.20, 0.60},
 	"mistralai/mistral-7b-instruct":     {0.055, 0.055},
 	"mistralai/mixtral-8x7b-instruct":   {0.24, 0.24},
+	"deepseek/deepseek-chat-v3-0324":    {0.14, 0.28},
+	"deepseek/deepseek-r1":              {0.55, 2.19},
 }
 
 // EstimateCost returns the estimated USD cost for the given model and token counts.

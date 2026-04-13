@@ -145,6 +145,7 @@ type mockProvider struct {
 }
 
 func (p *mockProvider) Name() string                                  { return "mock" }
+func (p *mockProvider) Model() string                                 { return "mock-model" }
 func (p *mockProvider) SupportsTools() bool                           { return false }
 func (p *mockProvider) SupportsMultimodal() bool                      { return false }
 func (p *mockProvider) SupportsAudio() bool                           { return false }

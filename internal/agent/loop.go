@@ -16,6 +16,7 @@ import (
 	"microagent/internal/config"
 	"microagent/internal/content"
 	"microagent/internal/filter"
+	"microagent/internal/notify"
 	"microagent/internal/provider"
 	"microagent/internal/store"
 	"microagent/internal/tool"
@@ -71,6 +72,15 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			a.makeReply(ctx, msg.ChannelID)("Unknown command /" + name + ". Type /help for available commands.")
 			return
 		}
+	}
+
+	if a.bus != nil {
+		a.bus.Emit(notify.Event{
+			Type:      notify.EventTurnStarted,
+			Origin:    notify.OriginAgent,
+			ChannelID: msg.ChannelID,
+			Timestamp: time.Now(),
+		})
 	}
 
 	// Detect telemetry capability once per message.
@@ -140,6 +150,9 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			slog.Debug("streaming enabled but channel does not implement StreamSender; server-side streaming with buffered display")
 		}
 	}
+
+	// lastRespContent captures the final LLM text for the turn.completed event.
+	var lastRespContent string
 
 	// Determine degradation once per turn, before the tool-call loop.
 	// A degraded turn means the current provider cannot handle media blocks
@@ -211,7 +224,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		_ = a.auditor.Emit(ctx, audit.AuditEvent{
 			ID: uuid.New().String(), ScopeID: scope,
 			EventType: "llm_call", Timestamp: llmStart, DurationMs: llmDuration.Milliseconds(),
-			Model: a.config.Name, InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
+			Model: a.provider.Model(), InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			StopReason: resp.StopReason, Iteration: i,
 		})
 		totalInputTokens += resp.Usage.InputTokens
@@ -244,6 +257,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 
 		if len(resp.ToolCalls) == 0 {
 			slog.Debug("LLM responded with text", "response_len", len(resp.Content))
+			lastRespContent = resp.Content
 			conv.Messages = append(conv.Messages, provider.ChatMessage{
 				Role:    "assistant",
 				Content: content.TextBlock(resp.Content),
@@ -448,6 +462,20 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 
 	conv.UpdatedAt = time.Now()
 	_ = a.store.SaveConversation(ctx, *conv)
+
+	if a.bus != nil {
+		a.bus.Emit(notify.Event{
+			Type:      notify.EventTurnCompleted,
+			Origin:    notify.OriginAgent,
+			ChannelID: msg.ChannelID,
+			Text:      lastRespContent,
+			Timestamp: time.Now(),
+			Meta: map[string]string{
+				"input_tokens":  fmt.Sprintf("%d", totalInputTokens),
+				"output_tokens": fmt.Sprintf("%d", totalOutputTokens),
+			},
+		})
+	}
 }
 
 // legacyTruncate performs the original HistoryLength-based truncation with LLM summarization.

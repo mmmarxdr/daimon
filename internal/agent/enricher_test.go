@@ -27,6 +27,7 @@ type enrichMockProvider struct {
 }
 
 func (p *enrichMockProvider) Name() string                                  { return "mock" }
+func (p *enrichMockProvider) Model() string                                 { return "mock-model" }
 func (p *enrichMockProvider) SupportsTools() bool                           { return false }
 func (p *enrichMockProvider) SupportsMultimodal() bool                      { return false }
 func (p *enrichMockProvider) SupportsAudio() bool                           { return false }

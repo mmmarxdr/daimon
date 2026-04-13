@@ -41,6 +41,7 @@ func (p *GeminiProvider) WithMediaReader(mr mediaReader) *GeminiProvider {
 }
 
 func (p *GeminiProvider) Name() string             { return "gemini" }
+func (p *GeminiProvider) Model() string            { return p.config.Model }
 func (p *GeminiProvider) SupportsTools() bool      { return true }
 func (p *GeminiProvider) SupportsMultimodal() bool { return true }
 func (p *GeminiProvider) SupportsAudio() bool      { return true }

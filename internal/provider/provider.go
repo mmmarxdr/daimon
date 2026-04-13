@@ -102,6 +102,7 @@ type UsageStats struct {
 
 type Provider interface {
 	Name() string
+	Model() string // returns the model ID used for API calls (e.g. "anthropic/claude-haiku-4-5")
 	Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 	SupportsTools() bool
 	SupportsMultimodal() bool

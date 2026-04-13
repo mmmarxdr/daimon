@@ -40,11 +40,9 @@ func (p *AnthropicProvider) WithMediaReader(mr mediaReader) *AnthropicProvider {
 	return p
 }
 
-func (p *AnthropicProvider) Name() string {
-	return "anthropic"
-}
-
-func (p *AnthropicProvider) SupportsTools() bool      { return true }
+func (p *AnthropicProvider) Name() string              { return "anthropic" }
+func (p *AnthropicProvider) Model() string             { return p.config.Model }
+func (p *AnthropicProvider) SupportsTools() bool       { return true }
 func (p *AnthropicProvider) SupportsMultimodal() bool { return true }
 func (p *AnthropicProvider) SupportsAudio() bool      { return false }
 

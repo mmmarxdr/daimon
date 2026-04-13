@@ -114,6 +114,7 @@ type blockingProvider struct {
 }
 
 func (b *blockingProvider) Name() string                                    { return "blocking" }
+func (b *blockingProvider) Model() string                                   { return "mock-model" }
 func (b *blockingProvider) SupportsTools() bool                             { return false }
 func (b *blockingProvider) SupportsMultimodal() bool                        { return false }
 func (b *blockingProvider) SupportsAudio() bool                             { return false }

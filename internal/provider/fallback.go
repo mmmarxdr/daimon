@@ -35,6 +35,11 @@ func (f *FallbackProvider) Name() string {
 	return f.primary.Name() + "(" + f.fallback.Name() + ")"
 }
 
+// Model returns the primary provider's model ID.
+func (f *FallbackProvider) Model() string {
+	return f.primary.Model()
+}
+
 // SupportsTools returns true only if BOTH providers support tools.
 // Conservative intersection: if the fallback is activated mid-conversation and
 // doesn't support tools, an ongoing tool-calling loop would break.

@@ -534,6 +534,7 @@ func (e *echoTestTool) Execute(_ context.Context, params json.RawMessage) (tool.
 type mockFullProvider struct{}
 
 func (m *mockFullProvider) Name() string             { return "mock" }
+func (m *mockFullProvider) Model() string            { return "mock-model" }
 func (m *mockFullProvider) SupportsTools() bool      { return false }
 func (m *mockFullProvider) SupportsMultimodal() bool { return false }
 func (m *mockFullProvider) SupportsAudio() bool      { return false }
@@ -729,6 +730,7 @@ type multimodalMockProvider struct {
 }
 
 func (m *multimodalMockProvider) Name() string        { return "multimodal-mock" }
+func (m *multimodalMockProvider) Model() string       { return "mock-model" }
 func (m *multimodalMockProvider) SupportsTools() bool { return false }
 func (m *multimodalMockProvider) SupportsMultimodal() bool {
 	return m.supportsMultimodal

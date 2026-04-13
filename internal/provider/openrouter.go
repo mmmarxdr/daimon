@@ -133,6 +133,7 @@ func NewOpenRouterProvider(cfg config.ProviderConfig) *OpenRouterProvider {
 // --------------------------------------------------------------------------
 
 func (p *OpenRouterProvider) Name() string             { return "openrouter" }
+func (p *OpenRouterProvider) Model() string            { return p.config.Model }
 func (p *OpenRouterProvider) SupportsTools() bool      { return true }
 func (p *OpenRouterProvider) SupportsMultimodal() bool { return true }
 func (p *OpenRouterProvider) SupportsAudio() bool      { return true }
