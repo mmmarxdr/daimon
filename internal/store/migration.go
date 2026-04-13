@@ -40,16 +40,18 @@ CREATE TABLE IF NOT EXISTS secrets (
 );
 
 CREATE TABLE IF NOT EXISTS cron_jobs (
-	id             TEXT PRIMARY KEY,
-	schedule       TEXT NOT NULL,
-	schedule_human TEXT NOT NULL,
-	prompt         TEXT NOT NULL,
-	channel_id     TEXT NOT NULL,
-	description    TEXT NOT NULL DEFAULT '',
-	enabled        INTEGER NOT NULL DEFAULT 1,
-	created_at     INTEGER NOT NULL,
-	last_run_at    INTEGER,
-	next_run_at    INTEGER
+	id                   TEXT PRIMARY KEY,
+	schedule             TEXT NOT NULL,
+	schedule_human       TEXT NOT NULL,
+	prompt               TEXT NOT NULL,
+	channel_id           TEXT NOT NULL,
+	description          TEXT NOT NULL DEFAULT '',
+	enabled              INTEGER NOT NULL DEFAULT 1,
+	created_at           INTEGER NOT NULL,
+	last_run_at          INTEGER,
+	next_run_at          INTEGER,
+	notify_channel       TEXT NOT NULL DEFAULT '',
+	notify_on_completion INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS cron_results (
@@ -118,6 +120,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 	if version < 6 {
 		if err := s.migrateV6(); err != nil {
 			return fmt.Errorf("migration v6: %w", err)
+		}
+	}
+	if version < 7 {
+		if err := s.migrateV7(); err != nil {
+			return fmt.Errorf("migration v7: %w", err)
 		}
 	}
 
@@ -331,6 +338,55 @@ func (s *SQLiteStore) migrateV6() error {
 		return fmt.Errorf("updating schema version to 6: %w", err)
 	}
 
+	return tx.Commit()
+}
+
+// migrateV7 adds per-job notification fields to cron_jobs.
+// Idempotent: checks for column existence before ALTER TABLE.
+// Advances schema_version to 7.
+func (s *SQLiteStore) migrateV7() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Check which columns already exist (guard for edge cases).
+	rows, err := tx.Query(`PRAGMA table_info(cron_jobs)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for cron_jobs: %w", err)
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !existing["notify_channel"] {
+		if _, err := tx.Exec(`ALTER TABLE cron_jobs ADD COLUMN notify_channel TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("adding notify_channel column: %w", err)
+		}
+	}
+	if !existing["notify_on_completion"] {
+		if _, err := tx.Exec(`ALTER TABLE cron_jobs ADD COLUMN notify_on_completion INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("adding notify_on_completion column: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 7"); err != nil {
+		return fmt.Errorf("updating schema version to 7: %w", err)
+	}
 	return tx.Commit()
 }
 

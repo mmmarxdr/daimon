@@ -11,6 +11,7 @@ import (
 
 	"microagent/internal/channel"
 	"microagent/internal/content"
+	"microagent/internal/notify"
 	"microagent/internal/store"
 )
 
@@ -45,6 +46,7 @@ type Scheduler struct {
 	mu            sync.Mutex
 	retentionDays int
 	maxPerJob     int
+	bus           notify.Bus
 }
 
 // NewScheduler constructs a Scheduler. If tz is nil, time.UTC is used.
@@ -59,6 +61,13 @@ func NewScheduler(cronStore store.CronStore, tz *time.Location, retentionDays, m
 		retentionDays: retentionDays,
 		maxPerJob:     maxPerJob,
 	}
+}
+
+// WithBus sets the event bus on the scheduler, enabling cron.job.fired events.
+// Returns the scheduler for fluent chaining.
+func (s *Scheduler) WithBus(bus notify.Bus) *Scheduler {
+	s.bus = bus
+	return s
 }
 
 // Start saves the inbox reference, loads all enabled jobs from the store, registers
@@ -198,6 +207,17 @@ func (s *Scheduler) fireJob(job store.CronJob) {
 	case s.inbox <- msg:
 	default:
 		slog.Warn("cron: inbox full, dropping job fire", "job_id", job.ID)
+	}
+
+	if s.bus != nil {
+		s.bus.Emit(notify.Event{
+			Type:      notify.EventCronJobFired,
+			Origin:    notify.OriginCron,
+			JobID:     job.ID,
+			JobPrompt: job.Prompt,
+			ChannelID: job.ChannelID,
+			Timestamp: time.Now(),
+		})
 	}
 
 	// Update run times (best-effort).

@@ -76,6 +76,8 @@ type CronJob struct {
 	CreatedAt     time.Time
 	LastRunAt     *time.Time
 	NextRunAt     *time.Time
+	NotifyChannel      string `json:"notify_channel"`       // per-job notification channel override; empty = use rule default
+	NotifyOnCompletion bool   `json:"notify_on_completion"` // opt-in echo-back without needing a rule
 }
 
 // CronResult is the output of a single cron job execution.

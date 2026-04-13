@@ -8,6 +8,7 @@ import (
 	"microagent/internal/audit"
 	"microagent/internal/channel"
 	"microagent/internal/config"
+	"microagent/internal/notify"
 	"microagent/internal/provider"
 	"microagent/internal/skill"
 	"microagent/internal/store"
@@ -93,6 +94,7 @@ type Agent struct {
 	startedAt       time.Time
 	inbox           chan channel.IncomingMessage
 	channelName     string
+	bus             notify.Bus
 }
 
 func New(
@@ -189,6 +191,13 @@ func (a *Agent) WithMediaConfig(cfg config.MediaConfig) *Agent {
 	return a
 }
 
+// WithBus sets the event bus on the agent, enabling agent.turn.started/completed events.
+// Returns a for fluent chaining.
+func (a *Agent) WithBus(bus notify.Bus) *Agent {
+	a.bus = bus
+	return a
+}
+
 func (a *Agent) Run(ctx context.Context) error {
 	a.startedAt = time.Now()
 	inbox := make(chan channel.IncomingMessage, 100)
@@ -249,6 +258,11 @@ func truncate(s string, n int) string {
 }
 
 func (a *Agent) Shutdown() error {
+	// Close the bus first — drains pending events while the mux can still deliver.
+	if a.bus != nil {
+		a.bus.Close()
+	}
+
 	// Stop the channel first — no more messages will be enqueued after this.
 	err := a.channel.Stop()
 

@@ -23,6 +23,7 @@ import (
 	"microagent/internal/config"
 	cronpkg "microagent/internal/cron"
 	"microagent/internal/mcp"
+	"microagent/internal/notify"
 	"microagent/internal/provider"
 	"microagent/internal/setup"
 	"microagent/internal/skill"
@@ -400,10 +401,13 @@ func main() {
 
 	// Build cron subsystem if enabled.
 	var cronScheduler cronpkg.SchedulerIface
+	var concreteScheduler *cronpkg.Scheduler
+	var cronChannelRef *cronpkg.CronChannel
 	if cfg.Cron.Enabled {
 		tz, _ := time.LoadLocation(cfg.Cron.Timezone)
 		scheduler := cronpkg.NewScheduler(cronSt, tz, cfg.Cron.RetentionDays, cfg.Cron.MaxResultsPerJob)
 		cronScheduler = scheduler
+		concreteScheduler = scheduler
 
 		// origSender delivers cron results back to the user's real channel.
 		// It's nil-safe: if channels is empty (daemon mode), Send is skipped by CronChannel.
@@ -414,6 +418,7 @@ func main() {
 		}
 
 		cronChannel := cronpkg.NewCronChannel(scheduler, cronSt, origSender, cfg.Cron.NotifyOnCompletion)
+		cronChannelRef = cronChannel
 		channels = append(channels, cronChannel)
 
 		// Merge cron tools into registry.
@@ -432,7 +437,38 @@ func main() {
 
 	mux := channel.NewMultiplexChannel(channels)
 
+	// Notification system (optional).
+	var notifyBus notify.Bus
+	if cfg.Notifications.Enabled && len(cfg.Notifications.Rules) > 0 {
+		bus := notify.NewEventBus(
+			cfg.Notifications.BusBufferSize,
+			cfg.Notifications.MaxPerMinute,
+			time.Duration(cfg.Notifications.HandlerTimeoutSec)*time.Second,
+		)
+		sender := notify.NewNotificationSender(mux, auditor, bus)
+		engine, err := notify.NewRulesEngine(cfg.Notifications.Rules, sender)
+		if err != nil {
+			slog.Error("notifications: failed to create rules engine", "error", err)
+		} else {
+			bus.Subscribe(engine.Handle)
+			for _, rule := range cfg.Notifications.Rules {
+				if !notify.KnownEventTypes[rule.EventType] {
+					slog.Warn("notify: rule references unknown event type", "rule", rule.Name, "event_type", rule.EventType)
+				}
+			}
+			notifyBus = bus
+			slog.Info("notifications enabled", "rules", len(cfg.Notifications.Rules))
+		}
+	}
+	if concreteScheduler != nil {
+		concreteScheduler.WithBus(notifyBus)
+	}
+	if cronChannelRef != nil {
+		cronChannelRef.WithBus(notifyBus)
+	}
+
 	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream)).
+		WithBus(notifyBus).
 		WithCronCommands(cronScheduler, cronSt)
 
 	// Start web dashboard if enabled in config or via --web flag.
@@ -453,6 +489,7 @@ func main() {
 		mux = channel.NewMultiplexChannel(channels)
 		// Rebuild the agent with the updated mux (WebChannel included).
 		ag = agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream)).
+			WithBus(notifyBus).
 			WithCronCommands(cronScheduler, cronSt)
 
 		// Type-assert provider to ModelLister if supported.

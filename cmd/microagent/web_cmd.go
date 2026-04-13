@@ -16,6 +16,7 @@ import (
 	"microagent/internal/config"
 	cronpkg "microagent/internal/cron"
 	"microagent/internal/mcp"
+	"microagent/internal/notify"
 	"microagent/internal/provider"
 	"microagent/internal/skill"
 	"microagent/internal/store"
@@ -185,8 +186,42 @@ func runWebCommand(args []string, cfgPath string) error {
 	var channels []channel.Channel
 	channels = append(channels, webCh)
 
+	// Also start the configured messaging channel (Telegram, Discord, etc.)
+	// so notifications and cron results can be delivered there.
+	switch cfg.Channel.Type {
+	case "telegram":
+		mediaStore, _ := st.(store.MediaStore)
+		tg, err := channel.NewTelegramChannel(cfg.Channel, cfg.Media, mediaStore)
+		if err != nil {
+			slog.Warn("web: failed to start telegram channel", "error", err)
+		} else {
+			channels = append(channels, tg)
+			slog.Info("telegram channel started alongside web dashboard")
+		}
+	case "discord":
+		mediaStore, _ := st.(store.MediaStore)
+		d, err := channel.NewDiscordChannel(cfg.Channel, cfg.Media, mediaStore)
+		if err != nil {
+			slog.Warn("web: failed to start discord channel", "error", err)
+		} else {
+			channels = append(channels, d)
+			slog.Info("discord channel started alongside web dashboard")
+		}
+	case "whatsapp":
+		mediaStore, _ := st.(store.MediaStore)
+		wa, err := channel.NewWhatsAppChannel(cfg.Channel, cfg.Media, mediaStore)
+		if err != nil {
+			slog.Warn("web: failed to start whatsapp channel", "error", err)
+		} else {
+			channels = append(channels, wa)
+			slog.Info("whatsapp channel started alongside web dashboard")
+		}
+	}
+
 	// ---- Cron (optional) ----
 	var cronScheduler cronpkg.SchedulerIface
+	var concreteScheduler *cronpkg.Scheduler
+	var cronChannelRef *cronpkg.CronChannel
 	var cronSt store.CronStore
 	if cfg.Cron.Enabled {
 		cs, ok := st.(store.CronStore)
@@ -197,8 +232,10 @@ func runWebCommand(args []string, cfgPath string) error {
 		tz, _ := time.LoadLocation(cfg.Cron.Timezone)
 		scheduler := cronpkg.NewScheduler(cs, tz, cfg.Cron.RetentionDays, cfg.Cron.MaxResultsPerJob)
 		cronScheduler = scheduler
+		concreteScheduler = scheduler
 
 		cronChannel := cronpkg.NewCronChannel(scheduler, cs, webCh.Send, cfg.Cron.NotifyOnCompletion)
+		cronChannelRef = cronChannel
 		channels = append(channels, cronChannel)
 
 		cronTools := tool.BuildCronTools(scheduler, cs, toolsRegistry, prov)
@@ -211,11 +248,41 @@ func runWebCommand(args []string, cfgPath string) error {
 
 	mux := channel.NewMultiplexChannel(channels)
 
+	// Notification system (optional).
+	var notifyBus notify.Bus
+	if cfg.Notifications.Enabled && len(cfg.Notifications.Rules) > 0 {
+		bus := notify.NewEventBus(
+			cfg.Notifications.BusBufferSize,
+			cfg.Notifications.MaxPerMinute,
+			time.Duration(cfg.Notifications.HandlerTimeoutSec)*time.Second,
+		)
+		sender := notify.NewNotificationSender(mux, aud, bus)
+		engine, err := notify.NewRulesEngine(cfg.Notifications.Rules, sender)
+		if err != nil {
+			slog.Error("notifications: failed to create rules engine", "error", err)
+		} else {
+			bus.Subscribe(engine.Handle)
+			for _, rule := range cfg.Notifications.Rules {
+				if !notify.KnownEventTypes[rule.EventType] {
+					slog.Warn("notify: rule references unknown event type", "rule", rule.Name, "event_type", rule.EventType)
+				}
+			}
+			notifyBus = bus
+			slog.Info("notifications enabled", "rules", len(cfg.Notifications.Rules))
+		}
+	}
+	if concreteScheduler != nil {
+		concreteScheduler.WithBus(notifyBus)
+	}
+	if cronChannelRef != nil {
+		cronChannelRef.WithBus(notifyBus)
+	}
+
 	ag := agent.New(
 		cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, aud,
 		toolsRegistry, autoloadSkills, skillIndex,
 		cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream),
-	).WithCronCommands(cronScheduler, cronSt)
+	).WithBus(notifyBus).WithCronCommands(cronScheduler, cronSt)
 
 	// ---- Web server ----
 	var ml provider.ModelLister

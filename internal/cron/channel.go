@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"microagent/internal/channel"
+	"microagent/internal/notify"
 	"microagent/internal/store"
 )
 
@@ -27,6 +28,7 @@ type CronChannel struct {
 	cronStore          store.CronStore
 	origSender         OriginalSender
 	notifyOnCompletion bool
+	bus                notify.Bus
 }
 
 // NewCronChannel creates a CronChannel.
@@ -39,6 +41,12 @@ func NewCronChannel(scheduler SchedulerIface, cronStore store.CronStore, origSen
 		origSender:         origSender,
 		notifyOnCompletion: notifyOnCompletion,
 	}
+}
+
+// WithBus sets the event bus on the CronChannel, enabling cron.job.completed/failed events.
+func (c *CronChannel) WithBus(bus notify.Bus) *CronChannel {
+	c.bus = bus
+	return c
 }
 
 // Name returns "cron".
@@ -89,6 +97,25 @@ func (c *CronChannel) Send(ctx context.Context, msg channel.OutgoingMessage) err
 			slog.Warn("cron: could not look up job for origSender", "job_id", jobID, "err", err)
 			return nil
 		}
+
+		if c.bus != nil {
+			evType := notify.EventCronJobCompleted
+			var errText string
+			if isError {
+				evType = notify.EventCronJobFailed
+				errText = msg.Text
+			}
+			c.bus.Emit(notify.Event{
+				Type:      evType,
+				Origin:    notify.OriginCron,
+				JobID:     jobID,
+				ChannelID: job.ChannelID,
+				Text:      msg.Text,
+				Error:     errText,
+				Timestamp: time.Now(),
+			})
+		}
+
 		if job.ChannelID != "" {
 			text := c.formatForwardText(msg.Text, job.Prompt, isError)
 			fwdMsg := channel.OutgoingMessage{
