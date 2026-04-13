@@ -470,6 +470,7 @@ func main() {
 	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream)).
 		WithBus(notifyBus).
 		WithCronCommands(cronScheduler, cronSt)
+	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 
 	// Start web dashboard if enabled in config or via --web flag.
 	if cfg.Web.Enabled || *webFlag {
@@ -491,6 +492,7 @@ func main() {
 		ag = agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream)).
 			WithBus(notifyBus).
 			WithCronCommands(cronScheduler, cronSt)
+		wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 
 		// Type-assert provider to ModelLister if supported.
 		var ml provider.ModelLister

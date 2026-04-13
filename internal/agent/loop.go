@@ -263,23 +263,43 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				Content: content.TextBlock(resp.Content),
 			})
 			if resp.Content != "" {
-				entry := store.MemoryEntry{
-					ID:        uuid.New().String(),
-					ScopeID:   scope,
-					Content:   resp.Content,
-					Source:    convID,
-					CreatedAt: time.Now(),
-				}
-				if err := a.store.AppendMemory(ctx, scope, entry); err != nil {
-					slog.Warn("failed to append memory", "error", err)
-				} else {
-					slog.Debug("memory appended", "scope_id", scope)
-					if a.enricher != nil {
-						a.enricher.Enqueue(entry)
+				if a.curator != nil {
+					// Smart memory: Curator classifies, deduplicates, and selectively persists.
+					userText := msg.Content.TextOnly()
+					if curateErr := a.curator.Curate(ctx, scope, userText, resp.Content, convID); curateErr != nil {
+						slog.Warn("memory curation failed, falling back to raw save", "error", curateErr)
+						// Fallback: save unconditionally (legacy behaviour).
+						entry := store.MemoryEntry{
+							ID:         uuid.New().String(),
+							ScopeID:    scope,
+							Content:    resp.Content,
+							Source:     convID,
+							Importance: 5,
+							CreatedAt:  time.Now(),
+						}
+						_ = a.store.AppendMemory(ctx, scope, entry)
 					}
-					// Async embedding — fire and forget.
-					if a.embeddingWorker != nil {
-						a.embeddingWorker.Enqueue(entry.ID, scope, entry.Content)
+				} else {
+					// Legacy path: save every response unconditionally.
+					entry := store.MemoryEntry{
+						ID:         uuid.New().String(),
+						ScopeID:    scope,
+						Content:    resp.Content,
+						Source:     convID,
+						Importance: 5,
+						CreatedAt:  time.Now(),
+					}
+					if err := a.store.AppendMemory(ctx, scope, entry); err != nil {
+						slog.Warn("failed to append memory", "error", err)
+					} else {
+						slog.Debug("memory appended", "scope_id", scope)
+						if a.enricher != nil {
+							a.enricher.Enqueue(entry)
+						}
+						// Async embedding — fire and forget.
+						if a.embeddingWorker != nil {
+							a.embeddingWorker.Enqueue(entry.ID, scope, entry.Content)
+						}
 					}
 				}
 			}
@@ -335,6 +355,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 							toolTimeout = 30 * time.Second
 						}
 						toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
+						toolCtx = tool.WithScope(toolCtx, scope)
 						result, err = executeWithRecover(toolCtx, t, tc.Input)
 						tCancel()
 						if err != nil {

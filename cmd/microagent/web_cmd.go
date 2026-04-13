@@ -283,6 +283,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		toolsRegistry, autoloadSkills, skillIndex,
 		cfg.Cron.MaxConcurrent, config.BoolVal(cfg.Provider.Stream),
 	).WithBus(notifyBus).WithCronCommands(cronScheduler, cronSt)
+	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 
 	// ---- Web server ----
 	var ml provider.ModelLister

@@ -122,6 +122,75 @@ func TestBuildMemorySection_ZeroMaxContext_NoCapApplied(t *testing.T) {
 // TestFormatMemoryLine — topic/title/tag rendering
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// TestFormatMemoryLineSmart — smart format rendering
+// ---------------------------------------------------------------------------
+
+func TestFormatMemoryLineSmart_TypeAndTopic(t *testing.T) {
+	m := store.MemoryEntry{
+		Type:    "fact",
+		Topic:   "security",
+		Title:   "OAuth enabled",
+		Content: "OAuth 2.0 is enabled",
+		Tags:    []string{"auth"},
+	}
+	got := formatMemoryLineSmart(m)
+	if !strings.Contains(got, "[fact]") {
+		t.Errorf("expected [fact], got: %q", got)
+	}
+	if !strings.Contains(got, "[security]") {
+		t.Errorf("expected [security], got: %q", got)
+	}
+	if !strings.Contains(got, "OAuth enabled") {
+		t.Errorf("expected title 'OAuth enabled', got: %q", got)
+	}
+	if !strings.Contains(got, "OAuth 2.0 is enabled") {
+		t.Errorf("expected content, got: %q", got)
+	}
+	if !strings.Contains(got, "[tags: auth]") {
+		t.Errorf("expected [tags: auth], got: %q", got)
+	}
+}
+
+func TestFormatMemoryLineSmart_TopicOnly(t *testing.T) {
+	m := store.MemoryEntry{
+		Topic:   "database",
+		Content: "connection pool size is 10",
+	}
+	got := formatMemoryLineSmart(m)
+	if !strings.Contains(got, "[database]") {
+		t.Errorf("expected [database], got: %q", got)
+	}
+	if strings.Contains(got, "[type]") || strings.Contains(got, "[]") {
+		t.Errorf("unexpected type bracket when Type is empty, got: %q", got)
+	}
+}
+
+func TestFormatMemoryLineSmart_TypeOnly(t *testing.T) {
+	m := store.MemoryEntry{
+		Type:    "preference",
+		Content: "user prefers dark mode",
+	}
+	got := formatMemoryLineSmart(m)
+	if !strings.Contains(got, "[preference]") {
+		t.Errorf("expected [preference], got: %q", got)
+	}
+	if strings.Contains(got, "[]") {
+		t.Errorf("unexpected empty bracket, got: %q", got)
+	}
+}
+
+func TestFormatMemoryLineSmart_NoTypeNoTopic(t *testing.T) {
+	m := store.MemoryEntry{
+		Content: "plain memory",
+	}
+	got := formatMemoryLineSmart(m)
+	expected := "- plain memory\n"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
 func TestFormatMemoryLine_WithTitleAndTags(t *testing.T) {
 	m := store.MemoryEntry{
 		Title:   "OAuth Setup",
@@ -195,19 +264,161 @@ func TestFormatMemoryLine_EmptyTags_NotRendered(t *testing.T) {
 	}
 }
 
-func TestBuildMemorySection_UsesFormatMemoryLine(t *testing.T) {
-	// buildMemorySection should use formatMemoryLine, so title+tags appear in output.
+func TestBuildMemorySection_UsesFormatMemoryLineSmart(t *testing.T) {
+	// buildMemorySection uses formatMemoryLineSmart; type+topic appear in brackets,
+	// title is shown as "title — content", tags still rendered.
 	entries := []store.MemoryEntry{
-		{Title: "My Title", Content: "enriched content", Tags: []string{"tag1", "tag2"}},
+		{Type: "fact", Topic: "auth", Title: "My Title", Content: "enriched content", Tags: []string{"tag1", "tag2"}},
 	}
 	result := buildMemorySection(entries, 100000)
-	if !strings.Contains(result, "[My Title]") {
-		t.Errorf("expected [My Title] in memory section, got: %s", result)
+	if !strings.Contains(result, "[fact]") {
+		t.Errorf("expected [fact] in memory section, got: %s", result)
+	}
+	if !strings.Contains(result, "[auth]") {
+		t.Errorf("expected [auth] in memory section, got: %s", result)
+	}
+	if !strings.Contains(result, "My Title") {
+		t.Errorf("expected 'My Title' in memory section, got: %s", result)
 	}
 	if !strings.Contains(result, "[tags: tag1, tag2]") {
 		t.Errorf("expected [tags: tag1, tag2] in memory section, got: %s", result)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Smart Retrieval tests (Phase 4 — T4.2)
+// ---------------------------------------------------------------------------
+
+func TestBuildMemorySection_ScoringOrder(t *testing.T) {
+	// Verify that importance can overcome a small search-rank disadvantage.
+	//
+	// Score formula: searchRank*0.6 + importance_norm*0.3 + recency*0.1
+	//
+	// With N=10 entries, adjacent positions differ by searchRank 0.1.
+	// So importance difference of 3+ (out of 10) is sufficient to flip the order.
+	//
+	// We put lowImp at index 0 (searchRank=1.0) and highImp at index 1 (searchRank=0.9):
+	//   lowImp:  1.0*0.6 + (1/10)*0.3 = 0.60 + 0.03 = 0.63
+	//   highImp: 0.9*0.6 + (10/10)*0.3 = 0.54 + 0.30 = 0.84  ← wins
+	//
+	// Padding entries are neutral (Importance=5) and have different Content so
+	// we can tell them apart.
+	now := time.Now()
+	entries := make([]store.MemoryEntry, 10)
+	// index 0: low importance (Importance=1)
+	entries[0] = store.MemoryEntry{ID: "low", Content: "low importance content", Importance: 1, CreatedAt: now}
+	// index 1: high importance (Importance=10)
+	entries[1] = store.MemoryEntry{ID: "high", Content: "high importance content", Importance: 10, CreatedAt: now}
+	// fill the rest with neutral padding
+	for i := 2; i < 10; i++ {
+		entries[i] = store.MemoryEntry{
+			ID:         fmt.Sprintf("pad-%d", i),
+			Content:    fmt.Sprintf("padding entry %d", i),
+			Importance: 5,
+			CreatedAt:  now,
+		}
+	}
+
+	result := buildMemorySection(entries, 100000)
+
+	lowPos := strings.Index(result, "low importance content")
+	highPos := strings.Index(result, "high importance content")
+	if lowPos == -1 || highPos == -1 {
+		t.Fatalf("expected both entries in output, got: %s", result)
+	}
+	if highPos > lowPos {
+		t.Errorf("expected high importance entry before low importance entry; highPos=%d, lowPos=%d\noutput:\n%s",
+			highPos, lowPos, result)
+	}
+}
+
+func TestBuildMemorySection_TopicDiversity(t *testing.T) {
+	// 6 entries with the same topic — only 3 should appear in output.
+	entries := make([]store.MemoryEntry, 6)
+	for i := range entries {
+		entries[i] = store.MemoryEntry{
+			ID:         fmt.Sprintf("entry-%d", i),
+			Topic:      "golang",
+			Content:    fmt.Sprintf("content about golang number %d", i),
+			Importance: 5,
+			CreatedAt:  time.Now(),
+		}
+	}
+	result := buildMemorySection(entries, 100000)
+
+	count := strings.Count(result, "content about golang number")
+	if count != 3 {
+		t.Errorf("expected exactly 3 entries for topic 'golang' (diversity cap), got %d\noutput:\n%s", count, result)
+	}
+}
+
+func TestBuildMemorySection_EmptyTopicNoCap(t *testing.T) {
+	// 6 entries with empty topic — all 6 should appear (no cap for uncategorized).
+	entries := make([]store.MemoryEntry, 6)
+	for i := range entries {
+		entries[i] = store.MemoryEntry{
+			ID:         fmt.Sprintf("uncapped-%d", i),
+			Topic:      "", // no topic
+			Content:    fmt.Sprintf("uncapped content %d", i),
+			Importance: 5,
+			CreatedAt:  time.Now(),
+		}
+	}
+	result := buildMemorySection(entries, 100000)
+
+	count := strings.Count(result, "uncapped content")
+	if count != 6 {
+		t.Errorf("expected 6 uncapped entries (empty topic = no cap), got %d\noutput:\n%s", count, result)
+	}
+}
+
+func TestBuildMemorySection_FormatWithTypeAndTopic(t *testing.T) {
+	// Entry with Type and Topic should format as "- [type] [topic] title — content [tags: ...]".
+	entries := []store.MemoryEntry{
+		{
+			Type:      "decision",
+			Topic:     "architecture",
+			Title:     "Use SQLite",
+			Content:   "We chose SQLite for simplicity",
+			Tags:      []string{"db", "storage"},
+			CreatedAt: time.Now(),
+		},
+	}
+	result := buildMemorySection(entries, 100000)
+
+	checks := []string{"[decision]", "[architecture]", "Use SQLite", "We chose SQLite", "[tags: db, storage]"}
+	for _, want := range checks {
+		if !strings.Contains(result, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, result)
+		}
+	}
+}
+
+func TestBuildMemorySection_BudgetRespected(t *testing.T) {
+	// Large entries should stop being added when budget is exhausted.
+	// Each entry ~25 tokens (100 chars). Budget = 200 * 15 / 100 = 30 tokens.
+	longContent := strings.Repeat("y", 100)
+	entries := make([]store.MemoryEntry, 10)
+	for i := range entries {
+		entries[i] = store.MemoryEntry{
+			Content:   longContent,
+			CreatedAt: time.Now(),
+		}
+	}
+	result := buildMemorySection(entries, 200) // budget=30 tokens
+	if !strings.Contains(result, "more memory entries omitted") {
+		t.Error("expected omission note when budget exceeded")
+	}
+}
+
+func TestBuildMemorySection_EmptyInput(t *testing.T) {
+	result := buildMemorySection([]store.MemoryEntry{}, 100000)
+	if result != "" {
+		t.Errorf("expected empty string for empty input, got: %q", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
 
 func TestBuildContext_MemoryBudgetCap_IntegratedViaBuildContext(t *testing.T) {
 	// Verify that buildContext uses the budget cap via integration:

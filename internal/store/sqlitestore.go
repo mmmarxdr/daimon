@@ -340,11 +340,15 @@ func (s *SQLiteStore) AppendMemory(ctx context.Context, scopeID string, entry Me
 		return fmt.Errorf("marshalling tags: %w", err)
 	}
 
+	importance := entry.Importance
+	if importance == 0 {
+		importance = 5
+	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO memory (id, scope_id, topic, type, title, content, tags, source, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO memory (id, scope_id, topic, type, title, content, tags, source, created_at, importance)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, scopeID, entry.Topic, entry.Type, entry.Title,
-		entry.Content, string(tagsJSON), entry.Source, entry.CreatedAt,
+		entry.Content, string(tagsJSON), entry.Source, entry.CreatedAt, importance,
 	)
 	if err != nil {
 		return fmt.Errorf("appending memory entry %s: %w", entry.ID, err)
@@ -368,7 +372,7 @@ func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
 			&entry.ID, &entry.ScopeID, &entry.Topic, &entry.Type, &entry.Title,
 			&entry.Content, &tagsJSON, &entry.Source, &entry.CreatedAt,
 			&entry.AccessCount, &entry.LastAccessedAt, &entry.ArchivedAt,
-			&entry.Embedding,
+			&entry.Embedding, &entry.Importance,
 		); err != nil {
 			return nil, fmt.Errorf("scanning memory row: %w", err)
 		}
@@ -415,9 +419,9 @@ func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query st
 	// Includes v2 columns (access_count, last_accessed_at, archived_at) and
 	// the v3 embedding BLOB column.
 	const memCols = `id, scope_id, topic, type, title, content, tags, source, created_at,
-	                 access_count, last_accessed_at, archived_at, embedding`
+	                 access_count, last_accessed_at, archived_at, embedding, importance`
 	const memColsM = `m.id, m.scope_id, m.topic, m.type, m.title, m.content, m.tags, m.source, m.created_at,
-	                  m.access_count, m.last_accessed_at, m.archived_at, m.embedding`
+	                  m.access_count, m.last_accessed_at, m.archived_at, m.embedding, m.importance`
 
 	// ftsLimit is how many candidates to fetch for potential embedding reranking.
 	// We fetch more than the user-requested limit to have a meaningful shortlist.
@@ -596,9 +600,10 @@ func (s *SQLiteStore) updateAccessCounts(ctx context.Context, entries []MemoryEn
 	}
 }
 
-// UpdateMemory updates topic, type, title, tags, and content of an existing
-// memory entry identified by entry.ID within scopeID. The FTS5 memory_au
-// trigger automatically re-indexes the FTS table after the UPDATE.
+// UpdateMemory updates topic, type, title, tags, content, importance, and
+// archived_at of an existing memory entry identified by entry.ID within
+// scopeID. The FTS5 memory_au trigger automatically re-indexes the FTS table
+// after the UPDATE.
 // Returns nil if no row matched (the caller cannot distinguish "not found"
 // from "no-op update" — this is by design to keep the interface simple).
 func (s *SQLiteStore) UpdateMemory(ctx context.Context, scopeID string, entry MemoryEntry) error {
@@ -607,15 +612,57 @@ func (s *SQLiteStore) UpdateMemory(ctx context.Context, scopeID string, entry Me
 		return fmt.Errorf("marshalling tags: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE memory SET topic = ?, type = ?, title = ?, tags = ?, content = ?
+		`UPDATE memory SET topic = ?, type = ?, title = ?, tags = ?, content = ?, importance = ?, archived_at = ?
 		 WHERE id = ? AND scope_id = ?`,
-		entry.Topic, entry.Type, entry.Title, string(tagsJSON), entry.Content,
+		entry.Topic, entry.Type, entry.Title, string(tagsJSON), entry.Content, entry.Importance, entry.ArchivedAt,
 		entry.ID, scopeID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating memory entry %s: %w", entry.ID, err)
 	}
 	return nil
+}
+
+// ListMemoryScopes returns all distinct scope_ids that have at least one
+// non-archived memory entry. Used by the Consolidator to enumerate scopes.
+func (s *SQLiteStore) ListMemoryScopes(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT scope_id FROM memory WHERE archived_at IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("listing memory scopes: %w", err)
+	}
+	defer rows.Close()
+
+	var scopes []string
+	for rows.Next() {
+		var scope string
+		if err := rows.Scan(&scope); err != nil {
+			return nil, fmt.Errorf("scanning scope row: %w", err)
+		}
+		scopes = append(scopes, scope)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating scope rows: %w", err)
+	}
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return scopes, nil
+}
+
+// HasEmbedQueryFunc reports whether an embedding function has been registered.
+// Used by the Curator to determine whether cosine similarity deduplication is available.
+func (s *SQLiteStore) HasEmbedQueryFunc() bool {
+	return s.embedQueryFunc != nil
+}
+
+// EmbedQuery generates an embedding for the given text using the registered
+// embedding function. Returns an error if no embedding function is registered.
+func (s *SQLiteStore) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	if s.embedQueryFunc == nil {
+		return nil, fmt.Errorf("embedding not configured")
+	}
+	return s.embedQueryFunc(ctx, text)
 }
 
 // ─── OutputStore implementation ───────────────────────────────────────────────

@@ -90,6 +90,8 @@ type Agent struct {
 	enricher        *Enricher        // async tag enrichment worker; nil when disabled
 	embeddingWorker *EmbeddingWorker // async embedding worker; nil when disabled
 	indexWorker     *IndexingWorker  // async output indexing worker; nil when disabled
+	curator         *Curator         // smart memory curation; nil when disabled
+	consolidator    *Consolidator    // background memory consolidation; nil when disabled
 	commands        *CommandRegistry
 	startedAt       time.Time
 	inbox           chan channel.IncomingMessage
@@ -198,6 +200,18 @@ func (a *Agent) WithBus(bus notify.Bus) *Agent {
 	return a
 }
 
+// WithCurator sets the Curator on the agent. Call after New(), before Run().
+func (a *Agent) WithCurator(c *Curator) { a.curator = c }
+
+// WithConsolidator sets the Consolidator on the agent. Call after New(), before Run().
+func (a *Agent) WithConsolidator(c *Consolidator) { a.consolidator = c }
+
+// Enricher returns the agent's async enrichment worker. May be nil.
+func (a *Agent) Enricher() *Enricher { return a.enricher }
+
+// EmbeddingWorker returns the agent's async embedding worker. May be nil.
+func (a *Agent) EmbeddingWorker() *EmbeddingWorker { return a.embeddingWorker }
+
 func (a *Agent) Run(ctx context.Context) error {
 	a.startedAt = time.Now()
 	inbox := make(chan channel.IncomingMessage, 100)
@@ -213,6 +227,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	if a.embeddingWorker != nil {
 		a.embeddingWorker.Start(ctx)
+	}
+	if a.consolidator != nil {
+		a.consolidator.Start(ctx)
 	}
 	// indexWorker is started in New() — no need to start here.
 	a.startPruningLoop(ctx)
@@ -272,6 +289,9 @@ func (a *Agent) Shutdown() error {
 	}
 
 	// Stop remaining background workers.
+	if a.consolidator != nil {
+		a.consolidator.Stop()
+	}
 	if a.enricher != nil {
 		a.enricher.Stop()
 	}

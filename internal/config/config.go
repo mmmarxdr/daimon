@@ -116,6 +116,38 @@ type AgentConfig struct {
 
 	// Native context-mode — token optimization for tool outputs.
 	ContextMode ContextModeConfig `yaml:"context_mode" json:"context_mode"`
+
+	// Smart memory — curation, deduplication, and consolidation.
+	Memory MemoryConfig `yaml:"memory" json:"memory"`
+}
+
+// MemoryConfig is the top-level smart-memory configuration block.
+type MemoryConfig struct {
+	Curation      MemoryCurationConfig `yaml:"curation"      json:"curation"`
+	Deduplication DeduplicationConfig  `yaml:"deduplication" json:"deduplication"`
+	Consolidation ConsolidationConfig  `yaml:"consolidation" json:"consolidation"`
+}
+
+// MemoryCurationConfig controls the Curator's filtering behaviour.
+type MemoryCurationConfig struct {
+	Enabled          bool `yaml:"enabled"            json:"enabled"`
+	MinImportance    int  `yaml:"min_importance"     json:"min_importance"`
+	MinResponseChars int  `yaml:"min_response_chars" json:"min_response_chars"`
+}
+
+// DeduplicationConfig controls near-duplicate detection in the Curator.
+type DeduplicationConfig struct {
+	Enabled         bool    `yaml:"enabled"          json:"enabled"`
+	CosineThreshold float64 `yaml:"cosine_threshold" json:"cosine_threshold"`
+	MaxCandidates   int     `yaml:"max_candidates"   json:"max_candidates"`
+}
+
+// ConsolidationConfig controls the background Consolidator worker.
+type ConsolidationConfig struct {
+	Enabled            bool `yaml:"enabled"      json:"enabled"`
+	IntervalHours      int  `yaml:"interval_hours" json:"interval_hours"`
+	MinEntriesPerTopic int  `yaml:"min_entries"  json:"min_entries"`
+	KeepNewest         int  `yaml:"keep_newest"  json:"keep_newest"`
 }
 
 // FallbackConfig configures an optional secondary provider for resilience.
@@ -512,6 +544,9 @@ func (c *Config) applyDefaults() {
 		c.Agent.ContextMode.SandboxKeepLast = 10
 	}
 
+	// Smart memory defaults.
+	c.setMemoryDefaults()
+
 	// Notifications defaults.
 	if c.Notifications.MaxPerMinute == 0 {
 		c.Notifications.MaxPerMinute = 30
@@ -521,6 +556,47 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Notifications.HandlerTimeoutSec == 0 {
 		c.Notifications.HandlerTimeoutSec = 5
+	}
+}
+
+// setMemoryDefaults applies zero-value defaults for the smart-memory subsystem.
+// Called from applyDefaults(). All fields use zero-value sentinel (0 / false means
+// omitted → apply default) so explicit config values are always respected.
+func (c *Config) setMemoryDefaults() {
+	// Curation defaults.
+	if !c.Agent.Memory.Curation.Enabled {
+		c.Agent.Memory.Curation.Enabled = true
+	}
+	if c.Agent.Memory.Curation.MinImportance == 0 {
+		c.Agent.Memory.Curation.MinImportance = 5
+	}
+	if c.Agent.Memory.Curation.MinResponseChars == 0 {
+		c.Agent.Memory.Curation.MinResponseChars = 50
+	}
+
+	// Deduplication defaults.
+	if !c.Agent.Memory.Deduplication.Enabled {
+		c.Agent.Memory.Deduplication.Enabled = true
+	}
+	if c.Agent.Memory.Deduplication.CosineThreshold == 0 {
+		c.Agent.Memory.Deduplication.CosineThreshold = 0.85
+	}
+	if c.Agent.Memory.Deduplication.MaxCandidates == 0 {
+		c.Agent.Memory.Deduplication.MaxCandidates = 5
+	}
+
+	// Consolidation defaults.
+	if !c.Agent.Memory.Consolidation.Enabled {
+		c.Agent.Memory.Consolidation.Enabled = true
+	}
+	if c.Agent.Memory.Consolidation.IntervalHours == 0 {
+		c.Agent.Memory.Consolidation.IntervalHours = 24
+	}
+	if c.Agent.Memory.Consolidation.MinEntriesPerTopic == 0 {
+		c.Agent.Memory.Consolidation.MinEntriesPerTopic = 5
+	}
+	if c.Agent.Memory.Consolidation.KeepNewest == 0 {
+		c.Agent.Memory.Consolidation.KeepNewest = 3
 	}
 }
 
@@ -701,6 +777,27 @@ func (c *Config) validate() error {
 		}
 		if c.Agent.ContextMode.SandboxKeepLast < 0 {
 			return fmt.Errorf("agent.context_mode.sandbox_keep_last must not be negative")
+		}
+	}
+
+	// Smart memory validation.
+	if c.Agent.Memory.Curation.Enabled {
+		if c.Agent.Memory.Curation.MinImportance < 1 || c.Agent.Memory.Curation.MinImportance > 10 {
+			return fmt.Errorf("agent.memory.curation.min_importance must be between 1 and 10, got %d", c.Agent.Memory.Curation.MinImportance)
+		}
+	}
+	if c.Agent.Memory.Deduplication.Enabled {
+		if c.Agent.Memory.Deduplication.CosineThreshold < 0.5 || c.Agent.Memory.Deduplication.CosineThreshold > 1.0 {
+			return fmt.Errorf("agent.memory.deduplication.cosine_threshold must be between 0.5 and 1.0, got %g", c.Agent.Memory.Deduplication.CosineThreshold)
+		}
+	}
+	if c.Agent.Memory.Consolidation.Enabled {
+		if c.Agent.Memory.Consolidation.IntervalHours <= 0 {
+			return fmt.Errorf("agent.memory.consolidation.interval_hours must be positive")
+		}
+		if c.Agent.Memory.Consolidation.MinEntriesPerTopic <= c.Agent.Memory.Consolidation.KeepNewest {
+			return fmt.Errorf("agent.memory.consolidation.min_entries (%d) must be greater than keep_newest (%d)",
+				c.Agent.Memory.Consolidation.MinEntriesPerTopic, c.Agent.Memory.Consolidation.KeepNewest)
 		}
 	}
 

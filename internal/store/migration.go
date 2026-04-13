@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS memory (
 	content    TEXT NOT NULL,
 	tags       TEXT,
 	source     TEXT,
-	created_at DATETIME NOT NULL
+	created_at DATETIME NOT NULL,
+	importance INTEGER NOT NULL DEFAULT 5
 );
 
 CREATE TABLE IF NOT EXISTS secrets (
@@ -125,6 +126,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 	if version < 7 {
 		if err := s.migrateV7(); err != nil {
 			return fmt.Errorf("migration v7: %w", err)
+		}
+	}
+	if version < 8 {
+		if err := s.migrateV8(); err != nil {
+			return fmt.Errorf("migration v8: %w", err)
 		}
 	}
 
@@ -424,6 +430,56 @@ func (s *SQLiteStore) migrateV5() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 5"); err != nil {
 		return fmt.Errorf("updating schema version to 5: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV8 adds the importance column to the memory table.
+// New databases get the column via the base schema. Existing databases
+// get it via this migration. Advances schema_version to 8.
+//
+// Idempotent: checks for column existence via PRAGMA table_info before
+// issuing ALTER TABLE, so re-running on an already-migrated database is safe.
+func (s *SQLiteStore) migrateV8() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Check if importance column already exists.
+	rows, err := tx.Query(`PRAGMA table_info(memory)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for memory: %w", err)
+	}
+	hasImportance := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		if name == "importance" {
+			hasImportance = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !hasImportance {
+		if _, err := tx.Exec(`ALTER TABLE memory ADD COLUMN importance INTEGER NOT NULL DEFAULT 5`); err != nil {
+			return fmt.Errorf("adding importance column to memory: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 8"); err != nil {
+		return fmt.Errorf("updating schema version to 8: %w", err)
 	}
 
 	return tx.Commit()

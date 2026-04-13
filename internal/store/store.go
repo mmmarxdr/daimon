@@ -42,6 +42,10 @@ type MemoryEntry struct {
 	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
 	ArchivedAt     *time.Time `json:"archived_at,omitempty"`
 
+	// Importance is a 1–10 score assigned by the Curator during classification.
+	// Default value is 5 (neutral). Added in schema v8.
+	Importance int `json:"importance"`
+
 	// Embedding stores a 256-dimensional float32 vector serialized as
 	// little-endian binary (1,024 bytes). Added in schema v3.
 	// Not serialized to JSON — internal transport only.
