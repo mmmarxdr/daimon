@@ -321,21 +321,66 @@ A **fallback provider** can be configured under `provider.fallback` with the sam
 
 All file tools sandbox paths under `base_path`. Path traversal beyond the sandbox is rejected.
 
-`web_fetch` extracts readable content from HTML pages using go-readability and converts to Markdown. Falls back to [Jina Reader API](https://jina.ai/reader/) for JS-heavy pages when `jina_enabled: true`.
+### `web_fetch` — Smart Web Content Extraction
+
+`web_fetch` converts web pages to clean Markdown optimized for LLM consumption (~90% fewer tokens than raw HTML). It uses a **3-tier extraction strategy** that automatically escalates when needed:
+
+| Tier | Method | When used | Tokens |
+|------|--------|-----------|--------|
+| **1** | Local extraction (go-readability + html-to-markdown) | Default — works for most content-rich pages | ~2K for a news article |
+| **2** | [Jina Reader API](https://jina.ai/reader/) fallback | When Tier 1 extracts < 200 chars (JS-heavy pages) | ~2K |
+| **3** | Raw HTTP response | When `extract_content: false` is passed | Full page size |
+
+The tier used is returned in the tool's metadata (`tier: "1"`, `"2"`, or `"raw"`).
+
+**Configuration:**
+
+```yaml
+tools:
+  web_fetch:
+    enabled: true            # default: true
+    timeout: 20s             # default: 20s
+    max_response_size: 1MB   # default: 1MB
+    blocked_domains: []      # domain blocklist
+    jina_enabled: true       # enables Tier 2 fallback (default: false)
+    jina_api_key: ""         # optional — or set MICROAGENT_JINA_API_KEY env var
+```
+
+**Examples to try with the agent:**
+
+- **Tier 1** (static content): *"Fetch and summarize https://en.wikipedia.org/wiki/Buenos_Aires"*
+- **Tier 2** (JS-heavy, needs Jina): *"Fetch https://www.google.com/search?q=microagent+ai"*
+- **Tier 3** (raw HTML): *"Fetch https://httpbin.org/html with extract_content false"*
+
+> **Note:** Some sites (X/Twitter, LinkedIn) actively block automated access. Neither Tier 1 nor Tier 2 can bypass authentication walls.
 
 ---
 
 ## Integrations (MCP)
 
-MCP (Model Context Protocol) lets the agent connect to external services at runtime — no code changes required. MCP servers run as subprocesses or HTTP endpoints.
+MCP (Model Context Protocol) lets the agent connect to external services at runtime — no code changes required. MCP servers run as subprocesses (stdio) or HTTP endpoints.
 
-**Requirements for MCP servers**: Most community servers need **Node.js >= 18** (for `npx`). Some use Python. The agent itself does not require Node — only the MCP servers do.
+**Requirements**: Most MCP servers need **Node.js >= 18** (for `npx`). Some use Python. The agent itself does not require Node.
 
-### Quick example: Gmail
+### How MCP works
+
+1. You add an MCP server to your config (`tools.mcp.servers[]`)
+2. On startup, micro-claw connects to each server and discovers its tools
+3. Tools are registered alongside built-ins — the LLM can call them like any other tool
+4. Use `prefix_tools: true` to namespace tool names (recommended with multiple servers)
+
+There are two **auth patterns** depending on the server:
+
+| Pattern | How it works | Example |
+|---------|-------------|---------|
+| **Env-based** | Credentials in env vars, server auto-connects | Gmail (IMAP), GitHub, Brave Search |
+| **OAuth** | Server exposes `authenticate` tool, user authorizes in browser first | Google Calendar, Google Workspace |
+
+### Setup: Gmail (env-based auth)
 
 1. Enable [2-Step Verification](https://myaccount.google.com/security) on your Google account
 2. Generate an [App Password](https://myaccount.google.com/apppasswords) (name it "microagent")
-3. Add to your config:
+3. Add to config:
 
 ```yaml
 tools:
@@ -359,22 +404,69 @@ tools:
 ```
 
 4. Verify: `microagent mcp test gmail`
-5. Ask the agent: "Show me my unread emails"
+5. Ask the agent: *"Show me my unread emails"*
+
+### Setup: Google Calendar (OAuth auth)
+
+OAuth servers require a one-time browser authorization before they work.
+
+**Step 1 — Google Cloud credentials** (one-time):
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) and create a project
+2. Enable the **Google Calendar API** (APIs & Services > Library)
+3. Go to **APIs & Services > Credentials > + CREATE CREDENTIALS > OAuth client ID**
+   - If prompted, configure the OAuth consent screen (External, add your email as test user)
+   - Application type: **Desktop app**
+4. Download the JSON file and save it as `~/.microagent/google-credentials.json`
+
+**Step 2 — Authorize** (one-time, run outside micro-claw):
+
+```bash
+GOOGLE_OAUTH_CREDENTIALS=/home/you/.microagent/google-credentials.json \
+  npx -y @cocal/google-calendar-mcp auth
+```
+
+This opens your browser. Authorize and close. The token is cached locally.
+
+**Step 3 — Add to config:**
+
+```yaml
+tools:
+  mcp:
+    servers:
+      # ... other servers ...
+      - name: google-calendar
+        transport: stdio
+        command: ["npx", "-y", "@cocal/google-calendar-mcp"]
+        prefix_tools: true
+        env:
+          GOOGLE_OAUTH_CREDENTIALS: "/home/you/.microagent/google-credentials.json"
+```
+
+4. Restart and ask: *"What events do I have this week?"*
 
 ### Popular integrations
 
-| Server | Install | What it does |
-|--------|---------|-------------|
-| **Gmail** (IMAP) | `npx -y mcp-mail-server` | Read, send, search, reply to emails |
-| **Google Workspace** | `pip install workspace-mcp` | Gmail + Calendar + Drive + Docs (requires OAuth) |
-| **Google Calendar** | `npx -y @cocal/google-calendar-mcp` | Events, scheduling, free/busy (requires OAuth) |
-| **GitHub** | `npx -y @modelcontextprotocol/server-github` | Issues, PRs, repos, CI |
-| **Filesystem** | `npx -y @modelcontextprotocol/server-filesystem /path` | Sandboxed file access |
-| **Brave Search** | `npx -y @modelcontextprotocol/server-brave-search` | Web search |
-| **Notion** | `npx -y @notionhq/notion-mcp-server` | Pages, databases, blocks |
-| **Slack** | `npx -y @modelcontextprotocol/server-slack` | Channels, messages, threads |
+| Server | Install | Auth | What it does |
+|--------|---------|------|-------------|
+| **Gmail** (IMAP) | `npx -y mcp-mail-server` | Env (app password) | Read, send, search, reply to emails |
+| **Google Calendar** | `npx -y @cocal/google-calendar-mcp` | OAuth (browser) | Events, scheduling, free/busy |
+| **Google Workspace** | `pip install workspace-mcp` | OAuth (browser) | Gmail + Calendar + Drive + Docs |
+| **GitHub** | `npx -y @modelcontextprotocol/server-github` | Env (`GITHUB_TOKEN`) | Issues, PRs, repos, CI |
+| **Filesystem** | `npx -y @modelcontextprotocol/server-filesystem /path` | None | Sandboxed file access |
+| **Brave Search** | `npx -y @modelcontextprotocol/server-brave-search` | Env (`BRAVE_API_KEY`) | Web search |
+| **Notion** | `npx -y @notionhq/notion-mcp-server` | Env (`NOTION_TOKEN`) | Pages, databases, blocks |
+| **Slack** | `npx -y @modelcontextprotocol/server-slack` | Env (`SLACK_BOT_TOKEN`) | Channels, messages, threads |
 
-All servers are configured in `tools.mcp.servers[]`. Use `prefix_tools: true` to namespace tool names (recommended when using multiple servers).
+### Auto-installed skills
+
+When you add an MCP server from the catalog (via CLI or web dashboard), micro-claw automatically installs a **skill file** that teaches the LLM how to use that integration efficiently. Skills include:
+
+- Token-saving strategies (fetch counts before content, use small limits)
+- Auth flow instructions (for OAuth servers)
+- Common task mappings ("show my unread emails" -> which tool to call)
+
+Skills are loaded on-demand via the `load_skill` tool — they don't waste context tokens on every message. See the [Skills](#skills) section for details.
 
 ### Managing MCP servers
 
@@ -424,18 +516,170 @@ Tool priority: **built-in > skill > MCP**.
 
 ## Scheduled Tasks (Cron)
 
-Schedule recurring tasks in natural language. Requires `store.type: sqlite` and `cron.enabled: true`.
+Schedule recurring tasks in natural language. The agent converts natural language to cron expressions, executes the prompt autonomously at each tick, and delivers results to the channel where it was created.
+
+**Requirements**: `store.type: sqlite` and `cron.enabled: true`.
+
+```yaml
+cron:
+  enabled: true
+  timezone: America/Argentina/Buenos_Aires   # optional, defaults to UTC
+  notify_on_completion: true                  # prefix results with task info
+```
+
+**Creating tasks** — just ask the agent:
+
+- *"Every morning at 9am give me a summary of my calendar events"*
+- *"Every minute tell me the current time"*
+- *"Every Monday at 8am send me a weekly report of my emails"*
+
+The agent uses the `schedule_task` tool automatically. Prompts must be self-contained — the agent runs them without conversation context, so include all relevant details in the prompt.
+
+**Managing tasks:**
+
+| Method | How |
+|--------|-----|
+| Chat | *"Show my scheduled tasks"* → agent calls `list_crons` |
+| Chat | *"Cancel task X"* → agent calls `delete_cron` |
+| CLI | `microagent cron list` / `microagent cron delete <id>` |
+| Daemon | `microagent --daemon` — runs cron-only, no interactive channel |
+
+**Per-job notification**: Each cron job can override where notifications go via `notify_channel` and `notify_on_completion` fields (set programmatically or via the notification rules below).
+
+---
+
+## Notifications
+
+Push notifications when events happen — cron completions, agent turn status, failures. Notifications are delivered to any configured channel (Telegram, Discord, WhatsApp, Web dashboard).
+
+### How it works
 
 ```
-> every morning at 9am give me a summary of the weather
+Event sources              Notification engine           Delivery channels
+┌──────────────┐     ┌───────────────────────────┐     ┌──────────────┐
+│ Cron fired   │     │                           │     │ Telegram     │
+│ Cron done    │────>│  Event Bus → Rules Engine │────>│ Discord      │
+│ Cron failed  │     │  (match + cooldown +      │     │ WhatsApp     │
+│ Turn started │     │   template + fallback)    │     │ Web dashboard│
+│ Turn done    │     │                           │     │ Email (MCP)  │
+└──────────────┘     └───────────────────────────┘     └──────────────┘
 ```
 
-```bash
-microagent cron list              # show all jobs
-microagent cron info <id>         # job details + results
-microagent cron delete <id>       # remove a job
-microagent --daemon               # run cron-only (no interactive channel)
+1. Internal events are emitted to an **event bus** (non-blocking, buffered)
+2. A **rules engine** evaluates each event against your configured rules
+3. Matching rules render a **Go template** and send via the target channel
+4. If delivery fails, an optional **fallback channel** is tried
+5. All notifications are **audited** (visible in the Logs dashboard)
+
+### Event types
+
+| Event | When it fires | Useful for |
+|-------|---------------|------------|
+| `cron.job.fired` | A cron job starts executing | Tracking execution |
+| `cron.job.completed` | A cron job finished successfully | Receiving results on another channel |
+| `cron.job.failed` | A cron job errored | Failure alerts |
+| `agent.turn.started` | The agent begins processing a message | Activity monitoring |
+| `agent.turn.completed` | The agent finished responding | Task completion alerts |
+
+### Configuration
+
+```yaml
+notifications:
+  enabled: true
+  max_per_minute: 30          # circuit breaker — prevents notification floods
+  bus_buffer_size: 256        # internal event queue size
+  handler_timeout_sec: 5      # max seconds to wait for channel delivery
+  rules:
+    - name: cron-results          # unique name for this rule
+      event_type: cron.job.completed
+      target_channel: "telegram:7535164458"   # where to send
+      template: "✅ {{.JobPrompt}}: {{.Text}}"
+      cooldown_sec: 10            # don't fire again for 10s (prevents spam)
+
+    - name: cron-failures
+      event_type: cron.job.failed
+      target_channel: "telegram:7535164458"
+      fallback_channel: "web:broadcast"       # try web if Telegram fails
+      template: "⚠ Task '{{.JobPrompt}}' failed: {{.Error}}"
+
+    - name: job-specific
+      event_type: cron.job.completed
+      job_id: "a22ea2c4-..."      # only this specific job
+      target_channel: "telegram:7535164458"
+      template: "📊 Report ready: {{.Text}}"
+
+    - name: turn-done
+      event_type: agent.turn.completed
+      target_channel: "web:broadcast"
+      template: "Agent done — {{.Meta.input_tokens}} in / {{.Meta.output_tokens}} out tokens"
+      cooldown_sec: 60            # at most once per minute
 ```
+
+### Template variables
+
+Templates use Go's `text/template` syntax. Available fields in every event:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `{{.Type}}` | string | Event type (e.g. `cron.job.completed`) |
+| `{{.JobID}}` | string | Cron job ID (empty for agent events) |
+| `{{.JobPrompt}}` | string | The cron job's prompt text |
+| `{{.ChannelID}}` | string | Originating channel |
+| `{{.Text}}` | string | Result text (agent response or cron output) |
+| `{{.Error}}` | string | Error message (only on failures) |
+| `{{.Timestamp}}` | time.Time | When the event occurred |
+| `{{.Meta.input_tokens}}` | string | Input tokens used (turn events only) |
+| `{{.Meta.output_tokens}}` | string | Output tokens used (turn events only) |
+
+### Channel ID format
+
+Target channels use the format `<channel_type>:<identifier>`:
+
+| Channel | Format | Example |
+|---------|--------|---------|
+| Telegram | `telegram:<chat_id>` | `telegram:7535164458` |
+| Discord | `discord:<channel_id>` | `discord:123456789` |
+| WhatsApp | `whatsapp:<phone>` | `whatsapp:+5491155551234` |
+| Web | `web:broadcast` | Sends to all connected web clients |
+
+### Safety features
+
+| Feature | Description |
+|---------|-------------|
+| **Loop prevention** | Notification events (`notification.sent/failed`) never trigger other rules |
+| **Circuit breaker** | `max_per_minute` caps total notifications globally (default: 30) |
+| **Per-rule cooldown** | `cooldown_sec` prevents the same rule from firing too frequently |
+| **Fallback channel** | If primary delivery fails, tries `fallback_channel` before giving up |
+| **Audit trail** | Every notification (sent or failed) is recorded as an audit event |
+| **Non-blocking** | Event bus never blocks the agent — events are dropped if the buffer is full |
+| **Startup validation** | Rules are validated on startup (template syntax, unique names, known event types) |
+
+### Examples
+
+**Daily calendar summary to Telegram:**
+```
+1. Ask the agent: "Every day at 9am tell me my calendar events for today"
+2. Configure notification rule:
+   - event_type: cron.job.completed
+   - target_channel: telegram:<your_chat_id>
+   - template: "📅 {{.Text}}"
+3. Result: every day at 9am, you get a Telegram push with your events
+```
+
+**Alert on cron failures:**
+```yaml
+- name: alert-failures
+  event_type: cron.job.failed
+  target_channel: "telegram:7535164458"
+  template: "🚨 Scheduled task failed!\nTask: {{.JobPrompt}}\nError: {{.Error}}"
+```
+
+**Weekly email summary (via Gmail MCP):**
+```
+Ask the agent: "Every Monday at 8am, summarize my unread emails from
+the past week and send the summary to marxdr7@gmail.com using Gmail"
+```
+The cron job prompt includes the "send email" instruction, so the agent uses the Gmail MCP tool during execution.
 
 ---
 
