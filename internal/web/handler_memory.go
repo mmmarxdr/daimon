@@ -5,6 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
+
+	"github.com/google/uuid"
 
 	"microagent/internal/store"
 )
@@ -63,6 +66,21 @@ func (s *Server) handlePostMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if entry.Content == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if entry.ScopeID == "" {
+		writeError(w, http.StatusBadRequest, "scope_id is required")
+		return
+	}
+
+	// Assign a server-generated ID — never trust caller-supplied IDs.
+	entry.ID = uuid.New().String()
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = time.Now().UTC()
+	}
+
 	if err := s.deps.Store.AppendMemory(r.Context(), entry.ScopeID, entry); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -78,7 +96,12 @@ func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, _ := strconv.ParseInt(pathParam(r, "id"), 10, 64)
+	rawID := pathParam(r, "id")
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid memory id: must be a number")
+		return
+	}
 	scopeID := r.URL.Query().Get("scope")
 
 	if err := ws.DeleteMemory(r.Context(), scopeID, id); err != nil {

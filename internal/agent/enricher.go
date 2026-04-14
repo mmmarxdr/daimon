@@ -28,6 +28,7 @@ type Enricher struct {
 	ch       chan enrichJob // buffered channel, capacity 5
 	limiter  *rateLimiter  // sliding-window rate limiter
 	wg       sync.WaitGroup
+	stopOnce sync.Once
 }
 
 // NewEnricher creates a new Enricher and starts its worker goroutine.
@@ -53,8 +54,12 @@ func NewEnricher(prov provider.Provider, st store.Store, cfg config.AgentConfig)
 }
 
 // Enqueue submits a memory entry for async tag enrichment.
-// Non-blocking: if the channel is full the job is silently dropped.
+// Non-blocking: if the channel is full or already stopped, the job is silently dropped.
 func (e *Enricher) Enqueue(entry store.MemoryEntry) {
+	defer func() {
+		// Guard against send on closed channel if Stop() races with Enqueue.
+		recover() //nolint:errcheck
+	}()
 	select {
 	case e.ch <- enrichJob{entry: entry}:
 	default:
@@ -135,8 +140,9 @@ func (e *Enricher) processJob(ctx context.Context, job enrichJob) {
 }
 
 // Stop signals the worker goroutine to exit and waits for it to finish.
+// Safe to call multiple times — subsequent calls are no-ops.
 func (e *Enricher) Stop() {
-	close(e.ch)
+	e.stopOnce.Do(func() { close(e.ch) })
 	e.wg.Wait()
 }
 

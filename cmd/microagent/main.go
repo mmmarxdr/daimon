@@ -484,7 +484,7 @@ func main() {
 			cfg.Web.AuthToken = tok
 		}
 
-		webCh := channel.NewWebChannel()
+		webCh := channel.NewWebChannel(cfg.Web.AllowedOrigins...)
 		// Add WebChannel to the mux so the agent can receive/send web chat messages.
 		channels = append(channels, webCh)
 		mux = channel.NewMultiplexChannel(channels)

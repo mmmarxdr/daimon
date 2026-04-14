@@ -11,10 +11,9 @@ import (
 	"microagent/internal/store"
 )
 
-func (a *Agent) buildContext(
-	conv *store.Conversation,
-	memories []store.MemoryEntry,
-) provider.ChatRequest {
+// buildSystemPrompt assembles the full system prompt string from personality,
+// security directive, autoload skill prose, skill index, and the memory section.
+func (a *Agent) buildSystemPrompt(memories []store.MemoryEntry) string {
 	sysPrompt := a.config.Personality
 
 	// Security directive for tool results
@@ -44,23 +43,33 @@ func (a *Agent) buildContext(
 		sysPrompt += buildMemorySection(memories, a.config.MaxContextTokens)
 	}
 
-	req := provider.ChatRequest{
-		SystemPrompt: sysPrompt,
-		Messages:     conv.Messages,
-		Tools:        []provider.ToolDefinition{},
-		MaxTokens:    a.config.MaxTokensPerTurn,
-		Temperature:  0.0,
-	}
+	return sysPrompt
+}
 
+// buildToolDefs returns a ToolDefinition slice built from the agent's registered tools.
+func (a *Agent) buildToolDefs() []provider.ToolDefinition {
+	defs := []provider.ToolDefinition{}
 	for _, t := range a.tools {
-		req.Tools = append(req.Tools, provider.ToolDefinition{
+		defs = append(defs, provider.ToolDefinition{
 			Name:        t.Name(),
 			Description: t.Description(),
 			InputSchema: t.Schema(),
 		})
 	}
+	return defs
+}
 
-	return req
+func (a *Agent) buildContext(
+	conv *store.Conversation,
+	memories []store.MemoryEntry,
+) provider.ChatRequest {
+	return provider.ChatRequest{
+		SystemPrompt: a.buildSystemPrompt(memories),
+		Messages:     conv.Messages,
+		Tools:        a.buildToolDefs(),
+		MaxTokens:    a.config.MaxTokensPerTurn,
+		Temperature:  0.0,
+	}
 }
 
 // formatMemoryLine renders a single MemoryEntry as a bullet-point string.

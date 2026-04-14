@@ -71,7 +71,7 @@ func auditEventToLogEntry(e audit.AuditEvent) wsLogEntry {
 // handleLogsWebSocket streams audit events as structured JSON log frames.
 // On connect, the last 100 events are sent; then new events are polled every 2s.
 func (s *Server) handleLogsWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	conn, err := s.wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Warn("web: ws/logs upgrade error", "error", err)
 		return

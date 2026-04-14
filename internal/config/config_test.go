@@ -1060,6 +1060,306 @@ func TestValidate_NativeMemory_ValidThreshold(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// TestContextConfig_ResolveMaxTokens
+// ---------------------------------------------------------------------------
+
+func TestContextConfig_ResolveMaxTokens(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxTokens interface{}
+		want      int
+	}{
+		{name: "int 200000", maxTokens: 200000, want: 200000},
+		{name: "float64 200000.0", maxTokens: float64(200000.0), want: 200000},
+		{name: "string auto", maxTokens: "auto", want: 0},
+		{name: "nil", maxTokens: nil, want: 0},
+		{name: "int 0", maxTokens: 0, want: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := ContextConfig{MaxTokens: tc.maxTokens}
+			got := c.ResolveMaxTokens()
+			if got != tc.want {
+				t.Errorf("ResolveMaxTokens() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestContextConfig_ApplyContextDefaults
+// ---------------------------------------------------------------------------
+
+func TestContextConfig_ApplyContextDefaults(t *testing.T) {
+	t.Run("fills all zero fields", func(t *testing.T) {
+		c := ContextConfig{}
+		c.ApplyContextDefaults()
+
+		if c.CompactThreshold != 0.8 {
+			t.Errorf("CompactThreshold = %v, want 0.8", c.CompactThreshold)
+		}
+		if c.CooldownTurns != 3 {
+			t.Errorf("CooldownTurns = %d, want 3", c.CooldownTurns)
+		}
+		if c.SummaryMaxTokens != 1000 {
+			t.Errorf("SummaryMaxTokens = %d, want 1000", c.SummaryMaxTokens)
+		}
+		if c.ProtectedTurns != 5 {
+			t.Errorf("ProtectedTurns = %d, want 5", c.ProtectedTurns)
+		}
+		if c.ToolResultMaxChars != 800 {
+			t.Errorf("ToolResultMaxChars = %d, want 800", c.ToolResultMaxChars)
+		}
+		if c.Strategy != "smart" {
+			t.Errorf("Strategy = %q, want 'smart'", c.Strategy)
+		}
+		if c.Notify == nil || !*c.Notify {
+			t.Errorf("Notify = %v, want pointer-to-true", c.Notify)
+		}
+		if c.FallbackCtxSize != 128000 {
+			t.Errorf("FallbackCtxSize = %d, want 128000", c.FallbackCtxSize)
+		}
+	})
+
+	t.Run("does not overwrite non-zero fields", func(t *testing.T) {
+		notifyFalse := false
+		c := ContextConfig{
+			CompactThreshold:   0.5,
+			CooldownTurns:      7,
+			SummaryMaxTokens:   500,
+			ProtectedTurns:     2,
+			ToolResultMaxChars: 200,
+			Strategy:           "legacy",
+			Notify:             &notifyFalse,
+			FallbackCtxSize:    64000,
+		}
+		c.ApplyContextDefaults()
+
+		if c.CompactThreshold != 0.5 {
+			t.Errorf("CompactThreshold overwritten: got %v, want 0.5", c.CompactThreshold)
+		}
+		if c.CooldownTurns != 7 {
+			t.Errorf("CooldownTurns overwritten: got %d, want 7", c.CooldownTurns)
+		}
+		if c.SummaryMaxTokens != 500 {
+			t.Errorf("SummaryMaxTokens overwritten: got %d, want 500", c.SummaryMaxTokens)
+		}
+		if c.ProtectedTurns != 2 {
+			t.Errorf("ProtectedTurns overwritten: got %d, want 2", c.ProtectedTurns)
+		}
+		if c.ToolResultMaxChars != 200 {
+			t.Errorf("ToolResultMaxChars overwritten: got %d, want 200", c.ToolResultMaxChars)
+		}
+		if c.Strategy != "legacy" {
+			t.Errorf("Strategy overwritten: got %q, want 'legacy'", c.Strategy)
+		}
+		if c.Notify == nil || *c.Notify != false {
+			t.Errorf("Notify overwritten: got %v, want pointer-to-false", c.Notify)
+		}
+		if c.FallbackCtxSize != 64000 {
+			t.Errorf("FallbackCtxSize overwritten: got %d, want 64000", c.FallbackCtxSize)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestAgentConfig_HasContextField
+// ---------------------------------------------------------------------------
+
+func TestAgentConfig_HasContextField(t *testing.T) {
+	// Verify that AgentConfig has a Context field of type ContextConfig.
+	cfg := AgentConfig{}
+	cfg.Context.ApplyContextDefaults()
+	if cfg.Context.Strategy != "smart" {
+		t.Errorf("AgentConfig.Context.Strategy = %q, want 'smart' after defaults", cfg.Context.Strategy)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T6.1 — ContextConfig YAML round-trip and validation edge cases
+// ---------------------------------------------------------------------------
+
+func TestContextConfig_YAMLRoundTrip_WithContextBlock(t *testing.T) {
+	yamlData := `
+provider:
+  api_key: "test-key"
+agent:
+  max_iterations: 5
+  context:
+    max_tokens: 200000
+    compact_threshold: 0.75
+    cooldown_turns: 4
+    summary_max_tokens: 1500
+    protected_turns: 3
+    tool_result_max_chars: 600
+    strategy: "legacy"
+    fallback_context_size: 64000
+    summary_model: "claude-3-haiku-20240307"
+`
+	tmpFile := createTempFile(t, yamlData)
+	defer os.Remove(tmpFile)
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load expected no error, got: %v", err)
+	}
+
+	ctx := cfg.Agent.Context
+	if v := ctx.ResolveMaxTokens(); v != 200000 {
+		t.Errorf("MaxTokens: got %d, want 200000", v)
+	}
+	if ctx.CompactThreshold != 0.75 {
+		t.Errorf("CompactThreshold: got %v, want 0.75", ctx.CompactThreshold)
+	}
+	if ctx.CooldownTurns != 4 {
+		t.Errorf("CooldownTurns: got %d, want 4", ctx.CooldownTurns)
+	}
+	if ctx.SummaryMaxTokens != 1500 {
+		t.Errorf("SummaryMaxTokens: got %d, want 1500", ctx.SummaryMaxTokens)
+	}
+	if ctx.ProtectedTurns != 3 {
+		t.Errorf("ProtectedTurns: got %d, want 3", ctx.ProtectedTurns)
+	}
+	if ctx.ToolResultMaxChars != 600 {
+		t.Errorf("ToolResultMaxChars: got %d, want 600", ctx.ToolResultMaxChars)
+	}
+	if ctx.Strategy != "legacy" {
+		t.Errorf("Strategy: got %q, want 'legacy'", ctx.Strategy)
+	}
+	if ctx.FallbackCtxSize != 64000 {
+		t.Errorf("FallbackCtxSize: got %d, want 64000", ctx.FallbackCtxSize)
+	}
+	if ctx.SummaryModel != "claude-3-haiku-20240307" {
+		t.Errorf("SummaryModel: got %q, want 'claude-3-haiku-20240307'", ctx.SummaryModel)
+	}
+}
+
+func TestContextConfig_YAMLRoundTrip_WithoutContextBlock_DefaultsApplied(t *testing.T) {
+	// No agent.context block → all defaults should be applied by ApplyContextDefaults.
+	// Note: ApplyContextDefaults is called by NewContextManager, not by Load.
+	// Load only parses the YAML; the zero-value ContextConfig is stored.
+	// We verify the zero-value here and rely on NewContextManager tests for defaults.
+	yamlData := `
+provider:
+  api_key: "test-key"
+agent:
+  max_iterations: 5
+`
+	tmpFile := createTempFile(t, yamlData)
+	defer os.Remove(tmpFile)
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load expected no error, got: %v", err)
+	}
+
+	ctx := cfg.Agent.Context
+	// Without a context block, fields are zero-value (defaults applied by ContextManager).
+	if ctx.Strategy != "" {
+		t.Errorf("Strategy without context block: got %q, want empty string (zero-value)", ctx.Strategy)
+	}
+	if ctx.CompactThreshold != 0 {
+		t.Errorf("CompactThreshold without context block: got %v, want 0 (zero-value)", ctx.CompactThreshold)
+	}
+	// Verify ApplyContextDefaults fills these correctly when called.
+	ctx.ApplyContextDefaults()
+	if ctx.Strategy != "smart" {
+		t.Errorf("After ApplyContextDefaults: Strategy = %q, want 'smart'", ctx.Strategy)
+	}
+	if ctx.CompactThreshold != 0.8 {
+		t.Errorf("After ApplyContextDefaults: CompactThreshold = %v, want 0.8", ctx.CompactThreshold)
+	}
+	if ctx.FallbackCtxSize != 128000 {
+		t.Errorf("After ApplyContextDefaults: FallbackCtxSize = %d, want 128000", ctx.FallbackCtxSize)
+	}
+}
+
+func TestContextConfig_YAMLRoundTrip_MaxTokensAutoString(t *testing.T) {
+	// max_tokens: "auto" → ResolveMaxTokens() returns 0 (auto-detect signal)
+	yamlData := `
+provider:
+  api_key: "test-key"
+agent:
+  max_iterations: 5
+  context:
+    max_tokens: "auto"
+    strategy: "smart"
+`
+	tmpFile := createTempFile(t, yamlData)
+	defer os.Remove(tmpFile)
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load expected no error, got: %v", err)
+	}
+
+	if v := cfg.Agent.Context.ResolveMaxTokens(); v != 0 {
+		t.Errorf("max_tokens 'auto': ResolveMaxTokens() = %d, want 0", v)
+	}
+}
+
+func TestContextConfig_YAMLRoundTrip_NoneStrategy(t *testing.T) {
+	yamlData := `
+provider:
+  api_key: "test-key"
+agent:
+  max_iterations: 5
+  context:
+    strategy: "none"
+`
+	tmpFile := createTempFile(t, yamlData)
+	defer os.Remove(tmpFile)
+
+	cfg, err := Load(tmpFile)
+	if err != nil {
+		t.Fatalf("Load expected no error, got: %v", err)
+	}
+
+	if cfg.Agent.Context.Strategy != "none" {
+		t.Errorf("strategy 'none': got %q", cfg.Agent.Context.Strategy)
+	}
+}
+
+func TestContextConfig_ApplyDefaults_CompactThresholdZero_GetsDefault(t *testing.T) {
+	// CompactThreshold == 0.0 → ApplyContextDefaults fills 0.8
+	c := ContextConfig{CompactThreshold: 0}
+	c.ApplyContextDefaults()
+	if c.CompactThreshold != 0.8 {
+		t.Errorf("CompactThreshold 0 → default: got %v, want 0.8", c.CompactThreshold)
+	}
+}
+
+func TestContextConfig_ApplyDefaults_NegativeProtectedTurns_NotChanged(t *testing.T) {
+	// ApplyContextDefaults only fills zero-value fields.
+	// Negative ProtectedTurns is non-zero, so it is NOT overwritten by ApplyContextDefaults.
+	// The compaction logic itself handles negative values gracefully (treated as 0).
+	c := ContextConfig{ProtectedTurns: -3}
+	c.ApplyContextDefaults()
+	// ProtectedTurns is -3 (non-zero) so it is preserved (no default applied).
+	if c.ProtectedTurns != -3 {
+		t.Errorf("negative ProtectedTurns: expected -3 preserved, got %d", c.ProtectedTurns)
+	}
+}
+
+func TestContextConfig_ApplyDefaults_ToolResultMaxCharsSmall_NotChanged(t *testing.T) {
+	// ToolResultMaxChars < 100 but non-zero: ApplyContextDefaults leaves it unchanged.
+	c := ContextConfig{ToolResultMaxChars: 50}
+	c.ApplyContextDefaults()
+	if c.ToolResultMaxChars != 50 {
+		t.Errorf("ToolResultMaxChars 50: expected 50 preserved, got %d", c.ToolResultMaxChars)
+	}
+}
+
+func TestContextConfig_ApplyDefaults_UnknownStrategy_Preserved(t *testing.T) {
+	// An unknown non-empty strategy is preserved (no validation at default-apply level).
+	c := ContextConfig{Strategy: "turbo"}
+	c.ApplyContextDefaults()
+	if c.Strategy != "turbo" {
+		t.Errorf("unknown strategy 'turbo': expected preserved, got %q", c.Strategy)
+	}
+}
+
 func createTempFile(t *testing.T, content string) string {
 	t.Helper()
 	f, err := os.CreateTemp("", "microagent-config-*.yaml")

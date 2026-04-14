@@ -247,6 +247,42 @@ func registerBuiltinCommands(reg *CommandRegistry) {
 	reg.Register("whoami", "Show your identity", cmdWhoami)
 }
 
+// cmdCompact implements the /compact command: force-compacts the current
+// conversation via the ContextManager and reports token counts.
+func (a *Agent) cmdCompact(cc CommandContext) error {
+	scope := userScope(cc.ChannelID, cc.SenderID)
+	convID := "conv_" + scope
+
+	conv, err := cc.Store.LoadConversation(cc.Ctx, convID)
+	if err != nil || len(conv.Messages) == 0 {
+		cc.Reply("Nothing to compact")
+		return nil
+	}
+
+	// Build system prompt and tool defs for token estimation.
+	var memories []store.MemoryEntry // skip memory search for /compact
+	systemPrompt := a.buildSystemPrompt(memories)
+	toolDefs := a.buildToolDefs()
+
+	// Count tokens before compaction.
+	before := EstimateMessagesTokens(conv.Messages)
+
+	// Force-compact.
+	conv.Messages = a.contextMgr.ForceCompact(cc.Ctx, systemPrompt, toolDefs, conv.Messages)
+
+	// Count tokens after compaction.
+	after := EstimateMessagesTokens(conv.Messages)
+
+	// Save the compacted conversation.
+	conv.UpdatedAt = time.Now()
+	if saveErr := cc.Store.SaveConversation(cc.Ctx, *conv); saveErr != nil {
+		return fmt.Errorf("failed to save compacted conversation: %w", saveErr)
+	}
+
+	cc.Reply(fmt.Sprintf("Compacted: %d → %d tokens", before, after))
+	return nil
+}
+
 // makeReply returns a function that sends a text reply to the given channel.
 func (a *Agent) makeReply(ctx context.Context, channelID string) func(string) {
 	return func(text string) {

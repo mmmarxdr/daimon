@@ -92,6 +92,7 @@ type Agent struct {
 	indexWorker     *IndexingWorker  // async output indexing worker; nil when disabled
 	curator         *Curator         // smart memory curation; nil when disabled
 	consolidator    *Consolidator    // background memory consolidation; nil when disabled
+	contextMgr      *ContextManager  // smart context management; nil when disabled
 	commands        *CommandRegistry
 	startedAt       time.Time
 	inbox           chan channel.IncomingMessage
@@ -163,7 +164,34 @@ func New(
 	reg := NewCommandRegistry()
 	registerBuiltinCommands(reg)
 
-	return &Agent{
+	// Synthesize ContextConfig from legacy flat fields when cfg.Context is zero-value.
+	// Priority:
+	//   1. cfg.Context.Strategy is already set → use cfg.Context as-is
+	//   2. MaxContextTokens > 0 → strategy "smart"
+	//   3. HistoryLength > 0 only → strategy "legacy"
+	//   4. Neither → strategy "none"
+	ctxCfg := cfg.Context
+	if ctxCfg.Strategy == "" {
+		switch {
+		case cfg.MaxContextTokens > 0:
+			ctxCfg.Strategy = "smart"
+			ctxCfg.MaxTokens = cfg.MaxContextTokens
+			ctxCfg.SummaryMaxTokens = cfg.SummaryTokens
+		case cfg.HistoryLength > 0:
+			ctxCfg.Strategy = "legacy"
+		default:
+			ctxCfg.Strategy = "none"
+		}
+	}
+	contextMgr := NewContextManager(ctxCfg, prov, nil)
+
+	// Register compact command as a closure so it can access the agent after construction.
+	// legacyFn will be wired after the agent struct is built (needs `a` to call legacyTruncate).
+	// This is a two-step registration: we register a placeholder here and fix it up
+	// after the agent is built — or we use a post-construction step.
+	// Simple approach: register it after the struct is built below.
+
+	a := &Agent{
 		config:          cfg,
 		limits:          limits,
 		filterCfg:       filterCfg,
@@ -181,9 +209,28 @@ func New(
 		enricher:        NewEnricher(prov, st, cfg),
 		embeddingWorker: embWorker,
 		indexWorker:     idxWorker,
+		contextMgr:      contextMgr,
 		commands:        reg,
 		channelName:     ch.Name(),
 	}
+	// Wire the legacy truncation function now that the agent struct is fully built.
+	// This lets ContextManager.legacyManage delegate to the existing legacyTruncate method.
+	// The closure preserves the original guard: only truncate when over HistoryLength.
+	if ctxCfg.Strategy == "legacy" {
+		histLen := cfg.HistoryLength
+		a.contextMgr.legacyFn = func(ctx context.Context, messages []provider.ChatMessage) []provider.ChatMessage {
+			if histLen > 0 && len(messages) > histLen {
+				return a.legacyTruncate(ctx, messages)
+			}
+			return messages
+		}
+	}
+
+	// Register the /compact command now that the agent struct is fully built.
+	reg.Register("compact", "Force-compact conversation context", func(cc CommandContext) error {
+		return a.cmdCompact(cc)
+	})
+	return a
 }
 
 // WithMediaConfig sets the media configuration on the agent, enabling the
@@ -194,9 +241,13 @@ func (a *Agent) WithMediaConfig(cfg config.MediaConfig) *Agent {
 }
 
 // WithBus sets the event bus on the agent, enabling agent.turn.started/completed events.
+// Also propagates the bus to contextMgr if present.
 // Returns a for fluent chaining.
 func (a *Agent) WithBus(bus notify.Bus) *Agent {
 	a.bus = bus
+	if a.contextMgr != nil {
+		a.contextMgr.bus = bus
+	}
 	return a
 }
 

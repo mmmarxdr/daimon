@@ -160,6 +160,10 @@ func truncateContent(s string, maxLen int) string {
 //  3. Hard truncate oldest messages as a last resort
 //
 // Returns the (potentially modified) messages and any summary prepended.
+//
+// Deprecated: This method is superseded by ContextManager (context_manager.go) and its
+// compactPipeline. It remains callable from tests (summarize_test.go) that verify its
+// behavior directly. Do NOT remove until all callers have migrated to ContextManager.
 func (a *Agent) manageContextTokens(ctx context.Context, systemPrompt string, messages []provider.ChatMessage) []provider.ChatMessage {
 	maxTokens := a.config.MaxContextTokens
 	if maxTokens <= 0 {

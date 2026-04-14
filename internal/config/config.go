@@ -27,6 +27,7 @@ type WebConfig struct {
 	AllowedOrigins []string `yaml:"allowed_origins"  json:"allowed_origins"` // CORS: allowed origins. Empty or ["*"] = allow all.
 	TLSCert        string   `yaml:"tls_cert"        json:"tls_cert"`        // Path to TLS certificate file (optional).
 	TLSKey         string   `yaml:"tls_key"         json:"tls_key"`         // Path to TLS private key file (optional).
+	TrustProxy     bool     `yaml:"trust_proxy"     json:"trust_proxy"`     // When true, X-Forwarded-For is trusted for client IP. Only enable behind a trusted reverse proxy.
 }
 
 type Config struct {
@@ -119,6 +120,9 @@ type AgentConfig struct {
 
 	// Smart memory — curation, deduplication, and consolidation.
 	Memory MemoryConfig `yaml:"memory" json:"memory"`
+
+	// Smart context — proactive compaction and token budget management.
+	Context ContextConfig `yaml:"context" json:"context"`
 }
 
 // MemoryConfig is the top-level smart-memory configuration block.
@@ -148,6 +152,89 @@ type ConsolidationConfig struct {
 	IntervalHours      int  `yaml:"interval_hours" json:"interval_hours"`
 	MinEntriesPerTopic int  `yaml:"min_entries"  json:"min_entries"`
 	KeepNewest         int  `yaml:"keep_newest"  json:"keep_newest"`
+}
+
+// ContextConfig controls smart context management — proactive compaction and token budget.
+type ContextConfig struct {
+	// MaxTokens is the context window size: int, float64, "auto" (0 = auto-detect), or nil.
+	MaxTokens interface{} `yaml:"max_tokens" json:"max_tokens"`
+
+	// CompactThreshold is the fraction of MaxTokens at which compaction triggers. Default: 0.8.
+	CompactThreshold float64 `yaml:"compact_threshold" json:"compact_threshold"`
+
+	// CooldownTurns is the number of turns to wait before allowing another compaction. Default: 3.
+	CooldownTurns int `yaml:"cooldown_turns" json:"cooldown_turns"`
+
+	// SummaryMaxTokens is the maximum tokens for the LLM-generated compaction summary. Default: 1000.
+	SummaryMaxTokens int `yaml:"summary_max_tokens" json:"summary_max_tokens"`
+
+	// ProtectedTurns is the minimum number of recent turns to always preserve. Default: 5.
+	ProtectedTurns int `yaml:"protected_turns" json:"protected_turns"`
+
+	// ToolResultMaxChars is the character limit for tool result truncation pre-compaction. Default: 800.
+	ToolResultMaxChars int `yaml:"tool_result_max_chars" json:"tool_result_max_chars"`
+
+	// Strategy is the compaction strategy: "smart" | "legacy" | "none". Default: "smart".
+	Strategy string `yaml:"strategy" json:"strategy"`
+
+	// Notify controls whether a notification is sent on compaction. Default: true.
+	// Pointer to distinguish explicit false from unset.
+	Notify *bool `yaml:"notify" json:"notify"`
+
+	// FallbackCtxSize is the assumed context window when MaxTokens is 0/auto and detection fails. Default: 128000.
+	FallbackCtxSize int `yaml:"fallback_context_size" json:"fallback_context_size"`
+
+	// SummaryModel is an optional model override for generating compaction summaries.
+	// Uses EnrichModel (or provider default) when empty.
+	SummaryModel string `yaml:"summary_model" json:"summary_model"`
+}
+
+// ResolveMaxTokens returns the integer context window size from MaxTokens.
+// Returns 0 when MaxTokens is nil, 0, or the string "auto" (signals auto-detect).
+func (c ContextConfig) ResolveMaxTokens() int {
+	switch v := c.MaxTokens.(type) {
+	case int:
+		return v
+	case float64:
+		return int(v)
+	case string:
+		if v == "auto" {
+			return 0
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+// ApplyContextDefaults fills zero-value fields with their documented defaults.
+// Non-zero fields are left unchanged.
+func (c *ContextConfig) ApplyContextDefaults() {
+	if c.CompactThreshold == 0 {
+		c.CompactThreshold = 0.8
+	}
+	if c.CooldownTurns == 0 {
+		c.CooldownTurns = 3
+	}
+	if c.SummaryMaxTokens == 0 {
+		c.SummaryMaxTokens = 1000
+	}
+	if c.ProtectedTurns == 0 {
+		c.ProtectedTurns = 5
+	}
+	if c.ToolResultMaxChars == 0 {
+		c.ToolResultMaxChars = 800
+	}
+	if c.Strategy == "" {
+		c.Strategy = "smart"
+	}
+	if c.Notify == nil {
+		t := true
+		c.Notify = &t
+	}
+	if c.FallbackCtxSize == 0 {
+		c.FallbackCtxSize = 128000
+	}
 }
 
 // FallbackConfig configures an optional secondary provider for resilience.

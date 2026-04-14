@@ -112,18 +112,12 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		Content: msg.Content,
 	})
 
-	// Token-based context management takes precedence when MaxContextTokens > 0.
-	// Falls back to the legacy HistoryLength-based truncation when MaxContextTokens is 0.
-	if a.config.MaxContextTokens > 0 {
-		// Build a preliminary system prompt to estimate its token cost.
-		preliminaryPrompt := a.config.Personality
-		conv.Messages = a.manageContextTokens(ctx, preliminaryPrompt, conv.Messages)
-	} else if a.config.HistoryLength > 0 && len(conv.Messages) > a.config.HistoryLength {
-		// Legacy HistoryLength-based truncation (backward compatible).
-		conv.Messages = a.legacyTruncate(ctx, conv.Messages)
-	}
-
+	// Context management via ContextManager (smart, legacy, or none strategy).
+	// The ContextManager is always present after New() — strategy controls behavior.
 	memories, _ := a.store.SearchMemory(ctx, scope, msg.Content.TextOnly(), a.config.MemoryResults)
+	systemPrompt := a.buildSystemPrompt(memories)
+	toolDefs := a.buildToolDefs()
+	conv.Messages = a.contextMgr.Manage(ctx, systemPrompt, toolDefs, conv.Messages)
 
 	maxIters := a.config.MaxIterations
 	if maxIters <= 0 {
@@ -173,7 +167,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	}
 
 	for i := 0; i < maxIters; i++ {
-		req := a.buildContext(conv, memories)
+		req := provider.ChatRequest{
+			SystemPrompt: systemPrompt,
+			Messages:     conv.Messages,
+			Tools:        toolDefs,
+			MaxTokens:    a.config.MaxTokensPerTurn,
+			Temperature:  0.0,
+		}
 
 		slog.Debug("calling LLM", "iteration", i, "messages", len(req.Messages))
 		if hasTelemetry {
@@ -501,6 +501,11 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 
 // legacyTruncate performs the original HistoryLength-based truncation with LLM summarization.
 // Preserved for backward compatibility when MaxContextTokens is 0.
+//
+// Deprecated: This function is still actively called by ContextManager.legacyManage when
+// strategy == "legacy". It is wired into ContextManager.legacyFn in Agent.New(). Do NOT
+// remove until the "legacy" strategy path is retired. See context_manager.go for the
+// current smart compaction path.
 func (a *Agent) legacyTruncate(ctx context.Context, messages []provider.ChatMessage) []provider.ChatMessage {
 	// Find the first user message before trimming
 	firstUserIdx := -1

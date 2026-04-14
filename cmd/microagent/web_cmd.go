@@ -182,7 +182,7 @@ func runWebCommand(args []string, cfgPath string) error {
 	}
 
 	// ---- Channels ----
-	webCh := channel.NewWebChannel()
+	webCh := channel.NewWebChannel(cfg.Web.AllowedOrigins...)
 	var channels []channel.Channel
 	channels = append(channels, webCh)
 

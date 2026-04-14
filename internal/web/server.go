@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"microagent/internal/audit"
 	"microagent/internal/channel"
@@ -40,17 +43,20 @@ type ServerDeps struct {
 
 // Server is the HTTP dashboard server.
 type Server struct {
-	deps ServerDeps
-	srv  *http.Server
-	mux  *http.ServeMux
+	deps        ServerDeps
+	srv         *http.Server
+	mux         *http.ServeMux
+	wsUpgrader  websocket.Upgrader
+	rateLimiter *ipRateLimiter
 }
 
 // NewServer creates a new Server with all routes registered.
 // The auth token must be set in deps.Config.Web.AuthToken before calling.
 func NewServer(deps ServerDeps) *Server {
 	s := &Server{
-		deps: deps,
-		mux:  http.NewServeMux(),
+		deps:       deps,
+		mux:        http.NewServeMux(),
+		wsUpgrader: newWSUpgrader(deps.Config.Web.AllowedOrigins),
 	}
 	s.routes()
 
@@ -68,8 +74,8 @@ func NewServer(deps ServerDeps) *Server {
 	handler = corsMiddleware(deps.Config.Web.AllowedOrigins, handler)
 
 	// Per-IP rate limiting: 120 requests per minute on API/WS endpoints.
-	limiter := newIPRateLimiter(120, time.Minute)
-	handler = rateLimitMiddleware(limiter, handler)
+	s.rateLimiter = newIPRateLimiter(120, time.Minute)
+	handler = rateLimitMiddleware(s.rateLimiter, deps.Config.Web.TrustProxy, handler)
 
 	// Security headers on all responses.
 	handler = securityHeadersMiddleware(handler)
@@ -86,6 +92,35 @@ func NewServer(deps ServerDeps) *Server {
 		MaxHeaderBytes: 1 << 20, // 1 MB max header size
 	}
 	return s
+}
+
+// newWSUpgrader builds a websocket.Upgrader that validates the request origin
+// against allowedOrigins. If allowedOrigins is empty or contains "*", all
+// origins are permitted (backwards-compatible default).
+func newWSUpgrader(allowedOrigins []string) websocket.Upgrader {
+	allowAll := len(allowedOrigins) == 0
+	originSet := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			allowAll = true
+		}
+		originSet[strings.TrimRight(o, "/")] = true
+	}
+
+	return websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			if allowAll {
+				return true
+			}
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return true // same-origin requests have no Origin header
+			}
+			return originSet[strings.TrimRight(origin, "/")]
+		},
+	}
 }
 
 // Start begins listening in a background goroutine.
@@ -107,6 +142,9 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully stops the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.rateLimiter != nil {
+		s.rateLimiter.Stop()
+	}
 	return s.srv.Shutdown(ctx)
 }
 

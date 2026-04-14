@@ -23,8 +23,9 @@ const (
 	EventCronJobFailed    = "cron.job.failed"
 
 	// Agent turn lifecycle events.
-	EventTurnStarted   = "agent.turn.started"
-	EventTurnCompleted = "agent.turn.completed"
+	EventTurnStarted      = "agent.turn.started"
+	EventTurnCompleted    = "agent.turn.completed"
+	EventContextCompacted = "agent.context.compacted"
 
 	// Notification system internal audit events — never matched by rules.
 	// Events with Origin == OriginNotification are dropped by the bus worker.
@@ -41,4 +42,5 @@ var KnownEventTypes = map[string]bool{
 	EventCronJobFailed:    true,
 	EventTurnStarted:      true,
 	EventTurnCompleted:    true,
+	EventContextCompacted: true,
 }

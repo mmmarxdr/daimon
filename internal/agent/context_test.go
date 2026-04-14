@@ -451,3 +451,142 @@ func TestBuildContext_MemoryBudgetCap_IntegratedViaBuildContext(t *testing.T) {
 		t.Error("should not omit entries that fit within budget")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T4.1 — buildSystemPrompt and buildToolDefs extracted methods
+// ---------------------------------------------------------------------------
+
+func TestBuildSystemPrompt_IncludesPersonality(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality: "You are a helpful assistant.",
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	got := a.buildSystemPrompt(nil)
+	if !strings.Contains(got, "You are a helpful assistant.") {
+		t.Errorf("expected personality in system prompt, got: %q", got)
+	}
+}
+
+func TestBuildSystemPrompt_IncludesMemorySection(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality:      "agent",
+			MaxContextTokens: 100000,
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	memories := []store.MemoryEntry{
+		{Content: "remember this important fact"},
+	}
+	got := a.buildSystemPrompt(memories)
+	if !strings.Contains(got, "remember this important fact") {
+		t.Errorf("expected memory content in system prompt, got: %q", got)
+	}
+	if !strings.Contains(got, "## Relevant Context:") {
+		t.Errorf("expected memory section header in system prompt, got: %q", got)
+	}
+}
+
+func TestBuildSystemPrompt_NoMemorySectionWhenEmpty(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality: "agent",
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	got := a.buildSystemPrompt(nil)
+	if strings.Contains(got, "## Relevant Context:") {
+		t.Errorf("should not include memory section when memories is nil, got: %q", got)
+	}
+	got2 := a.buildSystemPrompt([]store.MemoryEntry{})
+	if strings.Contains(got2, "## Relevant Context:") {
+		t.Errorf("should not include memory section when memories is empty, got: %q", got2)
+	}
+}
+
+func TestBuildToolDefs_ReturnsOneEntryPerTool(t *testing.T) {
+	toolA := &mockTool{name: "tool_a"}
+	toolB := &mockTool{name: "tool_b"}
+	a := &Agent{
+		config: config.AgentConfig{},
+		tools: map[string]tool.Tool{
+			"tool_a": toolA,
+			"tool_b": toolB,
+		},
+		skills: nil,
+	}
+	defs := a.buildToolDefs()
+	if len(defs) != 2 {
+		t.Errorf("expected 2 tool definitions, got %d", len(defs))
+	}
+	names := map[string]bool{}
+	for _, d := range defs {
+		names[d.Name] = true
+	}
+	if !names["tool_a"] {
+		t.Error("expected tool_a in definitions")
+	}
+	if !names["tool_b"] {
+		t.Error("expected tool_b in definitions")
+	}
+}
+
+func TestBuildToolDefs_EmptyWhenNoTools(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	defs := a.buildToolDefs()
+	if len(defs) != 0 {
+		t.Errorf("expected 0 tool definitions for empty tools map, got %d", len(defs))
+	}
+}
+
+func TestBuildContext_EqualsAssemblingBothMethods(t *testing.T) {
+	// Regression test: buildContext must produce the same ChatRequest as
+	// manually assembling via buildSystemPrompt + buildToolDefs.
+	toolA := &mockTool{name: "tool_x"}
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality:      "regression test personality",
+			MaxContextTokens: 100000,
+			MaxTokensPerTurn: 4096,
+		},
+		tools:  map[string]tool.Tool{"tool_x": toolA},
+		skills: nil,
+	}
+	memories := []store.MemoryEntry{
+		{Content: "regression memory entry"},
+	}
+	conv := &store.Conversation{
+		ID:        "reg",
+		ChannelID: "reg",
+		Messages:  []provider.ChatMessage{},
+		CreatedAt: time.Now(),
+	}
+
+	// Build via the combined buildContext method.
+	req := a.buildContext(conv, memories)
+
+	// Build manually via the two extracted methods.
+	wantSystemPrompt := a.buildSystemPrompt(memories)
+	wantTools := a.buildToolDefs()
+
+	if req.SystemPrompt != wantSystemPrompt {
+		t.Errorf("SystemPrompt mismatch.\nbuildContext: %q\nbuildSystemPrompt: %q", req.SystemPrompt, wantSystemPrompt)
+	}
+	if len(req.Tools) != len(wantTools) {
+		t.Errorf("Tools length mismatch: buildContext=%d, buildToolDefs=%d", len(req.Tools), len(wantTools))
+	}
+	for i, td := range req.Tools {
+		if td.Name != wantTools[i].Name {
+			t.Errorf("Tools[%d].Name mismatch: %q vs %q", i, td.Name, wantTools[i].Name)
+		}
+	}
+}

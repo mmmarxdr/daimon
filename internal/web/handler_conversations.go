@@ -93,7 +93,11 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 
 	conv, err := s.deps.Store.LoadConversation(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "conversation not found")
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "conversation not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
 		return
 	}
 

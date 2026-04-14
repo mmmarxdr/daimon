@@ -8,16 +8,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var wsUpgrader = websocket.Upgrader{
-	CheckOrigin:    func(r *http.Request) bool { return true },
-	ReadBufferSize: 1024,
-	WriteBufferSize: 1024,
-}
-
 // handleMetricsWebSocket upgrades the connection to WebSocket and pushes a
 // MetricsSnapshot every 5 seconds until the client disconnects.
 func (s *Server) handleMetricsWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	conn, err := s.wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Warn("web: ws/metrics upgrade error", "error", err)
 		return

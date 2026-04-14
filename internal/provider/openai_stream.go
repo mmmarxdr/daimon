@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 )
 
@@ -249,8 +250,14 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				stopReason = normalizeFinishReason(*choice.FinishReason)
 
-				// Close any active tool calls.
-				for idx, acc := range accumulators {
+				// Close any active tool calls in deterministic index order.
+				indices := make([]int, 0, len(accumulators))
+				for idx := range accumulators {
+					indices = append(indices, idx)
+				}
+				sort.Ints(indices)
+				for _, idx := range indices {
+					acc := accumulators[idx]
 					toolCalls = append(toolCalls, assembleToolCall(
 						acc.id, acc.name, acc.arguments.String(),
 					))

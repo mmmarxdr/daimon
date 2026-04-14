@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,13 +64,33 @@ const (
 )
 
 // NewWebChannel creates a WebChannel ready to accept connections.
+// allowedOrigins controls which WebSocket origins are permitted. If nil or
+// empty (or contains "*"), all origins are allowed (backwards-compatible default).
 // Call Start() before HandleWebSocket connections arrive so the inbox is set.
-func NewWebChannel() *WebChannel {
+func NewWebChannel(allowedOrigins ...string) *WebChannel {
+	allowAll := len(allowedOrigins) == 0
+	originSet := make(map[string]bool, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			allowAll = true
+		}
+		originSet[strings.TrimRight(o, "/")] = true
+	}
+
 	return &WebChannel{
 		upgrader: websocket.Upgrader{
-			CheckOrigin:  func(r *http.Request) bool { return true },
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
+			CheckOrigin: func(r *http.Request) bool {
+				if allowAll {
+					return true
+				}
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // same-origin requests have no Origin header
+				}
+				return originSet[strings.TrimRight(origin, "/")]
+			},
 		},
 	}
 }

@@ -153,6 +153,8 @@ type ipRateLimiter struct {
 	visitors map[string]*rateBucket
 	rate     int           // max requests per window
 	window   time.Duration // sliding window size
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 type rateBucket struct {
@@ -165,14 +167,27 @@ func newIPRateLimiter(rate int, window time.Duration) *ipRateLimiter {
 		visitors: make(map[string]*rateBucket),
 		rate:     rate,
 		window:   window,
+		done:     make(chan struct{}),
 	}
 	// Periodic cleanup of stale entries.
+	ticker := time.NewTicker(window * 2)
 	go func() {
-		for range time.Tick(window * 2) {
-			rl.cleanup()
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				rl.cleanup()
+			case <-rl.done:
+				return
+			}
 		}
 	}()
 	return rl
+}
+
+// Stop shuts down the background cleanup goroutine. Safe to call multiple times.
+func (rl *ipRateLimiter) Stop() {
+	rl.stopOnce.Do(func() { close(rl.done) })
 }
 
 func (rl *ipRateLimiter) allow(ip string) bool {
@@ -199,7 +214,7 @@ func (rl *ipRateLimiter) cleanup() {
 	}
 }
 
-func rateLimitMiddleware(limiter *ipRateLimiter, next http.Handler) http.Handler {
+func rateLimitMiddleware(limiter *ipRateLimiter, trustProxy bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only rate-limit API and WebSocket endpoints.
 		path := r.URL.Path
@@ -207,7 +222,7 @@ func rateLimitMiddleware(limiter *ipRateLimiter, next http.Handler) http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
-		ip := extractIP(r)
+		ip := extractIP(r, trustProxy)
 		if !limiter.allow(ip) {
 			slog.Warn("rate limit exceeded", "ip", ip, "path", path)
 			w.Header().Set("Retry-After", "60")
@@ -218,13 +233,18 @@ func rateLimitMiddleware(limiter *ipRateLimiter, next http.Handler) http.Handler
 	})
 }
 
-func extractIP(r *http.Request) string {
-	// Prefer X-Forwarded-For for reverse proxy setups.
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if ip, _, ok := strings.Cut(xff, ","); ok {
-			return strings.TrimSpace(ip)
+// extractIP returns the client IP address from the request. When trustProxy is
+// true, the X-Forwarded-For header is trusted and the leftmost IP is used (set
+// by a trusted reverse proxy). When trustProxy is false (the default), only
+// RemoteAddr is used to prevent IP spoofing via header injection.
+func extractIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if ip, _, ok := strings.Cut(xff, ","); ok {
+				return strings.TrimSpace(ip)
+			}
+			return strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
 	}
 	if ip, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return ip
