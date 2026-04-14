@@ -133,6 +133,54 @@ type WebStore interface {
 	DeleteMemory(ctx context.Context, scopeID string, entryID int64) error
 }
 
+// CostRecord represents a single LLM call cost record.
+type CostRecord struct {
+	ID            string
+	SessionID     string
+	ChannelID     string
+	Model         string
+	InputTokens   int
+	OutputTokens  int
+	InputCostUSD  float64
+	OutputCostUSD float64
+	TotalCostUSD  float64
+	Timestamp     time.Time
+}
+
+// CostFilter allows filtering cost records by dimension.
+type CostFilter struct {
+	SessionID string
+	ChannelID string
+	Model     string
+	Since     time.Time
+	Until     time.Time
+}
+
+// CostModelCost represents aggregated costs for a single model.
+type CostModelCost struct {
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	TotalCostUSD float64
+	CallCount    int
+}
+
+// CostSummary represents aggregated cost data across records.
+type CostSummary struct {
+	TotalInputTokens  int
+	TotalOutputTokens int
+	TotalCostUSD      float64
+	RecordCount       int
+	ByModel           []CostModelCost
+}
+
+// CostStore is an optional extension for cost tracking.
+// Only SQLiteStore implements this; callers type-assert.
+type CostStore interface {
+	RecordCost(ctx context.Context, record CostRecord) error
+	GetCostSummary(ctx context.Context, filter CostFilter) (CostSummary, error)
+}
+
 // SecretsStore is an optional extension of Store for encrypted key-value secrets.
 // Only SQLiteStore implements this interface. Callers type-assert:
 //

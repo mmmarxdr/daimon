@@ -138,6 +138,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 			return fmt.Errorf("migration v9: %w", err)
 		}
 	}
+	if version < 10 {
+		if err := s.migrateV10(); err != nil {
+			return fmt.Errorf("migration v10: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -485,6 +490,52 @@ func (s *SQLiteStore) migrateV8() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 8"); err != nil {
 		return fmt.Errorf("updating schema version to 8: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV10 creates the cost_records table for LLM call cost tracking.
+// Indexed by session, channel, model, and created_at for efficient filtering.
+// Advances schema_version to 10.
+func (s *SQLiteStore) migrateV10() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS cost_records (
+			id              TEXT PRIMARY KEY,
+			session_id      TEXT NOT NULL,
+			channel_id      TEXT NOT NULL,
+			model           TEXT NOT NULL,
+			input_tokens    INTEGER NOT NULL,
+			output_tokens   INTEGER NOT NULL,
+			input_cost_usd  REAL NOT NULL,
+			output_cost_usd REAL NOT NULL,
+			total_cost_usd  REAL NOT NULL,
+			created_at      DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("creating cost_records table: %w", err)
+	}
+
+	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_cost_session ON cost_records(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_cost_channel ON cost_records(channel_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_cost_model ON cost_records(model)`,
+		`CREATE INDEX IF NOT EXISTS idx_cost_created ON cost_records(created_at)`,
+	}
+	for _, idx := range indexes {
+		if _, err := tx.Exec(idx); err != nil {
+			return fmt.Errorf("creating cost index: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 10"); err != nil {
+		return fmt.Errorf("updating schema version to 10: %w", err)
 	}
 
 	return tx.Commit()
