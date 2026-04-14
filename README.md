@@ -19,7 +19,15 @@
 
 ## Install
 
-### Option A: Download a release (recommended)
+### Option A: One-liner (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
+```
+
+Detects your OS and architecture, downloads the latest release, and installs to `/usr/local/bin`.
+
+### Option B: Download a release manually
 
 Go to [Releases](https://github.com/mmmarxdr/micro-claw/releases) and download the binary for your platform. Release binaries include the web frontend.
 
@@ -30,7 +38,7 @@ chmod +x microagent
 sudo mv microagent /usr/local/bin/
 ```
 
-### Option B: Build from source
+### Option C: Build from source
 
 ```bash
 git clone https://github.com/mmmarxdr/micro-claw.git
@@ -45,7 +53,7 @@ make build-full
 # Binary is at bin/microagent
 ```
 
-### Option C: Go install
+### Option D: Go install
 
 ```bash
 go install github.com/mmmarxdr/micro-claw/cmd/microagent@latest
@@ -57,22 +65,29 @@ go install github.com/mmmarxdr/micro-claw/cmd/microagent@latest
 
 ## Quick Start
 
-**1. Run the setup wizard:**
+**1. Start the web dashboard:**
 
 ```bash
-microagent
+microagent web
 ```
 
-On first run (no config found), an interactive TUI wizard launches automatically. It walks you through:
+On first run (no config found), the setup wizard launches automatically in your browser. It walks you through:
 
 | Step | What |
 |------|------|
-| Provider | OpenRouter, Anthropic, Gemini, OpenAI, or Ollama |
-| Model & API key | Pre-filled default + your API key |
-| Channel | CLI, Telegram, or Discord |
-| Store path | Where conversations are saved (default: `~/.microagent/data`) |
+| Provider | Anthropic, OpenAI, Google, Deepseek, Qwen, OpenRouter, or Ollama |
+| API key | Validated with a real API call before saving |
+| Model | Choose from a curated catalog per provider |
 
-The wizard writes `~/.microagent/config.yaml` and starts the agent.
+The wizard writes `~/.microagent/config.yaml`, authenticates you via cookie, and drops you into the dashboard. No token copy-paste needed.
+
+**Alternative: Terminal setup wizard:**
+
+```bash
+microagent --setup
+```
+
+The TUI wizard guides you through the same steps in the terminal.
 
 **2. Or create a config manually:**
 
