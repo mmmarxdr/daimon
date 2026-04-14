@@ -260,6 +260,26 @@ type ProviderConfig struct {
 	Fallback   *FallbackConfig `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
+// IsProviderConfigured reports whether cfg has a complete provider setup.
+// Returns (true, nil) when all required fields are present.
+// Returns (false, missing) with every missing-field description accumulated
+// in a single pass — no short-circuit.
+//
+// Ollama does not require an API key; all other providers do.
+func IsProviderConfigured(cfg Config) (bool, []string) {
+	var missing []string
+	if cfg.Provider.Type == "" {
+		missing = append(missing, "provider.type is not set")
+	}
+	if cfg.Provider.Model == "" {
+		missing = append(missing, "provider.model is not set")
+	}
+	if cfg.Provider.Type != "ollama" && cfg.Provider.APIKey == "" {
+		missing = append(missing, "provider.api_key is not set")
+	}
+	return len(missing) == 0, missing
+}
+
 type ChannelConfig struct {
 	Type         string  `yaml:"type"          json:"type"`
 	Token        string  `yaml:"token"         json:"token"` // e.g. for telegram

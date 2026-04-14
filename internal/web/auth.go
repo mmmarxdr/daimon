@@ -34,6 +34,13 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 			return
 		}
 
+		// Setup endpoints are always accessible — no config exists before first run.
+		// Exception: /api/setup/reset requires auth (destructive operation).
+		if strings.HasPrefix(path, "/api/setup/") && path != "/api/setup/reset" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Extract the candidate token.
 		candidate := tokenFromRequest(r)
 

@@ -27,19 +27,24 @@ type MCPManager interface {
 	Test(ctx context.Context, cfg config.MCPServerConfig) ([]string, error)
 }
 
+// providerFactory constructs a Provider from a ProviderConfig.
+// Abstracted for testability — tests inject a mock factory; production uses provider.NewFromConfig.
+type providerFactory func(cfg config.ProviderConfig) (provider.Provider, error)
+
 // ServerDeps holds the dependencies for the web server.
 type ServerDeps struct {
-	Store       store.Store
-	Auditor     audit.Auditor
-	Config      *config.Config
-	ConfigPath  string                 // resolved path to config.yaml (for MCP/skill operations)
-	MCPService  MCPManager
-	ModelLister provider.ModelLister   // nil if provider doesn't support model listing
-	Tools       map[string]tool.Tool   // registered tool instances
-	StartedAt   time.Time
-	Version     string
-	WebChannel  *channel.WebChannel // nil disables the /ws/chat endpoint
-	MediaStore  store.MediaStore    // nil when media uploads are not configured
+	Store           store.Store
+	Auditor         audit.Auditor
+	Config          *config.Config
+	ConfigPath      string               // resolved path to config.yaml (for MCP/skill operations)
+	MCPService      MCPManager
+	ModelLister     provider.ModelLister // nil if provider doesn't support model listing
+	Tools           map[string]tool.Tool // registered tool instances
+	StartedAt       time.Time
+	Version         string
+	WebChannel      *channel.WebChannel // nil disables the /ws/chat endpoint
+	MediaStore      store.MediaStore    // nil when media uploads are not configured
+	ProviderFactory providerFactory     // nil defaults to provider.NewFromConfig
 }
 
 // Server is the HTTP dashboard server.
@@ -163,6 +168,15 @@ func (s *Server) mediaStore() store.MediaStore {
 
 // routes registers all HTTP routes.
 func (s *Server) routes() {
+	// Setup endpoints — always accessible, bypass auth middleware via authMiddleware exemption.
+	s.mux.HandleFunc("GET /api/setup/status", s.handleGetSetupStatus)
+	s.mux.HandleFunc("GET /api/setup/providers", s.handleGetSetupProviders)
+	// POST /api/setup/validate-key and /api/setup/complete bypass auth (pre-setup flow).
+	// POST /api/setup/reset requires auth (guarded by the auth middleware — NOT in exempt list).
+	s.mux.HandleFunc("POST /api/setup/validate-key", s.handleValidateKey)
+	s.mux.HandleFunc("POST /api/setup/complete", s.handleSetupComplete)
+	s.mux.HandleFunc("POST /api/setup/reset", s.handleSetupReset)
+
 	s.mux.HandleFunc("GET /api/status", s.handleGetStatus)
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)

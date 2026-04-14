@@ -1372,3 +1372,105 @@ func createTempFile(t *testing.T, content string) string {
 	f.Close()
 	return f.Name()
 }
+
+func TestIsProviderConfigured(t *testing.T) {
+	tests := []struct {
+		name        string
+		cfg         Config
+		wantOK      bool
+		wantMissing []string // substrings that must appear in missing fields
+	}{
+		{
+			name: "fully configured anthropic",
+			cfg: Config{
+				Provider: ProviderConfig{
+					Type:   "anthropic",
+					Model:  "claude-sonnet-4-6",
+					APIKey: "sk-ant-xxx",
+				},
+			},
+			wantOK:      true,
+			wantMissing: nil,
+		},
+		{
+			name:        "missing provider type",
+			cfg:         Config{},
+			wantOK:      false,
+			wantMissing: []string{"provider.type"},
+		},
+		{
+			name: "missing model",
+			cfg: Config{
+				Provider: ProviderConfig{
+					Type:   "anthropic",
+					APIKey: "sk-ant-xxx",
+				},
+			},
+			wantOK:      false,
+			wantMissing: []string{"provider.model"},
+		},
+		{
+			name: "missing api_key non-ollama",
+			cfg: Config{
+				Provider: ProviderConfig{
+					Type:  "openai",
+					Model: "gpt-5.4",
+				},
+			},
+			wantOK:      false,
+			wantMissing: []string{"provider.api_key"},
+		},
+		{
+			name: "ollama without api_key is ok",
+			cfg: Config{
+				Provider: ProviderConfig{
+					Type:  "ollama",
+					Model: "llama3",
+				},
+			},
+			wantOK:      true,
+			wantMissing: nil,
+		},
+		{
+			name: "multiple missing fields",
+			cfg: Config{
+				Provider: ProviderConfig{
+					Type: "openai",
+				},
+			},
+			wantOK:      false,
+			wantMissing: []string{"provider.model", "provider.api_key"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, missing := IsProviderConfigured(tc.cfg)
+
+			if ok != tc.wantOK {
+				t.Errorf("IsProviderConfigured() ok = %v, want %v", ok, tc.wantOK)
+			}
+
+			if tc.wantMissing == nil {
+				if len(missing) != 0 {
+					t.Errorf("expected no missing fields, got %v", missing)
+				}
+				return
+			}
+
+			// Verify each expected substring appears in at least one missing field.
+			for _, want := range tc.wantMissing {
+				found := false
+				for _, m := range missing {
+					if strings.Contains(m, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected missing field containing %q, got %v", want, missing)
+				}
+			}
+		})
+	}
+}

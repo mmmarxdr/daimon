@@ -588,28 +588,12 @@ func main() {
 
 // buildProvider constructs the appropriate Provider implementation from a ProviderConfig.
 // Returns error defensively; config.Load() validates the type before main() runs.
+// Empty type defaults to "anthropic" for backwards compatibility.
 func buildProvider(cfg config.ProviderConfig) (provider.Provider, error) {
-	switch cfg.Type {
-	case "gemini":
-		return provider.NewGeminiProvider(cfg), nil
-	case "openrouter":
-		return provider.NewOpenRouterProvider(cfg), nil
-	case "openai":
-		p, err := provider.NewOpenAIProvider(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize openai provider: %w", err)
-		}
-		return p, nil
-	case "ollama":
-		p, err := provider.NewOllamaProvider(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize ollama provider: %w", err)
-		}
-		return p, nil
-	default:
-		// Anthropic is the default (covers "" and "anthropic")
-		return provider.NewAnthropicProvider(cfg), nil
+	if cfg.Type == "" {
+		cfg.Type = "anthropic"
 	}
+	return provider.NewFromConfig(cfg)
 }
 
 // asProviderConfig converts a FallbackConfig to ProviderConfig for buildProvider.

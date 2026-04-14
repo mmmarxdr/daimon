@@ -1,0 +1,328 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"microagent/internal/config"
+	"microagent/internal/provider"
+	"microagent/internal/setup"
+)
+
+// setupStatusResponse is the response body for GET /api/setup/status.
+type setupStatusResponse struct {
+	NeedsSetup bool     `json:"needs_setup"`
+	Missing    []string `json:"missing"`
+}
+
+// handleGetSetupStatus returns whether the system needs first-time setup.
+// Always returns HTTP 200 — this is a status query, not an error condition.
+// This endpoint bypasses auth middleware.
+func (s *Server) handleGetSetupStatus(w http.ResponseWriter, r *http.Request) {
+	ok, missing := config.IsProviderConfigured(*s.deps.Config)
+	resp := setupStatusResponse{
+		NeedsSetup: !ok,
+		Missing:    missing,
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// modelInfoJSON is the JSON representation of a setup.ModelInfo.
+type modelInfoJSON struct {
+	ID          string  `json:"id"`
+	DisplayName string  `json:"display_name"`
+	CostIn      float64 `json:"cost_in"`
+	CostOut     float64 `json:"cost_out"`
+	ContextK    int     `json:"context_k"`
+	Description string  `json:"description"`
+}
+
+// handleGetSetupProviders returns the provider catalog as JSON.
+// Ollama is represented as an empty array (free-text model entry).
+// OtherModelSentinel entries (id == "") are excluded.
+// This endpoint bypasses auth middleware.
+func (s *Server) handleGetSetupProviders(w http.ResponseWriter, r *http.Request) {
+	catalog := make(map[string][]modelInfoJSON)
+
+	// Include all providers from the catalog, filtering sentinel entries.
+	for prov, models := range setup.ProviderCatalog {
+		entries := make([]modelInfoJSON, 0, len(models))
+		for _, m := range models {
+			if m.ID == "" {
+				continue // skip OtherModelSentinel
+			}
+			entries = append(entries, modelInfoJSON{
+				ID:          m.ID,
+				DisplayName: m.DisplayName,
+				CostIn:      m.CostIn,
+				CostOut:     m.CostOut,
+				ContextK:    m.ContextK,
+				Description: m.Description,
+			})
+		}
+		catalog[prov] = entries
+	}
+
+	// Ollama is intentionally absent from ProviderCatalog (free-text only).
+	// Ensure it appears in the response as an empty array.
+	if _, ok := catalog["ollama"]; !ok {
+		catalog["ollama"] = []modelInfoJSON{}
+	}
+
+	writeJSON(w, http.StatusOK, catalog)
+}
+
+// validateKeyRequest is the request body for POST /api/setup/validate-key.
+type validateKeyRequest struct {
+	Provider string `json:"provider"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url"`
+}
+
+// validateKeyResponse is the response body for POST /api/setup/validate-key.
+type validateKeyResponse struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error,omitempty"`
+}
+
+// handleValidateKey validates a provider API key by making a live HealthCheck.
+// Returns 403 if setup is already complete (to prevent re-validation when configured).
+// Uses a 10-second timeout on the validation call.
+// This endpoint bypasses auth middleware.
+func (s *Server) handleValidateKey(w http.ResponseWriter, r *http.Request) {
+	// Guard: if already configured, this endpoint is disabled.
+	if ok, _ := config.IsProviderConfigured(*s.deps.Config); ok {
+		writeError(w, http.StatusForbidden, "setup already complete")
+		return
+	}
+
+	var req validateKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	provCfg := config.ProviderConfig{
+		Type:    req.Provider,
+		Model:   req.Model,
+		APIKey:  req.APIKey,
+		BaseURL: req.BaseURL,
+	}
+
+	factory := s.deps.ProviderFactory
+	if factory == nil {
+		factory = provider.NewFromConfig
+	}
+
+	prov, err := factory(provCfg)
+	if err != nil {
+		writeJSON(w, http.StatusOK, validateKeyResponse{Valid: false, Error: err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	if _, err := prov.HealthCheck(ctx); err != nil {
+		writeJSON(w, http.StatusOK, validateKeyResponse{Valid: false, Error: err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, validateKeyResponse{Valid: true})
+}
+
+// setupCompleteRequest is the request body for POST /api/setup/complete.
+type setupCompleteRequest struct {
+	Provider string `json:"provider"`
+	APIKey   string `json:"api_key"`
+	Model    string `json:"model"`
+	BaseURL  string `json:"base_url"`
+}
+
+// setupCompleteResponse is the response body for POST /api/setup/complete.
+type setupCompleteResponse struct {
+	Success         bool   `json:"success"`
+	AuthToken       string `json:"auth_token"`
+	ConfigPath      string `json:"config_path"`
+	RestartRequired bool   `json:"restart_required"`
+}
+
+// handleSetupComplete writes the provider config atomically and reloads in-memory state.
+// If a config file already exists, non-provider fields are preserved.
+// Generates an auth token if one is not already set.
+func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
+	var req setupCompleteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Validate required fields.
+	if req.Provider == "" {
+		writeError(w, http.StatusBadRequest, "provider is required")
+		return
+	}
+	if req.Model == "" {
+		writeError(w, http.StatusBadRequest, "model is required")
+		return
+	}
+	if req.Provider != "ollama" && req.APIKey == "" {
+		writeError(w, http.StatusBadRequest, "api_key is required for this provider")
+		return
+	}
+
+	cfgPath := s.deps.ConfigPath
+	if cfgPath == "" {
+		// Fallback: write next to a default path.
+		home, _ := os.UserHomeDir()
+		cfgPath = filepath.Join(home, ".microagent", "config.yaml")
+	}
+
+	// Capture the current provider type before any changes (for restart detection).
+	prevType := s.deps.Config.Provider.Type
+
+	// Load existing config if present, otherwise start with defaults.
+	var base config.Config
+	existingData, err := os.ReadFile(cfgPath)
+	if err == nil {
+		if err2 := yaml.Unmarshal(existingData, &base); err2 != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to parse existing config: %v", err2))
+			return
+		}
+	} else {
+		// First-time defaults.
+		base.Web.Enabled = true
+		base.Store.Type = "sqlite"
+		if home, err2 := os.UserHomeDir(); err2 == nil {
+			base.Store.Path = filepath.Join(home, ".microagent", "data")
+		}
+	}
+
+	// Restart is required when switching provider type on an already-configured system.
+	restartRequired := prevType != "" && prevType != req.Provider
+
+	// Overlay provider fields only.
+	base.Provider.Type = req.Provider
+	base.Provider.Model = req.Model
+	base.Provider.APIKey = req.APIKey
+	base.Provider.BaseURL = req.BaseURL
+
+	// Ensure auth token exists.
+	authToken := base.Web.AuthToken
+	if authToken == "" {
+		t, err := GenerateToken()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to generate auth token")
+			return
+		}
+		authToken = t
+		base.Web.AuthToken = authToken
+	}
+
+	// Atomic write: temp file + rename.
+	if err := atomicWriteConfig(cfgPath, &base); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to write config: %v", err))
+		return
+	}
+
+	// Reload provider fields in-memory.
+	s.deps.Config.Provider = base.Provider
+	s.deps.Config.Web.AuthToken = authToken
+
+	writeJSON(w, http.StatusOK, setupCompleteResponse{
+		Success:         true,
+		AuthToken:       authToken,
+		ConfigPath:      cfgPath,
+		RestartRequired: restartRequired,
+	})
+}
+
+// handleSetupReset clears provider fields from config and disk.
+// Requires Bearer auth. Request body must contain {"confirm":"DELETE"}.
+func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Confirm string `json:"confirm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Confirm != "DELETE" {
+		writeError(w, http.StatusBadRequest, `confirm must be exactly "DELETE"`)
+		return
+	}
+
+	cfgPath := s.deps.ConfigPath
+	if cfgPath == "" {
+		home, _ := os.UserHomeDir()
+		cfgPath = filepath.Join(home, ".microagent", "config.yaml")
+	}
+
+	// Load existing config to preserve non-provider fields.
+	var base config.Config
+	if data, err := os.ReadFile(cfgPath); err == nil {
+		if err2 := yaml.Unmarshal(data, &base); err2 != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to parse config: %v", err2))
+			return
+		}
+	}
+
+	// Clear provider fields only.
+	base.Provider.Type = ""
+	base.Provider.Model = ""
+	base.Provider.APIKey = ""
+	base.Provider.BaseURL = ""
+
+	if err := atomicWriteConfig(cfgPath, &base); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to write config: %v", err))
+		return
+	}
+
+	// Reload in-memory.
+	s.deps.Config.Provider = base.Provider
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true, "needs_setup": true})
+}
+
+// atomicWriteConfig marshals cfg to YAML and writes it atomically using a
+// temp file in the same directory followed by os.Rename.
+func atomicWriteConfig(path string, cfg *config.Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()          //nolint:errcheck
+		os.Remove(tmpName)   //nolint:errcheck
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName) //nolint:errcheck
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName) //nolint:errcheck
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	return nil
+}
