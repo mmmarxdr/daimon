@@ -188,10 +188,9 @@ func (w *WebChannel) HandleWebSocket(rw http.ResponseWriter, r *http.Request) {
 
 	// Read limits and deadlines.
 	conn.SetReadLimit(wsMaxMessageSize)
-	conn.SetReadDeadline(time.Now().Add(wsPongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(wsPongWait))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(wsPongWait))
-		return nil
+		return conn.SetReadDeadline(time.Now().Add(wsPongWait))
 	})
 
 	connID := "web:" + uuid.New().String()[:8]

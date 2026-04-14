@@ -76,13 +76,12 @@ func TestFixedSizeChunker_Overlap(t *testing.T) {
 		if len(c1) == 0 || len(c2) == 0 {
 			continue
 		}
-		// The last `overlap` runes of c1 should appear somewhere near the start of c2
+		// Soft check: verify chunks have some overlap (strict position is implementation-dependent with snapping).
 		overlapText := string(c1[max(0, len(c1)-overlap):])
-		if !strings.HasPrefix(string(c2), strings.TrimSpace(overlapText[:min(len(overlapText), 5)])) {
-			// Soft check: just verify chunks are not completely disjoint
-			// (strict overlap start position is implementation-dependent with snapping)
+		prefix := strings.TrimSpace(overlapText[:min(len(overlapText), 5)])
+		if prefix != "" && !strings.Contains(string(c2[:min(len(c2), len(c1))]), prefix) {
+			t.Logf("overlap check: chunk %d tail %q not found near start of chunk %d", i, prefix, i+1)
 		}
-		_ = overlapText
 	}
 }
 

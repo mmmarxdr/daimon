@@ -41,7 +41,7 @@ func (p *curatorMockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*
 	return &provider.ChatResponse{Content: p.response}, nil
 }
 
-func (p *curatorMockProvider) chatCalls() int {
+func (p *curatorMockProvider) chatCalls() int { //nolint:unused // kept for future test assertions
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.calls
@@ -138,7 +138,7 @@ func enabledCurationCfg() config.MemoryCurationConfig {
 	}
 }
 
-func enabledDedupCfg() config.DeduplicationConfig {
+func enabledDedupCfg() config.DeduplicationConfig { //nolint:unused // kept for future test assertions
 	return config.DeduplicationConfig{
 		Enabled:         true,
 		CosineThreshold: 0.85,

@@ -32,7 +32,7 @@ func (s *integSender) Send(_ context.Context, msg channel.OutgoingMessage) error
 	return nil
 }
 
-func (s *integSender) callCount() int {
+func (s *integSender) callCount() int { //nolint:unused // kept for future test assertions
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.calls)

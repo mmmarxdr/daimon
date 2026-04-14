@@ -39,7 +39,7 @@ func (c *countingSender) count() int {
 	return len(c.calls)
 }
 
-func (c *countingSender) ruleNames() []string {
+func (c *countingSender) ruleNames() []string { //nolint:unused // kept for future test assertions
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	names := make([]string, len(c.calls))

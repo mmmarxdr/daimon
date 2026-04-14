@@ -79,7 +79,7 @@ func (s *consolidatorMockStore) appendCount() int {
 	return len(s.appendCalls)
 }
 
-func (s *consolidatorMockStore) updateCount() int {
+func (s *consolidatorMockStore) updateCount() int { //nolint:unused // kept for future test assertions
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.updateCalls)

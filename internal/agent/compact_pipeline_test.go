@@ -133,7 +133,7 @@ func TestFindNearestBoundaryBefore_EmptyBoundaries(t *testing.T) {
 
 // --- T3.2 tests: Pass 1 tool result compression ---
 
-func makeTurnMessages(userContent, assistantContent, toolResult string) []provider.ChatMessage {
+func makeTurnMessages(userContent, assistantContent, toolResult string) []provider.ChatMessage { //nolint:unused // kept for future test assertions
 	return []provider.ChatMessage{
 		{Role: "user", Content: content.TextBlock(userContent)},
 		{

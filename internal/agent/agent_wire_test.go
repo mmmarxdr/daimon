@@ -108,12 +108,15 @@ func TestNew_ContextMgr_Synthesis_NoneWhenNeitherSet(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // trackingContextManager wraps ContextManager and tracks calls to Manage.
+//
+//nolint:unused // kept for future integration test assertions
 type trackingContextManager struct {
 	*ContextManager
 	manageCalled int
 	lastInputLen int
 }
 
+//nolint:unused // kept for future integration test assertions
 func (t *trackingContextManager) Manage(
 	ctx context.Context,
 	systemPrompt string,

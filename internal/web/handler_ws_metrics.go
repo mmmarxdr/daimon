@@ -19,10 +19,9 @@ func (s *Server) handleMetricsWebSocket(w http.ResponseWriter, r *http.Request) 
 	defer conn.Close()
 
 	conn.SetReadLimit(4096) // control frames only
-	conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	conn.SetPongHandler(func(string) error {
-		conn.SetReadDeadline(time.Now().Add(90 * time.Second))
-		return nil
+		return conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	})
 
 	// Send an initial snapshot immediately.
