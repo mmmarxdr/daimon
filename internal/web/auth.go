@@ -25,6 +25,14 @@ func GenerateToken() (string, error) {
 // HTTP:      Authorization: Bearer <token>
 // WebSocket: ?token=<token> query parameter (browsers cannot set headers on WS).
 func authMiddleware(token string, next http.Handler) http.Handler {
+	return authMiddlewareDynamic(func() string { return token }, next)
+}
+
+// authMiddlewareDynamic is like authMiddleware but reads the expected token
+// from a function on every request. This allows the token to be updated at
+// runtime (e.g. after setup-complete writes a new token to config) without
+// requiring a server restart.
+func authMiddlewareDynamic(tokenFn func() string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -41,10 +49,17 @@ func authMiddleware(token string, next http.Handler) http.Handler {
 			return
 		}
 
+		expected := tokenFn()
+		// If no token is configured yet (pre-setup), allow all requests.
+		if expected == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Extract the candidate token.
 		candidate := tokenFromRequest(r)
 
-		if !tokenMatch(candidate, token) {
+		if !tokenMatch(candidate, expected) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}

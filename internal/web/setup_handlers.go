@@ -258,8 +258,12 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	base.Provider.APIKey = req.APIKey
 	base.Provider.BaseURL = req.BaseURL
 
-	// Ensure auth token exists.
-	authToken := base.Web.AuthToken
+	// Ensure auth token exists. Prefer the current in-memory token (set at
+	// startup), then fall back to the on-disk value, then generate a new one.
+	authToken := s.deps.Config.Web.AuthToken
+	if authToken == "" {
+		authToken = base.Web.AuthToken
+	}
 	if authToken == "" {
 		t, err := GenerateToken()
 		if err != nil {
@@ -267,8 +271,8 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		authToken = t
-		base.Web.AuthToken = authToken
 	}
+	base.Web.AuthToken = authToken
 
 	// Atomic write: temp file + rename.
 	if err := atomicWriteConfig(cfgPath, &base); err != nil {
