@@ -90,6 +90,44 @@ func configGet(args []string, cfgPath string) error {
 	return nil
 }
 
+// configSetAliasTable maps legacy v1 dotpaths to v2 dotpath templates.
+// The placeholder <active> is resolved at call time to cfg.Models.Default.Provider.
+func configSetAliasTable() map[string]string {
+	return map[string]string{
+		"provider.api_key":  "providers.<active>.api_key",
+		"provider.base_url": "providers.<active>.base_url",
+		"provider.type":     "models.default.provider",
+		"provider.model":    "models.default.model",
+	}
+}
+
+// resolveAlias performs a prefix match against the alias table and resolves the
+// <active> placeholder using cfg.Models.Default.Provider. It returns the
+// rewritten path, or an error when <active> is required but empty.
+// If path does not match any alias, it is returned unchanged.
+func resolveAlias(path string, cfg *config.Config) (string, error) {
+	aliases := configSetAliasTable()
+	for legacy, template := range aliases {
+		if path == legacy || strings.HasPrefix(path, legacy+".") {
+			active := cfg.Models.Default.Provider
+			if strings.Contains(template, "<active>") && active == "" {
+				return "", fmt.Errorf(
+					"cannot use alias %q: no active provider set. Set it first with: microagent config set models.default.provider <name>",
+					legacy,
+				)
+			}
+			rewritten := strings.ReplaceAll(template, "<active>", active)
+			// If path has a suffix beyond the exact alias (unlikely given current
+			// table, but guard for future extensions).
+			if path != legacy {
+				rewritten = rewritten + path[len(legacy):]
+			}
+			return rewritten, nil
+		}
+	}
+	return path, nil
+}
+
 // configSet implements `microagent config set <path> <value>`.
 func configSet(args []string, cfgPath string) error {
 	if len(args) < 2 {
@@ -99,6 +137,18 @@ func configSet(args []string, cfgPath string) error {
 	value := args[1]
 
 	resolved, err := resolveCfgPath(cfgPath)
+	if err != nil {
+		return err
+	}
+
+	// Load the typed Config first so we can resolve alias placeholders.
+	cfg, err := config.Load(resolved)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Resolve legacy alias before touching the raw map.
+	dotPath, err = resolveAlias(dotPath, cfg)
 	if err != nil {
 		return err
 	}
@@ -194,6 +244,7 @@ func redactSecrets(yamlStr string) string {
 
 // getFieldByPath navigates a Config struct using a dot-separated path
 // and returns the string representation of the value.
+// It handles both struct fields (by yaml tag) and map segments (by key lookup).
 func getFieldByPath(cfg *config.Config, dotPath string) (string, error) {
 	parts := strings.Split(dotPath, ".")
 	v := reflect.ValueOf(cfg).Elem()
@@ -205,15 +256,37 @@ func getFieldByPath(cfg *config.Config, dotPath string) (string, error) {
 			}
 			v = v.Elem()
 		}
-		if v.Kind() != reflect.Struct {
-			return "", fmt.Errorf("path %q: %q is not a struct", dotPath, strings.Join(parts[:i], "."))
-		}
 
-		field := findFieldByYAMLTag(v, part)
-		if !field.IsValid() {
-			return "", fmt.Errorf("unknown config path: %q (no field %q)", dotPath, part)
+		switch v.Kind() { //nolint:exhaustive
+		case reflect.Struct:
+			field := findFieldByYAMLTag(v, part)
+			if !field.IsValid() {
+				return "", fmt.Errorf("unknown config path: %q (no field %q)", dotPath, part)
+			}
+			v = field
+
+		case reflect.Map:
+			// Map key must be string-keyed.
+			key := reflect.ValueOf(part)
+			entry := v.MapIndex(key)
+			if !entry.IsValid() {
+				// Missing key on read: return zero value representation.
+				entry = reflect.New(v.Type().Elem()).Elem()
+			}
+			// Map values are unaddressable; wrap in interface for further descent.
+			// If the value is a struct, we need an addressable copy.
+			if entry.Kind() == reflect.Struct {
+				// Make an addressable copy so struct field access works.
+				tmp := reflect.New(entry.Type()).Elem()
+				tmp.Set(entry)
+				v = tmp
+			} else {
+				v = entry
+			}
+
+		default:
+			return "", fmt.Errorf("path %q: %q is not a struct or map", dotPath, strings.Join(parts[:i], "."))
 		}
-		v = field
 	}
 
 	// Dereference final pointer.
@@ -267,9 +340,39 @@ func formatValue(v reflect.Value) string {
 	}
 }
 
+// providerCredentialsFields is the set of valid yaml field names on ProviderCredentials.
+// Used to reject unknown fields when writing providers.<name>.<field>.
+var providerCredentialsFields = map[string]bool{
+	"api_key":  true,
+	"base_url": true,
+}
+
+// validateProviderPath checks that a path of the form providers.<name>.<field>
+// references a valid ProviderCredentials field. Returns an error for unknown fields.
+func validateProviderPath(parts []string) error {
+	// parts = ["providers", "<name>", "<field>", ...]
+	if len(parts) < 3 {
+		return nil // too short to validate — let normal flow handle
+	}
+	if parts[0] != "providers" {
+		return nil // not a providers path
+	}
+	field := parts[2]
+	if !providerCredentialsFields[field] {
+		return fmt.Errorf("unknown config path: %q (no field or key %q in providers entry; valid fields: api_key, base_url)", strings.Join(parts, "."), field)
+	}
+	return nil
+}
+
 // setFieldInMap sets a value in a nested map using a dot-separated path.
 func setFieldInMap(m map[string]interface{}, dotPath string, value interface{}) error {
 	parts := strings.Split(dotPath, ".")
+
+	// Validate provider sub-paths to catch unknown fields early (FR-30).
+	if err := validateProviderPath(parts); err != nil {
+		return err
+	}
+
 	current := m
 
 	for i := 0; i < len(parts)-1; i++ {

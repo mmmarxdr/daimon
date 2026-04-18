@@ -420,3 +420,258 @@ channel:
 		t.Error("expected stream to default to true in v2")
 	}
 }
+
+// configWithActiveProvider is the YAML fixture for alias tests — v2 shape with openrouter active.
+const configWithActiveProviderYAML = `
+agent:
+  name: "TestBot"
+providers:
+  openrouter:
+    api_key: sk-or-existing-key
+  anthropic:
+    api_key: sk-ant-existing-key
+models:
+  default:
+    provider: openrouter
+    model: anthropic/claude-haiku-4-5
+channel:
+  type: cli
+store:
+  type: file
+  path: /tmp/test-microagent/data
+`
+
+// configNoActiveProviderYAML is the fixture where models.default.provider is empty.
+const configNoActiveProviderYAML = `
+agent:
+  name: "TestBot"
+providers:
+  openrouter:
+    api_key: sk-or-existing-key
+models:
+  default:
+    provider: ""
+    model: ""
+channel:
+  type: cli
+store:
+  type: file
+  path: /tmp/test-microagent/data
+`
+
+// TestConfigSet_LegacyAlias tests AS-18: legacy v1 dotpaths transparently redirect to v2 paths.
+func TestConfigSet_LegacyAlias(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		value     string
+		checkFunc func(t *testing.T, cfg *config.Config)
+	}{
+		{
+			name:  "provider.api_key redirects to active provider api_key",
+			path:  "provider.api_key",
+			value: "sk-new-xxx",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Providers["openrouter"].APIKey
+				if got != "sk-new-xxx" {
+					t.Errorf("expected providers[openrouter].api_key = %q, got %q", "sk-new-xxx", got)
+				}
+			},
+		},
+		{
+			name:  "provider.base_url redirects to active provider base_url",
+			path:  "provider.base_url",
+			value: "https://custom.openrouter.ai",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Providers["openrouter"].BaseURL
+				if got != "https://custom.openrouter.ai" {
+					t.Errorf("expected providers[openrouter].base_url = %q, got %q", "https://custom.openrouter.ai", got)
+				}
+			},
+		},
+		{
+			name:  "provider.type redirects to models.default.provider",
+			path:  "provider.type",
+			value: "anthropic",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Models.Default.Provider
+				if got != "anthropic" {
+					t.Errorf("expected models.default.provider = %q, got %q", "anthropic", got)
+				}
+			},
+		},
+		{
+			name:  "provider.model redirects to models.default.model",
+			path:  "provider.model",
+			value: "claude-opus-4-6",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Models.Default.Model
+				if got != "claude-opus-4-6" {
+					t.Errorf("expected models.default.model = %q, got %q", "claude-opus-4-6", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgPath := writeTestConfig(t, configWithActiveProviderYAML)
+
+			if err := configSet([]string{tt.path, tt.value}, cfgPath); err != nil {
+				t.Fatalf("configSet(%q, %q): %v", tt.path, tt.value, err)
+			}
+
+			// Reload and verify.
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatalf("reload config: %v", err)
+			}
+			tt.checkFunc(t, cfg)
+		})
+	}
+}
+
+// TestConfigSet_NewPath tests AS-19: v2 dotpaths work directly.
+func TestConfigSet_NewPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		value     string
+		checkFunc func(t *testing.T, cfg *config.Config)
+	}{
+		{
+			name:  "providers.anthropic.api_key",
+			path:  "providers.anthropic.api_key",
+			value: "sk-ant-newkey",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Providers["anthropic"].APIKey
+				if got != "sk-ant-newkey" {
+					t.Errorf("expected %q, got %q", "sk-ant-newkey", got)
+				}
+			},
+		},
+		{
+			name:  "providers.anthropic.base_url",
+			path:  "providers.anthropic.base_url",
+			value: "https://api.anthropic.com",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Providers["anthropic"].BaseURL
+				if got != "https://api.anthropic.com" {
+					t.Errorf("expected %q, got %q", "https://api.anthropic.com", got)
+				}
+			},
+		},
+		{
+			name:  "models.default.provider",
+			path:  "models.default.provider",
+			value: "anthropic",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Models.Default.Provider
+				if got != "anthropic" {
+					t.Errorf("expected %q, got %q", "anthropic", got)
+				}
+			},
+		},
+		{
+			name:  "models.default.model",
+			path:  "models.default.model",
+			value: "claude-opus-4-6",
+			checkFunc: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				got := cfg.Models.Default.Model
+				if got != "claude-opus-4-6" {
+					t.Errorf("expected %q, got %q", "claude-opus-4-6", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfgPath := writeTestConfig(t, configWithActiveProviderYAML)
+
+			if err := configSet([]string{tt.path, tt.value}, cfgPath); err != nil {
+				t.Fatalf("configSet(%q, %q): %v", tt.path, tt.value, err)
+			}
+
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatalf("reload config: %v", err)
+			}
+			tt.checkFunc(t, cfg)
+		})
+	}
+}
+
+// TestConfigSet_UnknownPath tests AS-20: unrecognized path segment → non-zero exit + descriptive error.
+func TestConfigSet_UnknownPath(t *testing.T) {
+	cfgPath := writeTestConfig(t, configWithActiveProviderYAML)
+
+	err := configSet([]string{"providers.nonexistent.whatever", "value"}, cfgPath)
+	if err == nil {
+		t.Fatal("expected error for unknown path, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("expected error to mention 'unknown', got: %q", err.Error())
+	}
+}
+
+// TestConfigSet_AliasWithoutActive tests FR-28 error path: alias used when no active provider.
+func TestConfigSet_AliasWithoutActive(t *testing.T) {
+	cfgPath := writeTestConfig(t, configNoActiveProviderYAML)
+
+	err := configSet([]string{"provider.api_key", "sk-any"}, cfgPath)
+	if err == nil {
+		t.Fatal("expected error when no active provider is set, got nil")
+	}
+	// Must mention "active provider" or equivalent guidance.
+	if !strings.Contains(strings.ToLower(err.Error()), "active provider") {
+		t.Errorf("expected error to mention 'active provider', got: %q", err.Error())
+	}
+}
+
+// TestConfigShow_RedactsProvidersMapSecrets tests OQ-2: redactSecrets masks providers[*].api_key.
+func TestConfigShow_RedactsProvidersMapSecrets(t *testing.T) {
+	const multiProviderYAML = `
+providers:
+  anthropic:
+    api_key: sk-ant-real-secret
+  openrouter:
+    api_key: sk-or-real-secret
+models:
+  default:
+    provider: anthropic
+    model: claude-opus-4-6
+channel:
+  type: cli
+`
+	path := writeTestConfig(t, multiProviderYAML)
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	output := redactSecrets(string(data))
+
+	if strings.Contains(output, "sk-ant-real-secret") {
+		t.Error("anthropic api_key not redacted in providers map")
+	}
+	if strings.Contains(output, "sk-or-real-secret") {
+		t.Error("openrouter api_key not redacted in providers map")
+	}
+	if !strings.Contains(output, "****") {
+		t.Error("expected '****' in redacted output")
+	}
+}
