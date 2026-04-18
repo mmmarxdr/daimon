@@ -427,41 +427,29 @@ func TestEnricher_TagParsing(t *testing.T) {
 	}
 }
 
-// TestResolveEnrichModel verifies model selection per provider.
+// TestResolveEnrichModel verifies that resolveEnrichModel returns the
+// override when set and empty string otherwise (signals "use provider default").
 func TestResolveEnrichModel(t *testing.T) {
 	tests := []struct {
 		providerName string
 		override     string
-		wantContains string
+		want         string
 	}{
-		{"anthropic", "", "haiku"},
-		{"gemini", "", "flash"},
-		{"openai", "", "mini"},
-		{"openrouter", "", "llama"},
+		{"anthropic", "", ""},
+		{"gemini", "", ""},
+		{"openai", "", ""},
+		{"openrouter", "", ""},
 		{"unknown", "", ""},
 		{"anthropic", "custom-model", "custom-model"},
+		{"openrouter", "meta-llama/llama-3.1-8b-instruct:free", "meta-llama/llama-3.1-8b-instruct:free"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.providerName+"_"+tt.override, func(t *testing.T) {
 			prov := &enrichMockProviderWithName{name: tt.providerName}
 			got := resolveEnrichModel(prov, tt.override)
-			if tt.override != "" {
-				if got != tt.override {
-					t.Errorf("expected override %q, got %q", tt.override, got)
-				}
-				return
-			}
-			if tt.wantContains == "" {
-				// Unknown provider returns empty string.
-				if got != "" {
-					t.Errorf("expected empty string for unknown provider, got %q", got)
-				}
-				return
-			}
-			if !strings.Contains(got, tt.wantContains) {
-				t.Errorf("expected model to contain %q for provider %q, got %q",
-					tt.wantContains, tt.providerName, got)
+			if got != tt.want {
+				t.Errorf("expected %q, got %q", tt.want, got)
 			}
 		})
 	}

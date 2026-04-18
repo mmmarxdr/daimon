@@ -163,22 +163,15 @@ func parseEnrichTags(raw string) []string {
 	return tags
 }
 
-// resolveEnrichModel returns the cheapest model for the given provider.
-// If override is set, it takes precedence.
-func resolveEnrichModel(prov provider.Provider, override string) string {
-	if override != "" {
-		return override
-	}
-	switch prov.Name() {
-	case "anthropic":
-		return "claude-haiku-3-5"
-	case "gemini":
-		return "gemini-2.0-flash-lite"
-	case "openai":
-		return "gpt-4o-mini"
-	case "openrouter":
-		return "meta-llama/llama-3-8b-instruct:free"
-	default:
-		return "" // use provider's configured default
-	}
+// resolveEnrichModel returns the override when set, otherwise an empty string
+// which signals to callers to use the provider's configured default model
+// (the same one the main agent uses).
+//
+// Rationale: previously this function returned a "cheapest per provider"
+// hardcoded model (e.g. meta-llama/llama-3-8b-instruct:free on OpenRouter),
+// but those model names go stale — OpenRouter retires free-tier models
+// without notice, causing 404s. Respecting the user's already-chosen model
+// is safer. Users who want a cheaper classifier can set agent.enrich_model.
+func resolveEnrichModel(_ provider.Provider, override string) string {
+	return override
 }
