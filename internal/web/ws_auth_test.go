@@ -144,19 +144,35 @@ func TestWS_CheckOrigin_AllowsListed(t *testing.T) {
 	}
 }
 
-// TestWS_CheckOrigin_EmptyAllowedOrigins_CurrentBehavior documents FR-35 Phase 2 state:
-// when AllowedOrigins is empty, the upgrader currently allows all origins.
-// Phase 5 (T-035/T-036) will harden this to same-origin only.
-// The SameSite=Strict cookie + auth middleware provide the real protection for same-origin deploys.
-func TestWS_CheckOrigin_EmptyAllowedOrigins_CurrentBehavior(t *testing.T) {
+// TestWS_CrossOrigin_Rejected_WhenNotInAllowedList verifies T-035, FR-35, INV-5:
+// when AllowedOrigins is empty (same-origin mode), a cross-origin WS request
+// whose Origin header does not match the request Host MUST be rejected.
+func TestWS_CrossOrigin_Rejected_WhenNotInAllowedList(t *testing.T) {
+	// Empty AllowedOrigins → same-origin only.
 	upgrader := newWSUpgrader(nil)
 
+	// Request Host is localhost; Origin is a different scheme+host.
 	req, _ := http.NewRequest(http.MethodGet, "http://localhost/ws/metrics", nil)
-	req.Header.Set("Origin", "https://any.example.com")
+	req.Host = "localhost"
+	req.Header.Set("Origin", "https://evil.example.com")
 
-	// Phase 2: allow-all is the current behavior. Phase 5 will tighten this.
-	result := upgrader.CheckOrigin(req)
-	_ = result // behavior is documented here; Phase 5 will assert false
+	if upgrader.CheckOrigin(req) {
+		t.Error("CheckOrigin: cross-origin request should be rejected when AllowedOrigins is empty (same-origin-only mode)")
+	}
+}
+
+// TestWS_SameOrigin_Allowed_WhenAllowedOriginsEmpty verifies T-035, FR-35:
+// a same-origin WS request (Origin matches Host) is allowed even when AllowedOrigins is empty.
+func TestWS_SameOrigin_Allowed_WhenAllowedOriginsEmpty(t *testing.T) {
+	upgrader := newWSUpgrader(nil)
+
+	req, _ := http.NewRequest(http.MethodGet, "http://localhost:8080/ws/metrics", nil)
+	req.Host = "localhost:8080"
+	req.Header.Set("Origin", "http://localhost:8080")
+
+	if !upgrader.CheckOrigin(req) {
+		t.Error("CheckOrigin: same-origin request should be allowed when AllowedOrigins is empty")
+	}
 }
 
 // TestWS_CheckOrigin_SameOrigin_NoOriginHeader verifies FR-35:

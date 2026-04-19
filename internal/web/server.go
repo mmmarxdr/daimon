@@ -112,30 +112,47 @@ func NewServer(deps ServerDeps) *Server {
 }
 
 // newWSUpgrader builds a websocket.Upgrader that validates the request origin
-// against allowedOrigins. If allowedOrigins is empty or contains "*", all
-// origins are permitted (backwards-compatible default).
+// against allowedOrigins.
+//
+// Cross-origin mode (allowedOrigins non-empty): only origins in the list are
+// accepted; "*" is rejected as a wildcard — it would pair with
+// Allow-Credentials which is prohibited (INV-5, FR-35).
+//
+// Same-origin mode (allowedOrigins empty): the Origin header MUST match the
+// request Host (scheme + host + port). Requests with no Origin header (e.g.
+// same-origin native WS from the same browser tab) are always allowed.
+// This replaces the old allow-all default (T-035/T-036, FR-35).
 func newWSUpgrader(allowedOrigins []string) websocket.Upgrader {
-	allowAll := len(allowedOrigins) == 0
 	originSet := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
-		if o == "*" {
-			allowAll = true
+		if o != "*" { // wildcard explicitly excluded (INV-5)
+			originSet[strings.TrimRight(o, "/")] = true
 		}
-		originSet[strings.TrimRight(o, "/")] = true
 	}
+	crossOriginMode := len(originSet) > 0
 
 	return websocket.Upgrader{
 		ReadBufferSize:  4096,
 		WriteBufferSize: 4096,
 		CheckOrigin: func(r *http.Request) bool {
-			if allowAll {
-				return true
-			}
 			origin := r.Header.Get("Origin")
 			if origin == "" {
-				return true // same-origin requests have no Origin header
+				// No Origin header — same-origin browser request or non-browser
+				// CLI client. Allow in both modes (FR-35, T-164).
+				return true
 			}
-			return originSet[strings.TrimRight(origin, "/")]
+			if crossOriginMode {
+				return originSet[strings.TrimRight(origin, "/")]
+			}
+			// Same-origin mode: origin must match the request host.
+			// The gorilla/websocket default was allow-all; we enforce host match.
+			host := r.Host
+			if host == "" {
+				host = r.URL.Host
+			}
+			// Compare scheme+host+port. Origin may or may not have a trailing slash.
+			return strings.TrimRight(origin, "/") == ("http://"+host) ||
+				strings.TrimRight(origin, "/") == ("https://"+host)
 		},
 	}
 }

@@ -166,6 +166,26 @@ limits:
 #   port: 8080
 #   host: "127.0.0.1"              # use 0.0.0.0 to expose to the network (requires auth_token)
 #   auth_token: ""                  # auto-generated on startup if empty; also: MICROAGENT_WEB_TOKEN env var
+#
+#   # auth_token_issued_at is managed automatically — do NOT edit by hand.
+#   # It records when the current auth token was last issued (setup or logout).
+#   # The dashboard session expires 30 days after this timestamp (server-enforced).
+#   # auth_token_issued_at: ""
+#
+#   # trust_proxy: false            # set true when running behind a reverse proxy (nginx, Caddy, etc.)
+#   #                               # that terminates TLS. When true, X-Forwarded-Proto: https causes the
+#   #                               # auth cookie to be set with the Secure flag. Never set true unless
+#   #                               # the proxy is trusted and strips X-Forwarded-Proto from clients.
+#
+#   # Cross-origin deployment (frontend on a separate domain, e.g. Netlify/Cloudflare Pages):
+#   # List every frontend origin that is allowed to reach this backend. Leave empty (default)
+#   # for same-origin mode (frontend and backend served from the same host:port).
+#   # When non-empty: SameSite=None; Secure is set on the auth cookie, CORS echoes listed
+#   # origins with Allow-Credentials: true, and WS CheckOrigin validates against this list.
+#   # Wildcard "*" is NOT supported (incompatible with Allow-Credentials).
+#   # allowed_origins: []
+#   #   - "https://app.example.com"
+#   #   - "https://dashboard.example.com"
 
 # -----------------------------------------------------------------------------
 # Audit log (records every tool execution)
