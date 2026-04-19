@@ -594,7 +594,7 @@ func (c *Config) ApplyDefaults() {
 		c.SkillsDir = "~/.daimon/skills"
 	}
 	if c.SkillsRegistryURL == "" {
-		c.SkillsRegistryURL = "https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/configs/skills/registry.yaml"
+		c.SkillsRegistryURL = "https://raw.githubusercontent.com/mmmarxdr/daimon/main/configs/skills/registry.yaml"
 	}
 	if c.Cron.Timezone == "" {
 		c.Cron.Timezone = "UTC"

@@ -77,7 +77,7 @@ way.
 One-liner, detects your OS and architecture:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mmmarxdr/daimon/main/install.sh | sh
 ```
 
 For other install paths (release binary, build from source, `go install`),

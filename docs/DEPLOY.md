@@ -6,7 +6,7 @@ accessible remotely over HTTPS.
 ## 1. Install
 
 ```bash
-curl -sL https://github.com/mmmarxdr/micro-claw/releases/latest/download/daimon_linux_amd64.tar.gz | tar -xz
+curl -sL https://github.com/mmmarxdr/daimon/releases/latest/download/daimon_linux_amd64.tar.gz | tar -xz
 sudo mv daimon /usr/local/bin/
 ```
 

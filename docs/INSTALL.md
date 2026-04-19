@@ -9,12 +9,12 @@ Detects your OS and architecture, downloads the latest release, and installs
 to `/usr/local/bin`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/mmmarxdr/daimon/main/install.sh | sh
 ```
 
 ## Option B — Download a release manually
 
-Grab the binary for your platform from [Releases](https://github.com/mmmarxdr/micro-claw/releases).
+Grab the binary for your platform from [Releases](https://github.com/mmmarxdr/daimon/releases).
 Release archives include the web frontend.
 
 ```bash
@@ -27,8 +27,8 @@ sudo mv daimon /usr/local/bin/
 ## Option C — Build from source
 
 ```bash
-git clone https://github.com/mmmarxdr/micro-claw.git
-cd micro-claw
+git clone https://github.com/mmmarxdr/daimon.git
+cd daimon
 
 # TUI-only (no Node.js needed)
 make build

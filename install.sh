@@ -1,10 +1,9 @@
 #!/bin/sh
 # Daimon installer — downloads the latest release binary.
-# Usage: curl -fsSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
-# Note: the GitHub repo URL will be updated to mmmarxdr/daimon after the repo rename (Phase 5).
+# Usage: curl -fsSL https://raw.githubusercontent.com/mmmarxdr/daimon/main/install.sh | sh
 set -e
 
-REPO="mmmarxdr/micro-claw"
+REPO="mmmarxdr/daimon"
 INSTALL_DIR="/usr/local/bin"
 BINARY="daimon"
 

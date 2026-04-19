@@ -552,7 +552,7 @@ CI/GitHub Actions runs `make build` — the resulting `daimon` binary contains t
 The goal is a single command that a user pastes from the README or landing page:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/mmmarxdr/daimon/main/install.sh | sh
 ```
 
 The script does:
@@ -568,8 +568,8 @@ The script does:
 For users who want to build from source:
 
 ```bash
-git clone https://github.com/mmmarxdr/micro-claw
-cd micro-claw
+git clone https://github.com/mmmarxdr/daimon
+cd daimon
 make build        # requires Go 1.22+ and Node.js 20+ (dev only)
 ./daimon
 ```
