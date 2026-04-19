@@ -41,7 +41,7 @@ channel:
   type: cli
 store:
   type: file
-  path: /tmp/test-microagent/data
+  path: /tmp/test-daimon/data
 logging:
   level: info
 limits:
@@ -438,7 +438,7 @@ channel:
   type: cli
 store:
   type: file
-  path: /tmp/test-microagent/data
+  path: /tmp/test-daimon/data
 `
 
 // configNoActiveProviderYAML is the fixture where models.default.provider is empty.
@@ -456,7 +456,7 @@ channel:
   type: cli
 store:
   type: file
-  path: /tmp/test-microagent/data
+  path: /tmp/test-daimon/data
 `
 
 // TestConfigSet_LegacyAlias tests AS-18: legacy v1 dotpaths transparently redirect to v2 paths.

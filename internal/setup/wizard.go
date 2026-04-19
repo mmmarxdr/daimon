@@ -429,7 +429,7 @@ func newWizardModel() WizardModel {
 	allowedUsersInput.Placeholder = "123456,789012 (comma-separated user IDs)"
 
 	storePathInput := textinput.New()
-	storePathInput.SetValue("~/.microagent/data")
+	storePathInput.SetValue("~/.daimon/data")
 
 	return WizardModel{
 		step: stepProvider,
@@ -639,7 +639,7 @@ func (m WizardModel) advance() (tea.Model, tea.Cmd) {
 		path, err := DetectConfigPath()
 		if err != nil {
 			// If we can't determine path, use default for display
-			path = "~/.microagent/config.yaml"
+			path = "~/.daimon/config.yaml"
 		}
 		m.configPath = path
 	}
@@ -762,11 +762,11 @@ func (m WizardModel) buildConfig() *config.Config {
 	cfg.Store.Type = "file"
 	cfg.Store.Path = m.storePathInput.Value()
 	if cfg.Store.Path == "" {
-		cfg.Store.Path = "~/.microagent/data"
+		cfg.Store.Path = "~/.daimon/data"
 	}
 	cfg.Audit.Enabled = true
 	cfg.Audit.Type = "file"
-	cfg.Audit.Path = "~/.microagent/audit"
+	cfg.Audit.Path = "~/.daimon/audit"
 	return cfg
 }
 
@@ -941,7 +941,7 @@ func (m WizardModel) viewConfirm() string {
 	displayPath := m.configPath
 	if displayPath == "" {
 		// Fallback if configPath not set yet
-		displayPath = "~/.microagent/config.yaml"
+		displayPath = "~/.daimon/config.yaml"
 	}
 	sb.WriteString(m.styles.dimLabel.Render(fmt.Sprintf("The following will be written to %s:", displayPath)))
 	sb.WriteString("\n\n")

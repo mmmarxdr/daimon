@@ -13,7 +13,7 @@ var (
 	runWizardFunc = setup.RunWizard
 )
 
-// runSetupCommand implements the "microagent setup" subcommand.
+// runSetupCommand implements the "daimon setup" subcommand.
 // It checks if stdin is a TTY, runs the setup wizard, and exits.
 // This mirrors the logic of the --setup flag in main.go.
 func runSetupCommand(args []string, cfgPath string) error {

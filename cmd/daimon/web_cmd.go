@@ -25,11 +25,11 @@ import (
 	"daimon/internal/web"
 )
 
-// runWebCommand implements `microagent web` — starts the web dashboard with a
+// runWebCommand implements `daimon web` — starts the web dashboard with a
 // full agent loop backed by a WebChannel. Users can chat at /ws/chat.
 // Blocks until SIGINT/SIGTERM.
 func runWebCommand(args []string, cfgPath string) error {
-	// Subcommand: `microagent web token` — print the auth token from config.
+	// Subcommand: `daimon web token` — print the auth token from config.
 	if len(args) > 0 && args[0] == "token" {
 		return runWebTokenCommand(cfgPath)
 	}
@@ -404,7 +404,7 @@ func printDashboardBanner(host string, port int, token string) {
 	fmt.Printf("  │  🔑 Token:     %-33s│\n", token[:16]+"...")
 	fmt.Println("  │                                                 │")
 	fmt.Println("  │  Token saved in config. Retrieve anytime with:  │")
-	fmt.Println("  │  microagent web token                           │")
+	fmt.Println("  │  daimon web token                           │")
 	fmt.Println("  │                                                 │")
 	fmt.Println("  └─────────────────────────────────────────────────┘")
 	fmt.Println()
@@ -433,7 +433,7 @@ func runWebTokenCommand(cfgPath string) error {
 	}
 	if cfg.Web.AuthToken == "" {
 		fmt.Println("No auth token configured. Start the dashboard to generate one:")
-		fmt.Println("  microagent web")
+		fmt.Println("  daimon web")
 		return nil
 	}
 	fmt.Println(cfg.Web.AuthToken)

@@ -18,7 +18,7 @@ import (
 // cfgPath is the resolved --config value (may be empty).
 func runConfigCommand(args []string, cfgPath string) error {
 	if len(args) == 0 {
-		fmt.Println("Usage: microagent config <show|get|set|validate|path>")
+		fmt.Println("Usage: daimon config <show|get|set|validate|path>")
 		return nil
 	}
 	switch args[0] {
@@ -33,14 +33,14 @@ func runConfigCommand(args []string, cfgPath string) error {
 	case "path":
 		return configPath(args[1:], cfgPath)
 	case "--help", "-help", "-h":
-		fmt.Println("Usage: microagent config <show|get|set|validate|path>")
+		fmt.Println("Usage: daimon config <show|get|set|validate|path>")
 		return nil
 	default:
-		return fmt.Errorf("unknown config subcommand: %q\nUsage: microagent config <show|get|set|validate|path>", args[0])
+		return fmt.Errorf("unknown config subcommand: %q\nUsage: daimon config <show|get|set|validate|path>", args[0])
 	}
 }
 
-// configShow implements `microagent config show`.
+// configShow implements `daimon config show`.
 func configShow(_ []string, cfgPath string) error {
 	resolved, err := resolveCfgPath(cfgPath)
 	if err != nil {
@@ -64,10 +64,10 @@ func configShow(_ []string, cfgPath string) error {
 	return nil
 }
 
-// configGet implements `microagent config get <path>`.
+// configGet implements `daimon config get <path>`.
 func configGet(args []string, cfgPath string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: microagent config get <path>\nExample: microagent config get provider.model")
+		return fmt.Errorf("usage: daimon config get <path>\nExample: daimon config get provider.model")
 	}
 	dotPath := args[0]
 
@@ -112,7 +112,7 @@ func resolveAlias(path string, cfg *config.Config) (string, error) {
 			active := cfg.Models.Default.Provider
 			if strings.Contains(template, "<active>") && active == "" {
 				return "", fmt.Errorf(
-					"cannot use alias %q: no active provider set. Set it first with: microagent config set models.default.provider <name>",
+					"cannot use alias %q: no active provider set. Set it first with: daimon config set models.default.provider <name>",
 					legacy,
 				)
 			}
@@ -128,10 +128,10 @@ func resolveAlias(path string, cfg *config.Config) (string, error) {
 	return path, nil
 }
 
-// configSet implements `microagent config set <path> <value>`.
+// configSet implements `daimon config set <path> <value>`.
 func configSet(args []string, cfgPath string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: microagent config set <path> <value>\nExample: microagent config set provider.model gpt-4")
+		return fmt.Errorf("usage: daimon config set <path> <value>\nExample: daimon config set provider.model gpt-4")
 	}
 	dotPath := args[0]
 	value := args[1]
@@ -191,7 +191,7 @@ func configSet(args []string, cfgPath string) error {
 	return nil
 }
 
-// configValidate implements `microagent config validate`.
+// configValidate implements `daimon config validate`.
 func configValidate(_ []string, cfgPath string) error {
 	resolved, err := resolveCfgPath(cfgPath)
 	if err != nil {
@@ -209,7 +209,7 @@ func configValidate(_ []string, cfgPath string) error {
 	return nil
 }
 
-// configPath implements `microagent config path`.
+// configPath implements `daimon config path`.
 func configPath(_ []string, cfgPath string) error {
 	resolved, err := resolveCfgPath(cfgPath)
 	if err != nil {

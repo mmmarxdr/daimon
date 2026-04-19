@@ -358,7 +358,7 @@ func TestYAMLPreview_RedactsAPIKey(t *testing.T) {
 	// Advance through credentials and other steps to reach stepConfirm
 	// We'll directly simulate the advance logic by setting step to just before confirm
 	m.step = stepStorePath
-	m.storePathInput.SetValue("~/.microagent/data")
+	m.storePathInput.SetValue("~/.daimon/data")
 	// Advance to stepConfirm
 	model, _ := m.advance()
 	wm := model.(WizardModel)
@@ -408,7 +408,7 @@ func TestWizard_DetectsLocalConfigYAML(t *testing.T) {
 		choices: []string{"cli", "telegram", "discord"},
 		cursor:  0, // cli
 	}
-	m.storePathInput.SetValue("~/.microagent/data")
+	m.storePathInput.SetValue("~/.daimon/data")
 	m.step = stepStorePath
 
 	// Advance to stepConfirm
@@ -426,8 +426,8 @@ func TestWizard_DetectsLocalConfigYAML(t *testing.T) {
 		t.Error("wizard view should mention config.yaml when local file exists")
 	}
 
-	// The view should show local path, not ~/.microagent/config.yaml
-	if strings.Contains(view, "~/.microagent/config.yaml") {
+	// The view should show local path, not ~/.daimon/config.yaml
+	if strings.Contains(view, "~/.daimon/config.yaml") {
 		t.Error("wizard should not show default path when local config.yaml exists")
 	}
 }
@@ -448,7 +448,7 @@ func TestYAMLPreview_RedactsToken(t *testing.T) {
 
 	// Advance to stepConfirm by simulating the step sequence
 	m.step = stepStorePath
-	m.storePathInput.SetValue("~/.microagent/data")
+	m.storePathInput.SetValue("~/.daimon/data")
 	model, _ := m.advance()
 	wm := model.(WizardModel)
 
@@ -472,7 +472,7 @@ func TestYAMLPreview_EmptyAPIKeyNotRedacted_Ollama(t *testing.T) {
 	// apiKeyInput is empty
 
 	m.step = stepStorePath
-	m.storePathInput.SetValue("~/.microagent/data")
+	m.storePathInput.SetValue("~/.daimon/data")
 	model, _ := m.advance()
 	wm := model.(WizardModel)
 
@@ -560,7 +560,7 @@ func TestAdvance_ChannelExtra_AllowedUsersOptional(t *testing.T) {
 	m.tokenInput = tokenInput
 	// allowedUsersInput left empty
 
-	m.storePathInput.SetValue("~/.microagent/data") // needed to not block next step
+	m.storePathInput.SetValue("~/.daimon/data") // needed to not block next step
 
 	result, _ := m.advance()
 	wm := result.(WizardModel)

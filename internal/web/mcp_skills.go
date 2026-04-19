@@ -42,7 +42,7 @@ func installRecipeSkill(serverName string, cfg *config.Config, cfgPath string) {
 	skillsDir := cfg.SkillsDir
 	if skillsDir == "" {
 		home, _ := os.UserHomeDir()
-		skillsDir = filepath.Join(home, ".microagent", "skills")
+		skillsDir = filepath.Join(home, ".daimon", "skills")
 	} else {
 		// Expand tilde.
 		if len(skillsDir) > 0 && skillsDir[0] == '~' {

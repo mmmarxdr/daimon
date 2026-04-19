@@ -497,9 +497,9 @@ func TestSQLiteStore_DatabaseFileAtExpectedPath(t *testing.T) {
 	}
 	defer s.Close()
 
-	dbPath := filepath.Join(dir, "microagent.db")
+	dbPath := filepath.Join(dir, "daimon.db")
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Errorf("expected microagent.db at %s, but file does not exist", dbPath)
+		t.Errorf("expected daimon.db at %s, but file does not exist", dbPath)
 	}
 }
 
@@ -1137,5 +1137,23 @@ func TestTwoPhaseSearch_Scenario14_200EntriesTop5ByCosine(t *testing.T) {
 	}
 	if len(results) != 5 {
 		t.Errorf("Scenario 14: expected 5 results, got %d", len(results))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 rename — DB filename
+// ---------------------------------------------------------------------------
+
+func TestSQLiteStore_DatabaseFileNameIsDaimon(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewSQLiteStore(config.StoreConfig{Path: dir})
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer s.Close()
+
+	dbPath := filepath.Join(dir, "daimon.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Errorf("expected daimon.db at %s, but file does not exist", dbPath)
 	}
 }

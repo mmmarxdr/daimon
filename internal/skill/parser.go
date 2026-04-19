@@ -43,7 +43,7 @@ func closeFence(line string) bool {
 }
 
 // filenameStem derives the skill name from a path when frontmatter has no name.
-// e.g. "/home/user/.microagent/skills/git-helper.md" → "git-helper"
+// e.g. "/home/user/.daimon/skills/git-helper.md" → "git-helper"
 func filenameStem(path string) string {
 	base := filepath.Base(path)
 	return strings.TrimSuffix(base, filepath.Ext(base))

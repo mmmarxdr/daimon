@@ -207,7 +207,7 @@ func (t *scheduleTaskTool) Execute(ctx context.Context, params json.RawMessage) 
 		}
 		if !found {
 			warnings = append(warnings, fmt.Sprintf(
-				"Warning: this task mentions %q but no matching MCP tool is configured. Run `microagent mcp add ...` to add one.",
+				"Warning: this task mentions %q but no matching MCP tool is configured. Run `daimon mcp add ...` to add one.",
 				keyword,
 			))
 		}

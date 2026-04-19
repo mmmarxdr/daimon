@@ -68,7 +68,7 @@ func TestMigration_V1ToV2_UpgradesCleanly(t *testing.T) {
 
 	// Build a v1-like database manually: apply old schema (no schema_version),
 	// insert a row, then open through NewSQLiteStore.
-	db, err := sql.Open("sqlite", path+"/microagent.db")
+	db, err := sql.Open("sqlite", path+"/daimon.db")
 	if err != nil {
 		t.Fatalf("opening raw db: %v", err)
 	}

@@ -374,7 +374,7 @@ func TestGetSecret_WrongKey(t *testing.T) {
 
 // SC-ENC-02: encryption key from env var (config field empty)
 func TestGetSecret_KeyFromEnvVar(t *testing.T) {
-	t.Setenv("MICROAGENT_SECRET_KEY", testSecretsKey)
+	t.Setenv("DAIMON_SECRET_KEY", testSecretsKey)
 
 	st, err := NewSQLiteStore(config.StoreConfig{
 		Type: "sqlite",
@@ -433,8 +433,8 @@ func TestSQLiteStore_ImplementsSecretsStore(t *testing.T) {
 // TestGetSecret_NoKeyAfterEnvCleared verifies no env var leaks from other tests.
 func TestGetSecret_NoKeyAfterEnvCleared(t *testing.T) {
 	// Ensure env var is unset (t.Setenv in other tests is automatically restored).
-	if v := os.Getenv("MICROAGENT_SECRET_KEY"); v != "" {
-		t.Skipf("MICROAGENT_SECRET_KEY is set in environment (%q) — skipping leakage test", v)
+	if v := os.Getenv("DAIMON_SECRET_KEY"); v != "" {
+		t.Skipf("DAIMON_SECRET_KEY is set in environment (%q) — skipping leakage test", v)
 	}
 	st := newSecretsStoreNoKey(t)
 
@@ -478,5 +478,47 @@ func TestSetSecret_UpdatedAtAdvances(t *testing.T) {
 	// but we can assert t2 >= t1.
 	if t2 < t1 {
 		t.Errorf("updated_at went backwards: t1=%q t2=%q", t1, t2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 rename — DAIMON_SECRET_KEY env var
+// ---------------------------------------------------------------------------
+
+func TestGetSecret_KeyFromDaimonEnvVar(t *testing.T) {
+	t.Setenv("DAIMON_SECRET_KEY", testSecretsKey)
+
+	st, err := NewSQLiteStore(config.StoreConfig{
+		Type: "sqlite",
+		Path: t.TempDir(),
+		// EncryptionKey deliberately empty — should be read from DAIMON_SECRET_KEY
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+
+	if err := st.SetSecret(ctx, "daimon-envkey", "daimon-envval"); err != nil {
+		t.Fatalf("SetSecret via DAIMON_SECRET_KEY: %v", err)
+	}
+	got, err := st.GetSecret(ctx, "daimon-envkey")
+	if err != nil {
+		t.Fatalf("GetSecret via DAIMON_SECRET_KEY: %v", err)
+	}
+	if got != "daimon-envval" {
+		t.Errorf("GetSecret = %q, want %q", got, "daimon-envval")
+	}
+}
+
+func TestGetSecret_NoKeyAfterDaimonEnvCleared(t *testing.T) {
+	if v := os.Getenv("DAIMON_SECRET_KEY"); v != "" {
+		t.Skipf("DAIMON_SECRET_KEY is set in environment (%q) — skipping leakage test", v)
+	}
+	st := newSecretsStoreNoKey(t)
+
+	_, err := st.GetSecret(context.Background(), "k")
+	if !errors.Is(err, ErrEncryptionKeyNotConfigured) {
+		t.Errorf("GetSecret without any key = %v, want ErrEncryptionKeyNotConfigured", err)
 	}
 }

@@ -1678,7 +1678,7 @@ func (m *mockStoreWithOutputStore) SearchOutputs(_ context.Context, _ string, _ 
 }
 
 // ---------------------------------------------------------------------------
-// TestAutoIndex_ExitCode — H2: loop reads microagent/exit_code from Meta
+// TestAutoIndex_ExitCode — H2: loop reads daimon/exit_code from Meta
 // ---------------------------------------------------------------------------
 
 // autoIndexCfg returns an AgentConfig with AutoIndexOutputs=true and Mode=Off.
@@ -1756,7 +1756,7 @@ func TestAutoIndex_ExitCode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// TestAutoIndex_Truncated — H3: loop reads microagent/truncated from Meta
+// TestAutoIndex_Truncated — H3: loop reads daimon/truncated from Meta
 // ---------------------------------------------------------------------------
 
 func TestAutoIndex_Truncated(t *testing.T) {

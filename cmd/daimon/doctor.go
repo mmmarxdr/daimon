@@ -60,7 +60,7 @@ func checkStorePath(path string) error {
 	}
 
 	// Check if it's writable by trying to create a test file
-	testFile := filepath.Join(path, ".microagent-doctor-test")
+	testFile := filepath.Join(path, ".daimon-doctor-test")
 	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 		return fmt.Errorf("store.path %q is not writable: %w", path, err)
 	}
@@ -70,7 +70,7 @@ func checkStorePath(path string) error {
 	return nil
 }
 
-// runDoctorCommand implements the "microagent doctor" subcommand.
+// runDoctorCommand implements the "daimon doctor" subcommand.
 // It loads the configuration from cfgPath and validates it.
 func runDoctorCommand(args []string, cfgPath string) error {
 	// Resolve config path (empty means use default search)

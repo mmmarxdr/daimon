@@ -83,7 +83,7 @@ func (s *MCPService) List(_ context.Context) ([]ServerStatus, error) {
 // Returns a validation error if cfg fails Validate().
 //
 // Note: YAML comments in the config file are lost on round-trip due to yaml.v3
-// marshal/unmarshal. Use 'microagent mcp validate' as a safety net after editing.
+// marshal/unmarshal. Use 'daimon mcp validate' as a safety net after editing.
 func (s *MCPService) Add(_ context.Context, cfg config.MCPServerConfig) error {
 	if err := s.Validate(cfg); err != nil {
 		return err
@@ -127,7 +127,7 @@ func (s *MCPService) Add(_ context.Context, cfg config.MCPServerConfig) error {
 // Returns ErrNotFound (wrapped) if no server with the given name exists.
 //
 // Note: YAML comments in the config file are lost on round-trip due to yaml.v3
-// marshal/unmarshal. Use 'microagent mcp validate' as a safety net after editing.
+// marshal/unmarshal. Use 'daimon mcp validate' as a safety net after editing.
 func (s *MCPService) Remove(_ context.Context, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -253,7 +253,7 @@ func TestIntegration_StaticServing(t *testing.T) {
 
 	client := ts.Client()
 
-	t.Run("GET / returns 200 with micro-claw content", func(t *testing.T) {
+	t.Run("GET / returns 200 with daimon content", func(t *testing.T) {
 		resp, err := client.Get(ts.URL + "/")
 		if err != nil {
 			t.Fatal(err)
@@ -268,8 +268,8 @@ func TestIntegration_StaticServing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(bodyBytes), "<!doctype html>") && !strings.Contains(string(bodyBytes), "micro-claw") {
-			t.Errorf("expected body to contain 'micro-claw', got: %s", string(bodyBytes))
+		if !strings.Contains(string(bodyBytes), "<!doctype html>") && !strings.Contains(string(bodyBytes), "daimon") {
+			t.Errorf("expected body to contain 'daimon', got: %s", string(bodyBytes))
 		}
 	})
 
@@ -288,8 +288,8 @@ func TestIntegration_StaticServing(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(bodyBytes), "<!doctype html>") && !strings.Contains(string(bodyBytes), "micro-claw") {
-			t.Errorf("expected SPA fallback body to contain 'micro-claw', got: %s", string(bodyBytes))
+		if !strings.Contains(string(bodyBytes), "<!doctype html>") && !strings.Contains(string(bodyBytes), "daimon") {
+			t.Errorf("expected SPA fallback body to contain 'daimon', got: %s", string(bodyBytes))
 		}
 	})
 

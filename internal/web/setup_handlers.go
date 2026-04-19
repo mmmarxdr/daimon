@@ -226,7 +226,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 	if cfgPath == "" {
 		// Fallback: write next to a default path.
 		home, _ := os.UserHomeDir()
-		cfgPath = filepath.Join(home, ".microagent", "config.yaml")
+		cfgPath = filepath.Join(home, ".daimon", "config.yaml")
 	}
 
 	// Capture the current active provider before any changes (for restart detection).
@@ -247,7 +247,7 @@ func (s *Server) handleSetupComplete(w http.ResponseWriter, r *http.Request) {
 		base.Web.Enabled = true
 		base.Store.Type = "sqlite"
 		if home, err2 := os.UserHomeDir(); err2 == nil {
-			base.Store.Path = filepath.Join(home, ".microagent", "data")
+			base.Store.Path = filepath.Join(home, ".daimon", "data")
 		}
 	}
 
@@ -336,7 +336,7 @@ func (s *Server) handleSetupReset(w http.ResponseWriter, r *http.Request) {
 	cfgPath := s.deps.ConfigPath
 	if cfgPath == "" {
 		home, _ := os.UserHomeDir()
-		cfgPath = filepath.Join(home, ".microagent", "config.yaml")
+		cfgPath = filepath.Join(home, ".daimon", "config.yaml")
 	}
 
 	// Load existing config to preserve non-provider fields.

@@ -353,7 +353,7 @@ provider:
 agent:
   max_iterations: 5
 store:
-  path: "~/.microagent/data"
+  path: "~/.daimon/data"
 tools:
   file:
     base_path: "~/workspace"
@@ -367,7 +367,7 @@ tools:
 		t.Fatalf("Expected no error, got: %v", err)
 	}
 
-	expectedStorePath := filepath.Join(homeDir, ".microagent/data")
+	expectedStorePath := filepath.Join(homeDir, ".daimon/data")
 	if cfg.Store.Path != expectedStorePath {
 		t.Errorf("Expected Store.Path %q, got %q", expectedStorePath, cfg.Store.Path)
 	}
@@ -413,7 +413,7 @@ func TestLoadConfig_FilePriority(t *testing.T) {
 		t.Fatalf("write local config: %v", err)
 	}
 
-	homeConfigDir := filepath.Join(tmpDir, ".microagent")
+	homeConfigDir := filepath.Join(tmpDir, ".daimon")
 	if err := os.MkdirAll(homeConfigDir, 0o755); err != nil {
 		t.Fatalf("mkdir home config dir: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestFindConfigPath_Override(t *testing.T) {
 
 func TestFindConfigPath_NoOverride(t *testing.T) {
 	t.Run("empty override exercises fallback logic without error if no files exist", func(t *testing.T) {
-		// FindConfigPath("") tries ~/.microagent/config.yaml then ./config.yaml
+		// FindConfigPath("") tries ~/.daimon/config.yaml then ./config.yaml
 		// Neither likely exists in a clean test environment; it should return an error about "no config file found"
 		// We can't guarantee ./config.yaml doesn't exist in the working dir, so just verify the function doesn't panic
 		// and returns either a valid path or an error.
@@ -805,16 +805,16 @@ store:
 func TestApplyDefaults_StorePathDefault(t *testing.T) {
 	cfg := &Config{}
 	cfg.ApplyDefaults()
-	if cfg.Store.Path != "~/.microagent/data" {
-		t.Errorf("Store.Path = %q, want %q", cfg.Store.Path, "~/.microagent/data")
+	if cfg.Store.Path != "~/.daimon/data" {
+		t.Errorf("Store.Path = %q, want %q", cfg.Store.Path, "~/.daimon/data")
 	}
 }
 
 func TestApplyDefaults_AuditPathDefault(t *testing.T) {
 	cfg := &Config{}
 	cfg.ApplyDefaults()
-	if cfg.Audit.Path != "~/.microagent/audit" {
-		t.Errorf("Audit.Path = %q, want %q", cfg.Audit.Path, "~/.microagent/audit")
+	if cfg.Audit.Path != "~/.daimon/audit" {
+		t.Errorf("Audit.Path = %q, want %q", cfg.Audit.Path, "~/.daimon/audit")
 	}
 }
 
@@ -1453,7 +1453,7 @@ func marshalConfig(cfg *Config) ([]byte, error) {
 
 func createTempFile(t *testing.T, content string) string {
 	t.Helper()
-	f, err := os.CreateTemp("", "microagent-config-*.yaml")
+	f, err := os.CreateTemp("", "daimon-config-*.yaml")
 	if err != nil {
 		t.Fatalf("failed to create temp file: %v", err)
 	}
@@ -1790,5 +1790,80 @@ func TestApplyDefaults_PreservesExistingAuthTokenIssuedAt(t *testing.T) {
 	if !c.Web.AuthTokenIssuedAt.Equal(existing) {
 		t.Fatalf("ApplyDefaults: AuthTokenIssuedAt mutated from %v to %v",
 			existing, c.Web.AuthTokenIssuedAt)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 rename — daimon paths, env vars, agent name
+// ---------------------------------------------------------------------------
+
+func TestApplyDefaults_StorePathIsDaimon(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Store.Path != "~/.daimon/data" {
+		t.Errorf("Store.Path = %q, want %q", cfg.Store.Path, "~/.daimon/data")
+	}
+}
+
+func TestApplyDefaults_AuditPathIsDaimon(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Audit.Path != "~/.daimon/audit" {
+		t.Errorf("Audit.Path = %q, want %q", cfg.Audit.Path, "~/.daimon/audit")
+	}
+}
+
+func TestApplyDefaults_SkillsDirIsDaimon(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.SkillsDir != "~/.daimon/skills" {
+		t.Errorf("SkillsDir = %q, want %q", cfg.SkillsDir, "~/.daimon/skills")
+	}
+}
+
+func TestApplyDefaults_AgentNameIsDaimon(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Agent.Name != "Daimon" {
+		t.Errorf("Agent.Name = %q, want %q", cfg.Agent.Name, "Daimon")
+	}
+}
+
+func TestApplyDefaults_JinaEnvVarIsDaimon(t *testing.T) {
+	t.Setenv("DAIMON_JINA_API_KEY", "test-jina-key")
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Tools.WebFetch.JinaAPIKey != "test-jina-key" {
+		t.Errorf("JinaAPIKey = %q, want %q from DAIMON_JINA_API_KEY", cfg.Tools.WebFetch.JinaAPIKey, "test-jina-key")
+	}
+}
+
+func TestApplyDefaults_WebTokenEnvVarIsDaimon(t *testing.T) {
+	t.Setenv("DAIMON_WEB_TOKEN", "test-web-token")
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Web.AuthToken != "test-web-token" {
+		t.Errorf("Web.AuthToken = %q, want %q from DAIMON_WEB_TOKEN", cfg.Web.AuthToken, "test-web-token")
+	}
+}
+
+func TestFindConfigPath_LooksInDaimonDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	daimonDir := filepath.Join(tmpDir, ".daimon")
+	if err := os.MkdirAll(daimonDir, 0o755); err != nil {
+		t.Fatalf("mkdir .daimon: %v", err)
+	}
+	cfgPath := filepath.Join(daimonDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("agent:\n  max_iterations: 5\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	// Override home dir via env — FindConfigPath uses os.UserHomeDir.
+	t.Setenv("HOME", tmpDir)
+	found, err := FindConfigPath("")
+	if err != nil {
+		t.Fatalf("FindConfigPath: %v", err)
+	}
+	if found != cfgPath {
+		t.Errorf("FindConfigPath() = %q, want %q", found, cfgPath)
 	}
 }

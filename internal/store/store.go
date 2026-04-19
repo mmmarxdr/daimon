@@ -12,7 +12,7 @@ import (
 var ErrNotFound = errors.New("not found")
 
 // ErrEncryptionKeyNotConfigured is returned when a SecretsStore method is called
-// but no encryption key has been configured via store.encryption_key or MICROAGENT_SECRET_KEY.
+// but no encryption key has been configured via store.encryption_key or DAIMON_SECRET_KEY.
 var ErrEncryptionKeyNotConfigured = errors.New("encryption key not configured")
 
 type Conversation struct {

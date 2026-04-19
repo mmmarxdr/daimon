@@ -20,7 +20,7 @@ import (
 // cfgPath is the resolved --config value (may be empty → config.FindConfigPath uses default search).
 func runSkillsCommand(args []string, cfgPath string) error {
 	if len(args) == 0 {
-		fmt.Println("Usage: microagent skills <add|list|remove|info|search>")
+		fmt.Println("Usage: daimon skills <add|list|remove|info|search>")
 		return nil
 	}
 	switch args[0] {
@@ -35,14 +35,14 @@ func runSkillsCommand(args []string, cfgPath string) error {
 	case "search":
 		return skillsSearch(args[1:], cfgPath)
 	case "--help", "-help", "-h":
-		fmt.Println("Usage: microagent skills <add|list|remove|info|search>")
+		fmt.Println("Usage: daimon skills <add|list|remove|info|search>")
 		return nil
 	default:
-		return fmt.Errorf("unknown skills subcommand: %q\nUsage: microagent skills <add|list|remove|info|search>", args[0])
+		return fmt.Errorf("unknown skills subcommand: %q\nUsage: daimon skills <add|list|remove|info|search>", args[0])
 	}
 }
 
-// skillsAdd implements `microagent skills add SRC [--force]`.
+// skillsAdd implements `daimon skills add SRC [--force]`.
 func skillsAdd(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("skills add", flag.ContinueOnError)
 	force := fs.Bool("force", false, "overwrite existing skill file")
@@ -50,8 +50,8 @@ func skillsAdd(args []string, cfgPath string) error {
 		return err
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent skills add SRC [--force]")
-		return fmt.Errorf("usage: microagent skills add SRC [--force]")
+		fmt.Fprintln(os.Stderr, "Usage: daimon skills add SRC [--force]")
+		return fmt.Errorf("usage: daimon skills add SRC [--force]")
 	}
 	src := fs.Arg(0)
 
@@ -85,7 +85,7 @@ func skillsAdd(args []string, cfgPath string) error {
 	return nil
 }
 
-// skillsList implements `microagent skills list [--store]`.
+// skillsList implements `daimon skills list [--store]`.
 func skillsList(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("skills list", flag.ContinueOnError)
 	showStore := fs.Bool("store", false, "also scan the store dir for orphaned skill files")
@@ -114,7 +114,7 @@ func skillsList(args []string, cfgPath string) error {
 	}
 
 	if len(skills) == 0 {
-		fmt.Println("No skills registered. Use 'microagent skills add' to install one.")
+		fmt.Println("No skills registered. Use 'daimon skills add' to install one.")
 		return nil
 	}
 
@@ -156,7 +156,7 @@ func skillsList(args []string, cfgPath string) error {
 	return nil
 }
 
-// skillsRemove implements `microagent skills remove NAME [--yes] [--keep-file]`.
+// skillsRemove implements `daimon skills remove NAME [--yes] [--keep-file]`.
 func skillsRemove(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("skills remove", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "skip confirmation prompt")
@@ -167,8 +167,8 @@ func skillsRemove(args []string, cfgPath string) error {
 	}
 
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent skills remove NAME [--yes] [--keep-file]")
-		return fmt.Errorf("usage: microagent skills remove NAME [--yes] [--keep-file]")
+		fmt.Fprintln(os.Stderr, "Usage: daimon skills remove NAME [--yes] [--keep-file]")
+		return fmt.Errorf("usage: daimon skills remove NAME [--yes] [--keep-file]")
 	}
 	name := fs.Arg(0)
 
@@ -221,15 +221,15 @@ type skillsInfoFrontmatter struct {
 	Author  string `yaml:"author"`
 }
 
-// skillsInfo implements `microagent skills info NAME`.
+// skillsInfo implements `daimon skills info NAME`.
 func skillsInfo(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("skills info", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent skills info NAME")
-		return fmt.Errorf("usage: microagent skills info NAME")
+		fmt.Fprintln(os.Stderr, "Usage: daimon skills info NAME")
+		return fmt.Errorf("usage: daimon skills info NAME")
 	}
 	name := fs.Arg(0)
 
@@ -333,7 +333,7 @@ func skillsInfo(args []string, cfgPath string) error {
 	return nil
 }
 
-// skillsSearch implements `microagent skills search [QUERY]`.
+// skillsSearch implements `daimon skills search [QUERY]`.
 // It fetches the registry and prints skills matching the query.
 // If no query is given, all available skills are listed.
 func skillsSearch(args []string, cfgPath string) error {

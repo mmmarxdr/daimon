@@ -228,7 +228,7 @@ func TestApply_ShellExec_GoTest(t *testing.T) {
 --- FAIL: TestBaz (0.00s)
     foo_test.go:12: expected true, got false
 FAIL
-ok  	microagent/internal/foo	0.05s`
+ok  	daimon/internal/foo	0.05s`
 
 	got, metrics := Apply("shell_exec", makeShellInput("go test ./..."), textResult(testOutput), cfg)
 	if strings.Contains(got.Content, "--- PASS:") {
@@ -942,7 +942,7 @@ func TestPreApply_ShellTool_InvalidJSON_ReturnsFalse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPreApply_Shell_MetaKeysPresent(t *testing.T) {
-	// PreApply intercepting shell_exec must emit all 4 microagent/ Meta keys.
+	// PreApply intercepting shell_exec must emit all 4 daimon/ Meta keys.
 	cfg := config.ContextModeConfig{
 		Mode:             config.ContextModeAuto,
 		ShellMaxOutput:   4096,

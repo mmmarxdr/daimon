@@ -27,7 +27,7 @@ func runCostsCommand(args []string, cfgPath string) error {
 	case "list-models":
 		return costsListModels(args[1:], cfgPath)
 	case "--help", "-help", "-h":
-		fmt.Println("Usage: microagent costs [summary|by-model|list-models]")
+		fmt.Println("Usage: daimon costs [summary|by-model|list-models]")
 		fmt.Println()
 		fmt.Println("Subcommands:")
 		fmt.Println("  summary     Show aggregate cost summary (default)")
@@ -56,7 +56,7 @@ func openCostStore(cfgPath string) (store.CostStore, func(), error) {
 	return s, func() { s.Close() }, nil
 }
 
-// costsSummary implements `microagent costs [summary]`.
+// costsSummary implements `daimon costs [summary]`.
 func costsSummary(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("costs summary", flag.ContinueOnError)
 	days := fs.Int("days", 0, "limit to last N days (0 = all time)")
@@ -123,14 +123,14 @@ func costsSummary(args []string, cfgPath string) error {
 	return nil
 }
 
-// costsByModel implements `microagent costs by-model`.
+// costsByModel implements `daimon costs by-model`.
 func costsByModel(args []string, cfgPath string) error {
 	// Same as summary but focuses on the per-model table.
 	// Accepts the same flags for filtering.
 	return costsSummary(args, cfgPath)
 }
 
-// costsListModels implements `microagent costs list-models`.
+// costsListModels implements `daimon costs list-models`.
 func costsListModels(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("costs list-models", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {

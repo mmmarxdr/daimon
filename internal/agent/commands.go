@@ -129,7 +129,7 @@ func isDigit(c byte) bool {
 
 // cmdPing replies with a liveness message.
 func cmdPing(cc CommandContext) error {
-	cc.Reply("pong — micro-claw is alive")
+	cc.Reply("pong — daimon is alive")
 	return nil
 }
 

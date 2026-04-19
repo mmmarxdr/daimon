@@ -112,7 +112,7 @@ func TestDefaultConfigPath_ReturnsHomeBased(t *testing.T) {
 	if path == "" {
 		t.Error("expected non-empty path")
 	}
-	// Should end with .microagent/config.yaml
+	// Should end with .daimon/config.yaml
 	if filepath.Base(path) != "config.yaml" {
 		t.Errorf("expected path to end with config.yaml, got %q", path)
 	}
@@ -188,7 +188,7 @@ func TestDetectConfigPath_UsesXDGWhenSet(t *testing.T) {
 	}
 
 	// Should use XDG path
-	expected := filepath.Join(tmpDir, "microagent", "config.yaml")
+	expected := filepath.Join(tmpDir, "daimon", "config.yaml")
 	if path != expected {
 		t.Errorf("DetectConfigPath() = %q, want XDG path %q", path, expected)
 	}
@@ -301,12 +301,46 @@ func minimalConfig() *config.Config {
 		},
 		Store: config.StoreConfig{
 			Type: "sqlite",
-			Path: "~/.microagent/data",
+			Path: "~/.daimon/data",
 		},
 		Audit: config.AuditConfig{
 			Enabled: true,
 			Type:    "sqlite",
-			Path:    "~/.microagent/audit",
+			Path:    "~/.daimon/audit",
 		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 rename — daimon config paths
+// ---------------------------------------------------------------------------
+
+func TestDefaultConfigPath_UsesDaimonDir(t *testing.T) {
+	path, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath: %v", err)
+	}
+	// Must use .daimon subdir, not .microagent
+	if !strings.Contains(path, ".daimon") {
+		t.Errorf("DefaultConfigPath() = %q, want path containing .daimon", path)
+	}
+}
+
+func TestDetectConfigPath_XDGUsesDaimonSubdir(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+
+	// Temporarily chdir so there's no local config.yaml
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+	os.Chdir(t.TempDir())
+
+	path, err := DetectConfigPath()
+	if err != nil {
+		t.Fatalf("DetectConfigPath: %v", err)
+	}
+	expected := filepath.Join(tmpDir, "daimon", "config.yaml")
+	if path != expected {
+		t.Errorf("DetectConfigPath() with XDG = %q, want %q", path, expected)
 	}
 }

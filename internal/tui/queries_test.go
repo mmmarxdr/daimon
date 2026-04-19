@@ -77,7 +77,7 @@ func TestLoadAuditData_WithRows(t *testing.T) {
 
 func TestLoadStoreData_NoDBFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "nonexistent", "microagent.db")
+	path := filepath.Join(dir, "nonexistent", "daimon.db")
 
 	stats, err := loadStoreData(path)
 	if err != nil {
@@ -90,7 +90,7 @@ func TestLoadStoreData_NoDBFile(t *testing.T) {
 
 func TestLoadStoreData_WithRows(t *testing.T) {
 	dir := t.TempDir()
-	dbPath := filepath.Join(dir, "microagent.db")
+	dbPath := filepath.Join(dir, "daimon.db")
 
 	db := createStoreDB(t, dbPath)
 	// Insert 1 conversation, 2 memory entries, 3 secrets.

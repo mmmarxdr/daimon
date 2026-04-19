@@ -25,7 +25,7 @@ type SQLiteStore struct {
 	embedQueryFunc func(ctx context.Context, text string) ([]float32, error) // nil when disabled
 }
 
-// NewSQLiteStore opens (or creates) a SQLite database at cfg.Path/microagent.db,
+// NewSQLiteStore opens (or creates) a SQLite database at cfg.Path/daimon.db,
 // enables WAL mode, and applies the schema. Returns an error if the database
 // cannot be opened or the schema cannot be applied.
 func NewSQLiteStore(cfg config.StoreConfig) (*SQLiteStore, error) {
@@ -33,7 +33,7 @@ func NewSQLiteStore(cfg config.StoreConfig) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("creating store directory %s: %w", cfg.Path, err)
 	}
 
-	dbPath := filepath.Join(cfg.Path, "microagent.db")
+	dbPath := filepath.Join(cfg.Path, "daimon.db")
 	// Embed pragmas in the DSN so every connection in the pool inherits them —
 	// a PRAGMA set via db.Exec only applies to the one connection that ran it.
 	// busy_timeout: wait up to 5 s on a locked write (fixes SQLITE_BUSY from
@@ -1063,12 +1063,12 @@ func scanCronJobRow(row *sql.Row) (CronJob, error) {
 }
 
 // encryptionKey resolves the AES-256 encryption key from config or environment.
-// Resolution order: StoreConfig.EncryptionKey → MICROAGENT_SECRET_KEY env var.
+// Resolution order: StoreConfig.EncryptionKey → DAIMON_SECRET_KEY env var.
 // Returns ErrEncryptionKeyNotConfigured if neither is set.
 func (s *SQLiteStore) encryptionKey() ([]byte, error) {
 	hexKey := s.cfg.EncryptionKey
 	if hexKey == "" {
-		hexKey = os.Getenv("MICROAGENT_SECRET_KEY")
+		hexKey = os.Getenv("DAIMON_SECRET_KEY")
 	}
 	if hexKey == "" {
 		return nil, ErrEncryptionKeyNotConfigured

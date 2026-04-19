@@ -27,7 +27,7 @@ func (s *FileStore) Close() error {
 func (s *FileStore) convPath(id string) (string, error) {
 	basePath := s.config.Path
 	if basePath == "" {
-		basePath = "~/.microagent/data"
+		basePath = "~/.daimon/data"
 	}
 	if strings.HasPrefix(basePath, "~") {
 		if usr, err := os.UserHomeDir(); err == nil {
@@ -45,7 +45,7 @@ func (s *FileStore) convPath(id string) (string, error) {
 func (s *FileStore) memPath(scopeID string) (string, error) {
 	basePath := s.config.Path
 	if basePath == "" {
-		basePath = "~/.microagent/data"
+		basePath = "~/.daimon/data"
 	}
 	if strings.HasPrefix(basePath, "~") {
 		if usr, err := os.UserHomeDir(); err == nil {
@@ -337,7 +337,7 @@ func (s *FileStore) SearchOutputs(_ context.Context, _ string, _ int) ([]ToolOut
 //	if ms, ok := myStore.(store.MediaStore); ok { ... } else { /* log warning */ }
 //
 // main.go logs a startup warning when cfg.Media.Enabled=true and the store
-// does not satisfy MediaStore — see cmd/microagent/main.go store construction.
+// does not satisfy MediaStore — see cmd/daimon/main.go store construction.
 //
 // Compile-time assertion.
 var _ OutputStore = (*FileStore)(nil)

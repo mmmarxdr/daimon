@@ -1,5 +1,5 @@
 # =============================================================================
-# microagent — configuration example
+# daimon — configuration example
 # =============================================================================
 # Copy this file to configs/default.yaml and fill in the values marked with
 # REPLACE_ME. That file is git-ignored, so your secrets never leave this machine.
@@ -133,15 +133,15 @@ tools:
   #   max_response_size: "1MB"
   #   blocked_domains: []
   #   jina_enabled: false    # enable Jina Reader API fallback for JS-heavy pages
-  #   jina_api_key: ""       # optional — also readable from MICROAGENT_JINA_API_KEY env var
+  #   jina_api_key: ""       # optional — also readable from DAIMON_JINA_API_KEY env var
 
 # -----------------------------------------------------------------------------
 # Store
 # -----------------------------------------------------------------------------
 store:
-  type: file                  # alternatively: sqlite (uses microagent.db at the same path for better scalability)
-  # type: sqlite              # alternative: uses microagent.db at the same path for better scalability
-  path: "~/.microagent/data"
+  type: file                  # alternatively: sqlite (uses daimon.db at the same path for better scalability)
+  # type: sqlite              # alternative: uses daimon.db at the same path for better scalability
+  path: "~/.daimon/data"
 
 # -----------------------------------------------------------------------------
 # Logging
@@ -162,10 +162,10 @@ limits:
 # Web dashboard (optional — embedded frontend + REST API + WebSocket chat)
 # -----------------------------------------------------------------------------
 # web:
-#   enabled: false                  # also activatable via --web flag or `microagent web`
+#   enabled: false                  # also activatable via --web flag or `daimon web`
 #   port: 8080
 #   host: "127.0.0.1"              # use 0.0.0.0 to expose to the network (requires auth_token)
-#   auth_token: ""                  # auto-generated on startup if empty; also: MICROAGENT_WEB_TOKEN env var
+#   auth_token: ""                  # auto-generated on startup if empty; also: DAIMON_WEB_TOKEN env var
 #
 #   # auth_token_issued_at is managed automatically — do NOT edit by hand.
 #   # It records when the current auth token was last issued (setup or logout).
@@ -192,7 +192,7 @@ limits:
 # -----------------------------------------------------------------------------
 audit:
   enabled: false
-  path: "~/.microagent/audit"
+  path: "~/.daimon/audit"
 
 # -----------------------------------------------------------------------------
 # Token filter (optional — reduces context tokens by post-processing tool output)
@@ -212,5 +212,5 @@ audit:
 #   List of skill files to load at startup. Each file can inject behavioral
 #   instructions into the system prompt and define fixed-command shell tools.
 #   Paths support ~ expansion and ${ENV_VAR} substitution.
-#   - ~/.microagent/skills/git-helper.md
+#   - ~/.daimon/skills/git-helper.md
 #   - ~/workspace/.skills/react-patterns.md

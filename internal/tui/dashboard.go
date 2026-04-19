@@ -266,14 +266,14 @@ func renderMCP(m DashboardModel) string {
 	if !d.Enabled {
 		sb.WriteString(m.styles.dimLabel.Render("MCP is disabled. Enable it in config (tools.mcp.enabled: true)."))
 		sb.WriteString("\n")
-		sb.WriteString(m.styles.dimLabel.Render("Use 'microagent mcp add' to configure servers."))
+		sb.WriteString(m.styles.dimLabel.Render("Use 'daimon mcp add' to configure servers."))
 		sb.WriteString("\n\n")
 		sb.WriteString(m.styles.hint.Render("Press 'e' to open MCP management."))
 		return sb.String()
 	}
 
 	if len(d.Servers) == 0 {
-		sb.WriteString(m.styles.dimLabel.Render("No servers configured. Use 'microagent mcp add --name NAME --transport stdio --command CMD' to add one."))
+		sb.WriteString(m.styles.dimLabel.Render("No servers configured. Use 'daimon mcp add --name NAME --transport stdio --command CMD' to add one."))
 		sb.WriteString("\n\n")
 		sb.WriteString(m.styles.hint.Render("Press 'e' to open MCP management."))
 		return sb.String()
@@ -307,13 +307,13 @@ func renderMCP(m DashboardModel) string {
 
 	sb.WriteString("\n")
 	sb.WriteString(m.styles.dimLabel.Render(
-		fmt.Sprintf("%d server(s) configured. Use 'microagent mcp test NAME' to verify connectivity.", len(d.Servers))))
+		fmt.Sprintf("%d server(s) configured. Use 'daimon mcp test NAME' to verify connectivity.", len(d.Servers))))
 	sb.WriteString("\n")
 	sb.WriteString(m.styles.hint.Render("Press 'e' to open MCP management."))
 	return sb.String()
 }
 
-// launchMCPManage suspends the dashboard and launches "microagent mcp manage" as a subprocess.
+// launchMCPManage suspends the dashboard and launches "daimon mcp manage" as a subprocess.
 // The dashboard resumes when the subprocess exits.
 func launchMCPManage(cfgPath string) tea.Cmd {
 	args := []string{"mcp", "manage"}

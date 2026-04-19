@@ -19,7 +19,7 @@ import (
 // cfgPath is the resolved --config value (may be empty).
 func runCronCommand(args []string, cfgPath string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: microagent cron <list|delete|info>")
+		return fmt.Errorf("usage: daimon cron <list|delete|info>")
 	}
 	switch args[0] {
 	case "list":
@@ -29,10 +29,10 @@ func runCronCommand(args []string, cfgPath string) error {
 	case "info":
 		return cronInfo(args[1:], cfgPath)
 	case "--help", "-help", "-h":
-		fmt.Println("Usage: microagent cron <list|delete|info>")
+		fmt.Println("Usage: daimon cron <list|delete|info>")
 		return nil
 	default:
-		return fmt.Errorf("unknown cron subcommand: %q\nUsage: microagent cron <list|delete|info>", args[0])
+		return fmt.Errorf("unknown cron subcommand: %q\nUsage: daimon cron <list|delete|info>", args[0])
 	}
 }
 
@@ -54,7 +54,7 @@ func openCronStore(cfgPath string) (store.CronStore, func(), error) {
 	return s, func() { s.Close() }, nil
 }
 
-// cronList implements `microagent cron list`.
+// cronList implements `daimon cron list`.
 func cronList(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("cron list", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -127,7 +127,7 @@ func cronList(args []string, cfgPath string) error {
 	return nil
 }
 
-// cronDelete implements `microagent cron delete <id> [--yes]`.
+// cronDelete implements `daimon cron delete <id> [--yes]`.
 func cronDelete(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("cron delete", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "skip confirmation prompt")
@@ -137,8 +137,8 @@ func cronDelete(args []string, cfgPath string) error {
 	}
 
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent cron delete <id> [--yes]")
-		return fmt.Errorf("usage: microagent cron delete <id> [--yes]")
+		fmt.Fprintln(os.Stderr, "Usage: daimon cron delete <id> [--yes]")
+		return fmt.Errorf("usage: daimon cron delete <id> [--yes]")
 	}
 	id := fs.Arg(0)
 
@@ -174,7 +174,7 @@ func cronDelete(args []string, cfgPath string) error {
 	return nil
 }
 
-// cronInfo implements `microagent cron info <id>`.
+// cronInfo implements `daimon cron info <id>`.
 func cronInfo(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("cron info", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -182,8 +182,8 @@ func cronInfo(args []string, cfgPath string) error {
 	}
 
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent cron info <id>")
-		return fmt.Errorf("usage: microagent cron info <id>")
+		fmt.Fprintln(os.Stderr, "Usage: daimon cron info <id>")
+		return fmt.Errorf("usage: daimon cron info <id>")
 	}
 	id := fs.Arg(0)
 

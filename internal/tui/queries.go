@@ -1,4 +1,4 @@
-// Package tui provides terminal UI components for the microagent dashboard.
+// Package tui provides terminal UI components for the daimon dashboard.
 package tui
 
 import (
@@ -50,7 +50,7 @@ type StoreStats struct {
 // Other errors (schema mismatch, permission denied) are returned in err.
 func LoadAll(cfg *config.Config) (OverviewData, []AuditEventRow, StoreStats, MCPTabData, error) {
 	auditDBPath := filepath.Join(cfg.Audit.Path, "audit.db")
-	storeDBPath := filepath.Join(cfg.Store.Path, "microagent.db")
+	storeDBPath := filepath.Join(cfg.Store.Path, "daimon.db")
 
 	overview, auditEvents, err1 := loadAuditData(auditDBPath)
 	storeStats, err2 := loadStoreData(storeDBPath)

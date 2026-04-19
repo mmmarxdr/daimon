@@ -1,4 +1,4 @@
-// Package tool provides execution and utility tooling for the microagent.
+// Package tool provides execution and utility tooling for the daimon agent.
 package tool
 
 // BoundedExec provides byte-limit and timeout enforcement for subprocess execution.

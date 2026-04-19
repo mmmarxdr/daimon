@@ -18,12 +18,12 @@ func DefaultConfigPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("configwriter: get home dir: %w", err)
 	}
-	return filepath.Join(home, ".microagent", "config.yaml"), nil
+	return filepath.Join(home, ".daimon", "config.yaml"), nil
 }
 
 // DetectConfigPath returns the appropriate config file path based on:
 // 1. If ./config.yaml exists in current directory, use it
-// 2. If XDG_CONFIG_HOME is set, use $XDG_CONFIG_HOME/microagent/config.yaml
+// 2. If XDG_CONFIG_HOME is set, use $XDG_CONFIG_HOME/daimon/config.yaml
 // 3. Otherwise, return DefaultConfigPath()
 func DetectConfigPath() (string, error) {
 	// Check for local config.yaml
@@ -41,7 +41,7 @@ func DetectConfigPath() (string, error) {
 
 	// Check for XDG_CONFIG_HOME
 	if xdgConfigHome := os.Getenv("XDG_CONFIG_HOME"); xdgConfigHome != "" {
-		xdgConfigPath := filepath.Join(xdgConfigHome, "microagent", "config.yaml")
+		xdgConfigPath := filepath.Join(xdgConfigHome, "daimon", "config.yaml")
 		return xdgConfigPath, nil
 	}
 
@@ -63,7 +63,7 @@ func WriteConfig(path string, cfg *config.Config) error {
 
 	// Write to a temp file in the same directory (same filesystem = atomic rename).
 	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".microagent-config-*.yaml")
+	tmp, err := os.CreateTemp(dir, ".daimon-config-*.yaml")
 	if err != nil {
 		return fmt.Errorf("configwriter: create temp file: %w", err)
 	}
@@ -216,7 +216,7 @@ func buildChannelNode(cfg *config.Config) *yaml.Node {
 func buildStoreNode(cfg *config.Config) *yaml.Node {
 	storePath := cfg.Store.Path
 	if storePath == "" {
-		storePath = "~/.microagent/data"
+		storePath = "~/.daimon/data"
 	}
 	return mappingNode(
 		"type", cfg.Store.Type,
@@ -227,7 +227,7 @@ func buildStoreNode(cfg *config.Config) *yaml.Node {
 func buildAuditNode(cfg *config.Config) *yaml.Node {
 	auditPath := cfg.Audit.Path
 	if auditPath == "" {
-		auditPath = "~/.microagent/audit"
+		auditPath = "~/.daimon/audit"
 	}
 	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	n.Content = append(n.Content,

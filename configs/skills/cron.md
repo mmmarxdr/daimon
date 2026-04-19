@@ -2,7 +2,7 @@
 name: cron_scheduler
 description: Enables the agent to schedule recurring tasks using natural language
 version: 2.0.0
-author: microagent
+author: daimon
 autoload: true
 ---
 

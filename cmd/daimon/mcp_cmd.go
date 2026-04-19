@@ -36,7 +36,7 @@ func (m *multiFlag) Set(v string) error {
 // cfgPath is the resolved --config value (may be empty → config.FindConfigPath uses default search).
 func runMCPCommand(args []string, cfgPath string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: microagent mcp <list|add|remove|test|validate|manage>")
+		return fmt.Errorf("usage: daimon mcp <list|add|remove|test|validate|manage>")
 	}
 	switch args[0] {
 	case "list":
@@ -52,10 +52,10 @@ func runMCPCommand(args []string, cfgPath string) error {
 	case "manage":
 		return mcpManage(args[1:], cfgPath)
 	case "--help", "-help", "-h":
-		fmt.Println("Usage: microagent mcp <list|add|remove|test|validate|manage>")
+		fmt.Println("Usage: daimon mcp <list|add|remove|test|validate|manage>")
 		return nil
 	default:
-		return fmt.Errorf("unknown mcp subcommand: %q\nUsage: microagent mcp <list|add|remove|test|validate|manage>", args[0])
+		return fmt.Errorf("unknown mcp subcommand: %q\nUsage: daimon mcp <list|add|remove|test|validate|manage>", args[0])
 	}
 }
 
@@ -64,14 +64,14 @@ func resolveCfgPath(cfgPath string) (string, error) {
 	resolved, err := config.FindConfigPath(cfgPath)
 	if err != nil {
 		if errors.Is(err, config.ErrNoConfig) {
-			return "", fmt.Errorf("no config file found; create one at ~/.microagent/config.yaml or pass --config")
+			return "", fmt.Errorf("no config file found; create one at ~/.daimon/config.yaml or pass --config")
 		}
 		return "", fmt.Errorf("config: %w", err)
 	}
 	return resolved, nil
 }
 
-// mcpList implements `microagent mcp list`.
+// mcpList implements `daimon mcp list`.
 func mcpList(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("mcp list", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "output as JSON")
@@ -93,7 +93,7 @@ func mcpList(args []string, cfgPath string) error {
 	}
 
 	if len(statuses) == 0 {
-		fmt.Println("No MCP servers configured. Use 'microagent mcp add' to add one.")
+		fmt.Println("No MCP servers configured. Use 'daimon mcp add' to add one.")
 		return nil
 	}
 
@@ -147,7 +147,7 @@ func mcpList(args []string, cfgPath string) error {
 	return nil
 }
 
-// mcpAdd implements `microagent mcp add`.
+// mcpAdd implements `daimon mcp add`.
 func mcpAdd(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("mcp add", flag.ContinueOnError)
 	name := fs.String("name", "", "server name (required)")
@@ -205,12 +205,12 @@ func mcpAdd(args []string, cfgPath string) error {
 	if *noTest {
 		fmt.Printf("Server %q added to config.\n", *name)
 	} else {
-		fmt.Printf("Server %q added to config. Run 'microagent mcp test %s' to verify.\n", *name, *name)
+		fmt.Printf("Server %q added to config. Run 'daimon mcp test %s' to verify.\n", *name, *name)
 	}
 	return nil
 }
 
-// mcpRemove implements `microagent mcp remove NAME`.
+// mcpRemove implements `daimon mcp remove NAME`.
 func mcpRemove(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("mcp remove", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "skip confirmation prompt")
@@ -220,8 +220,8 @@ func mcpRemove(args []string, cfgPath string) error {
 	}
 
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent mcp remove NAME [--yes]")
-		return fmt.Errorf("usage: microagent mcp remove NAME [--yes]")
+		fmt.Fprintln(os.Stderr, "Usage: daimon mcp remove NAME [--yes]")
+		return fmt.Errorf("usage: daimon mcp remove NAME [--yes]")
 	}
 	name := fs.Arg(0)
 
@@ -260,7 +260,7 @@ func mcpRemove(args []string, cfgPath string) error {
 	return nil
 }
 
-// mcpTest implements `microagent mcp test NAME`.
+// mcpTest implements `daimon mcp test NAME`.
 func mcpTest(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("mcp test", flag.ContinueOnError)
 	timeout := fs.Duration("timeout", 15*time.Second, "connection timeout")
@@ -270,8 +270,8 @@ func mcpTest(args []string, cfgPath string) error {
 	}
 
 	if fs.NArg() < 1 {
-		fmt.Fprintln(os.Stderr, "Usage: microagent mcp test NAME [--timeout DURATION]")
-		return fmt.Errorf("usage: microagent mcp test NAME [--timeout DURATION]")
+		fmt.Fprintln(os.Stderr, "Usage: daimon mcp test NAME [--timeout DURATION]")
+		return fmt.Errorf("usage: daimon mcp test NAME [--timeout DURATION]")
 	}
 	name := fs.Arg(0)
 
@@ -329,7 +329,7 @@ func mcpTest(args []string, cfgPath string) error {
 	return nil
 }
 
-// mcpValidate implements `microagent mcp validate`.
+// mcpValidate implements `daimon mcp validate`.
 func mcpValidate(args []string, cfgPath string) error {
 	fs := flag.NewFlagSet("mcp validate", flag.ContinueOnError)
 	if err := fs.Parse(args); err != nil {
@@ -406,7 +406,7 @@ func mcpValidate(args []string, cfgPath string) error {
 	return nil
 }
 
-// mcpManage implements `microagent mcp manage` — launches the TUI management screen.
+// mcpManage implements `daimon mcp manage` — launches the TUI management screen.
 func mcpManage(_ []string, cfgPath string) error {
 	return tui.RunMCPManage(cfgPath)
 }

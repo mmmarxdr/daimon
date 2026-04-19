@@ -442,7 +442,7 @@ type HTTPToolConfig struct {
 type StoreConfig struct {
 	Type          string `yaml:"type"                     json:"type"`
 	Path          string `yaml:"path"                     json:"path"`
-	EncryptionKey string `yaml:"encryption_key,omitempty" json:"encryption_key,omitempty"` // hex-encoded 32-byte key; also read from MICROAGENT_SECRET_KEY env var
+	EncryptionKey string `yaml:"encryption_key,omitempty" json:"encryption_key,omitempty"` // hex-encoded 32-byte key; also read from DAIMON_SECRET_KEY env var
 
 	// Native memory — Layer 3: optional API embeddings.
 	// Requires store.type = "sqlite". When false (default), the embedding column
@@ -520,7 +520,7 @@ type NotificationRule struct {
 // is constructed without loading from file (e.g., setup-only mode).
 func (c *Config) ApplyDefaults() {
 	if c.Agent.Name == "" {
-		c.Agent.Name = "micro-claw"
+		c.Agent.Name = "Daimon"
 	}
 	if c.Agent.MaxIterations == 0 {
 		c.Agent.MaxIterations = 10
@@ -562,7 +562,7 @@ func (c *Config) ApplyDefaults() {
 	}
 	// Jina API key: config field → env var fallback.
 	if c.Tools.WebFetch.JinaAPIKey == "" {
-		if envKey := os.Getenv("MICROAGENT_JINA_API_KEY"); envKey != "" {
+		if envKey := os.Getenv("DAIMON_JINA_API_KEY"); envKey != "" {
 			c.Tools.WebFetch.JinaAPIKey = envKey
 		}
 	}
@@ -579,19 +579,19 @@ func (c *Config) ApplyDefaults() {
 		c.Store.Type = "file"
 	}
 	if c.Store.Path == "" {
-		c.Store.Path = "~/.microagent/data"
+		c.Store.Path = "~/.daimon/data"
 	}
 	if c.Audit.Type == "" {
 		c.Audit.Type = "file"
 	}
 	if c.Audit.Path == "" {
-		c.Audit.Path = "~/.microagent/audit"
+		c.Audit.Path = "~/.daimon/audit"
 	}
 	if c.Tools.MCP.ConnectTimeout == 0 {
 		c.Tools.MCP.ConnectTimeout = 10 * time.Second
 	}
 	if c.SkillsDir == "" {
-		c.SkillsDir = "~/.microagent/skills"
+		c.SkillsDir = "~/.daimon/skills"
 	}
 	if c.SkillsRegistryURL == "" {
 		c.SkillsRegistryURL = "https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/configs/skills/registry.yaml"
@@ -679,7 +679,7 @@ func (c *Config) ApplyDefaults() {
 	}
 	// Auth token: config field → env var fallback.
 	if c.Web.AuthToken == "" {
-		if envToken := os.Getenv("MICROAGENT_WEB_TOKEN"); envToken != "" {
+		if envToken := os.Getenv("DAIMON_WEB_TOKEN"); envToken != "" {
 			c.Web.AuthToken = envToken
 		}
 	}
@@ -1073,7 +1073,7 @@ func FindConfigPath(override string) (string, error) {
 
 	home, err := os.UserHomeDir()
 	if err == nil {
-		homePath := filepath.Join(home, ".microagent/config.yaml")
+		homePath := filepath.Join(home, ".daimon/config.yaml")
 		if _, err := os.Stat(homePath); err == nil {
 			return homePath, nil
 		}
