@@ -1,10 +1,10 @@
 # Configuration Reference
 
-Daimon reads its config from `~/.microagent/config.yaml` by default. The
+Daimon reads its config from `~/.daimon/config.yaml` by default. The
 search order is:
 
 1. `--config` CLI flag
-2. `~/.microagent/config.yaml`
+2. `~/.daimon/config.yaml`
 3. `./config.yaml`
 
 All string values support `${ENV_VAR}` interpolation. Paths support `~`
@@ -27,7 +27,7 @@ channel:
 
 store:
   type: sqlite
-  path: "~/.microagent/data"
+  path: "~/.daimon/data"
 ```
 
 ## `agent`
@@ -72,7 +72,7 @@ See [docs/CHANNELS.md](CHANNELS.md) for per-channel setup.
 | `enabled` | bool | `false` | Enable web dashboard (also via `--web` flag) |
 | `port` | int | `8080` | HTTP port |
 | `host` | string | `"127.0.0.1"` | Bind address (`0.0.0.0` to expose) |
-| `auth_token` | string | auto-generated | Bearer token; also `MICROAGENT_WEB_TOKEN` env var |
+| `auth_token` | string | auto-generated | Bearer token; also `DAIMON_WEB_TOKEN` env var |
 
 See [docs/WEB_DASHBOARD.md](WEB_DASHBOARD.md) for the full web guide.
 
@@ -106,7 +106,7 @@ See [docs/MCP.md](MCP.md).
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `type` | string | `"file"` | `file` or `sqlite` |
-| `path` | string | `"~/.microagent/data"` | Storage directory |
+| `path` | string | `"~/.daimon/data"` | Storage directory |
 
 ## `logging`
 
@@ -127,7 +127,7 @@ See [docs/MCP.md](MCP.md).
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
 | `enabled` | bool | `false` | Enable audit log |
-| `path` | string | `"~/.microagent/audit"` | Audit log directory |
+| `path` | string | `"~/.daimon/audit"` | Audit log directory |
 
 ## `cron`
 

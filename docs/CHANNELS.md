@@ -18,7 +18,7 @@ channel:
   type: cli
 ```
 
-Run `microagent` and start typing. The agent responds inline.
+Run `daimon` and start typing. The agent responds inline.
 
 ## Telegram
 

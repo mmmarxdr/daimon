@@ -50,8 +50,7 @@ docs(readme): clarify VPS deploy prerequisites
 - Large refactors without prior agreement.
 - Feature additions not tracked in an issue.
 - Style-only changes to code that already passes `gofmt` and `golangci-lint`.
-- Renaming `microagent` to `daimon` piecemeal — that rename is tracked
-  as a single breaking-change issue and will ship as one coordinated PR.
+- Binary name changes (the rename from `microagent` to `daimon` has already landed in v0.4.0).
 
 ## License
 

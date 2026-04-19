@@ -8,10 +8,9 @@
 <img width="1541" height="925" alt="image" src="https://github.com/user-attachments/assets/ba522b15-055e-4d18-bb8f-d6d853f239d2" />
 
 
-> **Naming note.** The project is **Daimon**. During the 0.x phase the CLI
-> binary is still published as `microagent` from the legacy package name —
-> a rename is planned for a future release. All documentation uses the
-> `microagent` command until that migration lands.
+> **Note.** As of v0.4.0 the CLI binary is `daimon`. If you were using
+> `microagent` from a previous release, see the migration guide in
+> [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
@@ -87,15 +86,15 @@ see **[docs/INSTALL.md](docs/INSTALL.md)**.
 ### Run it
 
 ```bash
-microagent web
+daimon web
 ```
 
 On first run, a browser-based setup wizard launches automatically. It walks
 you through provider, API key, and model — validates the key with a real
-API call, writes `~/.microagent/config.yaml`, and drops you into the
+API call, writes `~/.daimon/config.yaml`, and drops you into the
 dashboard.
 
-Prefer the terminal? `microagent --setup` runs the same wizard in a TUI.
+Prefer the terminal? `daimon --setup` runs the same wizard in a TUI.
 
 Prefer a hand-written config? See **[docs/CONFIG.md](docs/CONFIG.md)**.
 
@@ -128,9 +127,9 @@ inside the binary.
 
 ## Status
 
-Early development. Expect breaking changes until 1.0. The CLI rename from
-`microagent` to `daimon` is tracked in an open issue and will ship in a
-future release.
+Early development. Expect breaking changes until 1.0. v0.4.0 completed the
+rename from `microagent` to `daimon` — see [CHANGELOG.md](CHANGELOG.md)
+for migration steps.
 
 ## Contributing
 

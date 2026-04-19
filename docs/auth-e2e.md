@@ -3,7 +3,7 @@
 Manual acceptance checklist for the `auth-httponly-complete` SDD.
 Run this against a local deployment before releasing or after any auth-related change.
 
-> **Environment**: local `microagent web` behind nginx (for proxy tests) OR plain HTTP for same-origin tests.
+> **Environment**: local `daimon web` behind nginx (for proxy tests) OR plain HTTP for same-origin tests.
 
 ---
 

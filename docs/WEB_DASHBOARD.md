@@ -7,10 +7,10 @@ conversation history, and config management.
 
 ```bash
 # Standalone (web is the only interface)
-microagent web
+daimon web
 
 # Alongside CLI/Telegram (both work simultaneously)
-microagent --web
+daimon --web
 ```
 
 On startup, the agent generates an auth token (if none is configured) and
@@ -42,7 +42,7 @@ The dashboard is **always authenticated**. Three ways to set the token:
 | Method                | Example                                                      |
 | --------------------- | ------------------------------------------------------------ |
 | Config file           | `web.auth_token: "my-secret-token"`                          |
-| Environment variable  | `MICROAGENT_WEB_TOKEN=my-secret-token microagent web`        |
+| Environment variable  | `DAIMON_WEB_TOKEN=my-secret-token daimon web`        |
 | Auto-generated        | Leave empty — token is printed on startup                    |
 
 For production or VPS deployments, set a fixed token in config or env so
@@ -68,7 +68,7 @@ web:
   enabled: true
   port: 8080
   host: "127.0.0.1"    # 0.0.0.0 to expose to network
-  auth_token: ""        # auto-generated if empty; also: MICROAGENT_WEB_TOKEN env var
+  auth_token: ""        # auto-generated if empty; also: DAIMON_WEB_TOKEN env var
 
   # auth_token_issued_at is managed automatically — do not edit by hand.
   # Records when the current auth token was last issued. TTL is 30 days.

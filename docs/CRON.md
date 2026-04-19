@@ -36,8 +36,8 @@ include all relevant details in the prompt itself.
 | ------ | ----------------------------------------------------------- |
 | Chat   | *"Show my scheduled tasks"* → agent calls `list_crons`      |
 | Chat   | *"Cancel task X"* → agent calls `delete_cron`               |
-| CLI    | `microagent cron list` / `microagent cron delete <id>`      |
-| Daemon | `microagent --daemon` — cron-only, no interactive channel   |
+| CLI    | `daimon cron list` / `daimon cron delete <id>`      |
+| Daemon | `daimon --daemon` — cron-only, no interactive channel   |
 
 ## Per-job notification
 

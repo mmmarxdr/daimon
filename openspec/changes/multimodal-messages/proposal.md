@@ -2,7 +2,7 @@
 
 ## 1. Why
 
-Users on Telegram, WhatsApp, and Discord routinely send photos, voice notes, and documents. micro-claw silently drops every non-text update at the channel edge, which is the single biggest UX gap right now — voice notes never get heard, photos never get seen, and the user gets no acknowledgement. The providers we already ship (Anthropic, OpenAI, Gemini) natively accept images and audio; we are leaving their capability on the floor. Fix it now so downstream work (personal-assistant integrations, agentic memory) can assume the agent can perceive what the user actually sends.
+Users on Telegram, WhatsApp, and Discord routinely send photos, voice notes, and documents. Daimon silently drops every non-text update at the channel edge, which is the single biggest UX gap right now — voice notes never get heard, photos never get seen, and the user gets no acknowledgement. The providers we already ship (Anthropic, OpenAI, Gemini) natively accept images and audio; we are leaving their capability on the floor. Fix it now so downstream work (personal-assistant integrations, agentic memory) can assume the agent can perceive what the user actually sends.
 
 ## 2. Scope
 
@@ -92,7 +92,7 @@ These require a user decision before sdd-design / sdd-spec can lock the architec
 | Option | What it is | Pros | Cons |
 |--------|-----------|------|------|
 | **P1. Inline BLOB in `conversations`** | Bytes live in the messages JSON column | Simplest. Atomic with the conversation. One table. | DB grows fast (10 MB photo per turn). `sqlite_dump` / backups get heavy. Page cache thrashes. |
-| **P2. External files** | `~/.microagent/data/media/{conv_id}/{attachment_id}.{ext}`; JSON stores the path | Fast. Cheap backups (exclude dir). Easy cleanup (rm dir). | Not atomic — crash between DB commit and file write loses integrity. Orphan files on partial failure. Path portability on user-dir moves. |
+| **P2. External files** | `~/.daimon/data/media/{conv_id}/{attachment_id}.{ext}`; JSON stores the path | Fast. Cheap backups (exclude dir). Easy cleanup (rm dir). | Not atomic — crash between DB commit and file write loses integrity. Orphan files on partial failure. Path portability on user-dir moves. |
 | **P3. Content-addressed store (CAS)** | `media_blobs(sha256 PRIMARY KEY, bytes BLOB, mime, size, created_at)`; JSON references by hash | Deduplication (same photo forwarded twice = one row). Integrity (hash verifies content). Atomic (single DB txn). Retention = `DELETE FROM media_blobs WHERE sha256 NOT IN (SELECT ref FROM conversations) AND created_at < now-30d`. | Most complex to implement. Still inside SQLite, so large-blob tradeoffs still apply (but at least dedup'd). Needs a GC job. |
 
 **Recommendation: P3 (CAS).** Integrity + dedup + atomicity outweigh the extra implementation cost. P1 is a trap at 10 MB photos. P2's atomicity hole is a real correctness bug waiting to bite — we already have a drop-on-full-inbox issue, we don't need a drop-on-crash-during-write issue too. CAS is how Git, IPFS, and every serious content store handle this, and it scales cleanly to future per-message compression or encryption-at-rest.
@@ -124,7 +124,7 @@ These require a user decision before sdd-design / sdd-spec can lock the architec
 | **One-shot migration on startup** | First run of new binary rewrites every row to the new shape | Clean — only one shape in the DB afterward. Easier reasoning. | Startup cost proportional to history. Must be idempotent + interruptible. Rollback gets hard once rewritten. |
 | **Both** | Lazy shim AND a background rewrite pass | Correctness + cleanliness. | Most code. |
 
-**Recommendation: Lazy shim, no startup migration.** micro-claw is a personal single-user binary — `conversations` is small (hundreds to low-thousands of rows) and a read-time shim costs effectively nothing. Adding a one-shot migration adds rollback risk we don't need. If the shape stabilizes and we later want to drop the shim, we can add a one-off migration then. For now: accept both shapes on read, write only the new shape.
+**Recommendation: Lazy shim, no startup migration.** Daimon is a personal single-user binary — `conversations` is small (hundreds to low-thousands of rows) and a read-time shim costs effectively nothing. Adding a one-shot migration adds rollback risk we don't need. If the shape stabilizes and we later want to drop the shim, we can add a one-off migration then. For now: accept both shapes on read, write only the new shape.
 
 ## 6. Risks + Mitigations
 

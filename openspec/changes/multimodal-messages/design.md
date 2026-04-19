@@ -158,7 +158,7 @@ func UnmarshalBlocks(raw json.RawMessage) (Blocks, error) {
 ### 2.2 `internal/channel/channel.go` (MODIFIED)
 
 ```go
-import "microagent/internal/content"
+import "daimon/internal/content"
 
 type IncomingMessage struct {
     ID        string
@@ -191,7 +191,7 @@ Rationale for Q2 deferral: doubling the surface area (send path per channel) tri
 ### 2.3 `internal/provider/provider.go` (MODIFIED)
 
 ```go
-import "microagent/internal/content"
+import "daimon/internal/content"
 
 type ChatMessage struct {
     Role       string         `json:"role"`
@@ -405,7 +405,7 @@ WHERE last_referenced_at < ?
   );
 ```
 
-The JSON scan is expensive but runs once per `cleanup_interval` (default 24h). At micro-claw's expected scale (thousands of conversations, not millions) it's fine. The index on `last_referenced_at` narrows the candidate set before the JSON scan.
+The JSON scan is expensive but runs once per `cleanup_interval` (default 24h). At Daimon's expected scale (thousands of conversations, not millions) it's fine. The index on `last_referenced_at` narrows the candidate set before the JSON scan.
 
 ### 4.4 SQLite BLOB concerns
 

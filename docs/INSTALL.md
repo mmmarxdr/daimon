@@ -19,9 +19,9 @@ Release archives include the web frontend.
 
 ```bash
 # Linux (amd64)
-tar -xzf microagent_*_linux_amd64.tar.gz
-chmod +x microagent
-sudo mv microagent /usr/local/bin/
+tar -xzf daimon_*_linux_amd64.tar.gz
+chmod +x daimon
+sudo mv daimon /usr/local/bin/
 ```
 
 ## Option C — Build from source
@@ -36,13 +36,13 @@ make build
 # With web frontend (downloads pre-built assets, no Node.js needed)
 make build-full
 
-# Binary lands at bin/microagent
+# Binary lands at bin/daimon
 ```
 
 ## Option D — `go install`
 
 ```bash
-go install github.com/mmmarxdr/micro-claw/cmd/microagent@latest
+go install github.com/mmmarxdr/daimon/cmd/daimon@latest
 ```
 
 > Note: `go install` builds without the web frontend. The TUI and API
@@ -52,17 +52,17 @@ go install github.com/mmmarxdr/micro-claw/cmd/microagent@latest
 ## First run
 
 ```bash
-microagent web
+daimon web
 ```
 
 On first run with no config, the browser-based setup wizard launches
 automatically. It walks you through provider, API key and model, validates
-the key with a real API call, and writes `~/.microagent/config.yaml`.
+the key with a real API call, and writes `~/.daimon/config.yaml`.
 
 Alternative TUI wizard:
 
 ```bash
-microagent --setup
+daimon --setup
 ```
 
 Manual config: see [docs/CONFIG.md](CONFIG.md).

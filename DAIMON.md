@@ -1,17 +1,18 @@
-# MICROAGENT — AI Context Document
+# DAIMON — AI Context Document
 
-> **Purpose**: This document is the single source of truth for any AI assistant working on MicroAgent. Read it fully before writing any code, suggesting architecture changes, or making implementation decisions. Every section is intentional — do not skip, summarize, or override unless explicitly told by the developer.
+> **Purpose**: This document is the single source of truth for any AI assistant working on Daimon. Read it fully before writing any code, suggesting architecture changes, or making implementation decisions. Every section is intentional — do not skip, summarize, or override unless explicitly told by the developer.
 
 ---
 
 ## 1. PROJECT IDENTITY
 
-- **Name**: MicroAgent (working name — subject to change before public release)
+- **Name**: Daimon
+- **Binary**: `daimon`
 - **Language**: Go (1.22+)
-- **License**: TBD (likely MIT)
+- **License**: Apache 2.0
 - **Author**: Marc Dechand
-- **Repository**: Private GitLab (org: JPH Lions, user: MarcDechand) — will move to GitHub for public release
-- **Status**: Post-MVP, production hardening phase
+- **Repository**: `github.com/mmmarxdr/daimon` (was `micro-claw`)
+- **Status**: Post-MVP, production hardening phase (v0.4.0)
 
 **One-line summary**: An ultra-lightweight, single-binary personal AI agent written in Go — designed to be extensible, local-first, and memory-efficient.
 
@@ -268,7 +269,7 @@ type Store interface {
 ```
 
 **Rules for Store implementations:**
-- FileStore (MVP): one JSON file per conversation under `~/.microagent/data/conversations/`, one `memory.json` file with all entries. SearchMemory does case-insensitive substring match.
+- FileStore (MVP): one JSON file per conversation under `~/.daimon/data/conversations/`, one `memory.json` file with all entries. SearchMemory does case-insensitive substring match.
 - Writes MUST be atomic (write to temp file → rename) to prevent corruption on crash.
 - MUST NOT load all conversations into memory. Load on demand, by ID.
 - SearchMemory MUST return results sorted by recency (newest first).
@@ -348,9 +349,9 @@ main goroutine
 ## 6. PROJECT STRUCTURE
 
 ```
-microagent/
+daimon/
 ├── cmd/
-│   └── microagent/
+│   └── daimon/
 │       └── main.go              # Entrypoint: config → registry → wire → run
 ├── internal/
 │   ├── agent/
@@ -414,28 +415,28 @@ microagent/
 
 | Tool | Purpose | Command |
 |------|---------|---------|
-| `go build` | Compile binary | `go build -o microagent ./cmd/microagent` |
+| `go build` | Compile binary | `go build -o daimon ./cmd/daimon` |
 | `go test` | Run tests | `go test ./...` |
 | `go vet` | Static analysis | `go vet ./...` |
 | `golangci-lint` | Linting | `golangci-lint run` |
 | `gofumpt` | Formatting (stricter gofmt) | `gofumpt -w .` |
 | `goreleaser` | Cross-compilation + release | Used for public releases only |
-| `dlv` | Debugger | `dlv debug ./cmd/microagent` |
+| `dlv` | Debugger | `dlv debug ./cmd/daimon` |
 
 ### 7.3 Build & Cross-Compilation
 
 ```bash
 # Standard build
-go build -ldflags="-s -w" -o microagent ./cmd/microagent
+go build -ldflags="-s -w" -o daimon ./cmd/daimon
 
 # Cross-compile for Linux ARM (e.g., Raspberry Pi)
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o microagent-arm64 ./cmd/microagent
+GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o daimon-arm64 ./cmd/daimon
 
 # Cross-compile for macOS
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o microagent-darwin ./cmd/microagent
+GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o daimon-darwin ./cmd/daimon
 
 # Static binary (no CGO)
-CGO_ENABLED=0 go build -ldflags="-s -w" -o microagent ./cmd/microagent
+CGO_ENABLED=0 go build -ldflags="-s -w" -o daimon ./cmd/daimon
 ```
 
 `-ldflags="-s -w"` strips debug info, reducing binary size by ~30%.
@@ -452,7 +453,7 @@ CGO_ENABLED=0 go build -ldflags="-s -w" -o microagent ./cmd/microagent
 ## 8. CONFIGURATION SPEC
 
 ```yaml
-# ~/.microagent/config.yaml
+# ~/.daimon/config.yaml
 
 agent:
   name: "Micro"
@@ -507,7 +508,7 @@ tools:
 
 store:
   type: file                   # file | sqlite
-  path: "~/.microagent/data"
+  path: "~/.daimon/data"
 
 logging:
   level: info                  # debug | info | warn | error
@@ -521,7 +522,7 @@ limits:
 
 ### Config Resolution Rules
 
-1. Load YAML file from `--config` flag, or `~/.microagent/config.yaml`, or `./config.yaml` (first found).
+1. Load YAML file from `--config` flag, or `~/.daimon/config.yaml`, or `./config.yaml` (first found).
 2. Resolve `${ENV_VAR}` references in string values.
 3. Apply defaults for any missing field.
 4. Validate: fail fast with a clear error if required fields are missing (e.g., `provider.api_key`).
@@ -633,11 +634,11 @@ limits:
 
 ## 10. KNOWN PROBLEMS & PITFALLS
 
-These are issues known from OpenClaw, Nanobot, and general agent development. MicroAgent must address or consciously defer each one:
+These are issues known from OpenClaw, Nanobot, and general agent development. Daimon must address or consciously defer each one:
 
 ### 10.1 Addressed in MVP
 
-| Problem | How MicroAgent handles it |
+| Problem | How Daimon handles it |
 |---------|--------------------------|
 | **Unbounded token costs** | `max_iterations` + `max_tokens_per_turn` limits per message |
 | **Shell injection** | Whitelist model. Commands parsed, base command checked before execution |

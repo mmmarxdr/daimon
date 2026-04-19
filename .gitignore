@@ -1,5 +1,5 @@
 # Binaries for programs and plugins
-/microagent
+/daimon
 *.exe
 *.exe~
 *.dll
@@ -54,9 +54,12 @@ configs/default.yaml
 TDD_EVIDENCE_*.md
 exploration.md
 
-# Embedded frontend (copied from micro-claw-frontend)
+# Embedded frontend (copied from daimon-frontend)
 internal/web/static/assets/
 !internal/web/static/index.html
+
+# GoReleaser snapshot output
+dist/
 
 # ----------------------------------------------------------------------
 # NOTA: Las carpetas .agents y .atl no se incluyen aquí

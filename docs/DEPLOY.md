@@ -6,15 +6,15 @@ accessible remotely over HTTPS.
 ## 1. Install
 
 ```bash
-curl -sL https://github.com/mmmarxdr/micro-claw/releases/latest/download/microagent_linux_amd64.tar.gz | tar -xz
-sudo mv microagent /usr/local/bin/
+curl -sL https://github.com/mmmarxdr/micro-claw/releases/latest/download/daimon_linux_amd64.tar.gz | tar -xz
+sudo mv daimon /usr/local/bin/
 ```
 
 ## 2. Configure
 
 ```bash
-mkdir -p ~/.microagent
-cat > ~/.microagent/config.yaml << 'EOF'
+mkdir -p ~/.daimon
+cat > ~/.daimon/config.yaml << 'EOF'
 agent:
   name: "Micro"
   personality: "You are a helpful assistant."
@@ -30,17 +30,17 @@ channel:
 
 store:
   type: sqlite
-  path: "~/.microagent/data"
+  path: "~/.daimon/data"
 
 web:
   enabled: true
   port: 8080
   host: "127.0.0.1"           # keep localhost — Caddy handles external traffic
-  auth_token: ${MICROAGENT_WEB_TOKEN}
+  auth_token: ${DAIMON_WEB_TOKEN}
 
 audit:
   enabled: true
-  path: "~/.microagent/audit"
+  path: "~/.daimon/audit"
 EOF
 ```
 
@@ -49,8 +49,8 @@ EOF
 ```bash
 # Add to ~/.bashrc or use a secrets manager
 export OPENROUTER_API_KEY="sk-or-v1-..."
-export MICROAGENT_WEB_TOKEN="$(openssl rand -hex 32)"
-echo "Your web token: $MICROAGENT_WEB_TOKEN"
+export DAIMON_WEB_TOKEN="$(openssl rand -hex 32)"
+echo "Your web token: $DAIMON_WEB_TOKEN"
 ```
 
 ## 4. Reverse proxy with HTTPS (Caddy)
@@ -76,17 +76,17 @@ dashboard is now at `https://agent.yourdomain.com`.
 ## 5. Run as a systemd service
 
 ```ini
-# /etc/systemd/system/microagent.service
+# /etc/systemd/system/daimon.service
 [Unit]
-Description=Daimon (microagent) AI agent
+Description=Daimon AI agent
 After=network.target
 
 [Service]
 Type=simple
-User=microagent
+User=daimon
 Environment=OPENROUTER_API_KEY=sk-or-v1-...
-Environment=MICROAGENT_WEB_TOKEN=your-fixed-token-here
-ExecStart=/usr/local/bin/microagent web
+Environment=DAIMON_WEB_TOKEN=your-fixed-token-here
+ExecStart=/usr/local/bin/daimon web
 Restart=on-failure
 RestartSec=5
 
@@ -95,18 +95,18 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo useradd -r -s /bin/false microagent
+sudo useradd -r -s /bin/false daimon
 sudo systemctl daemon-reload
-sudo systemctl enable --now microagent
+sudo systemctl enable --now daimon
 ```
 
 ## 6. Verify
 
 ```bash
 # Check the service
-sudo systemctl status microagent
+sudo systemctl status daimon
 
 # Test the API
-curl -H "Authorization: Bearer $MICROAGENT_WEB_TOKEN" \
+curl -H "Authorization: Bearer $DAIMON_WEB_TOKEN" \
   https://agent.yourdomain.com/api/status
 ```

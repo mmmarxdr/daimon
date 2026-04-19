@@ -8,7 +8,7 @@ Everything you need to build, test, and ship changes to Daimon.
 make build           # compile binary (TUI-only)
 make build-full      # compile with web frontend
 make frontend        # download pre-built frontend assets
-make copy-frontend   # copy from a local micro-claw-frontend checkout
+make copy-frontend   # copy from a local daimon-frontend checkout
 ```
 
 ## Test
@@ -23,7 +23,7 @@ make ci              # vet + lint + test-race (run this before pushing)
 ## Project structure
 
 ```
-cmd/microagent/       entrypoint, subcommands
+cmd/daimon/           entrypoint, subcommands
 internal/
   agent/              agent loop, context builder
   channel/            CLI, Telegram, Discord, WhatsApp, Web
@@ -39,41 +39,41 @@ internal/
 configs/              example config + skill files
 ```
 
-For the full architecture breakdown, see `MICROAGENT.md` in the repo root.
+For the full architecture breakdown, see `DAIMON.md` in the repo root.
 
 ## Running locally
 
 ```bash
 # Agent with CLI channel
-./bin/microagent
+./bin/daimon
 
 # Agent with web dashboard
-./bin/microagent web
+./bin/daimon web
 
 # Re-run the setup wizard
-./bin/microagent --setup
+./bin/daimon --setup
 ```
 
-Config search order: `--config` flag → `~/.microagent/config.yaml` →
+Config search order: `--config` flag → `~/.daimon/config.yaml` →
 `./config.yaml`.
 
 ## CLI reference
 
 ```bash
-microagent                            # start the agent (setup wizard if no config)
-microagent --web                      # start with web dashboard
-microagent --dashboard                # TUI dashboard (read-only)
-microagent --setup                    # re-run setup wizard
-microagent --daemon                   # cron-only background mode
+daimon                            # start the agent (setup wizard if no config)
+daimon --web                      # start with web dashboard
+daimon --dashboard                # TUI dashboard (read-only)
+daimon --setup                    # re-run setup wizard
+daimon --daemon                   # cron-only background mode
 
-microagent web [--port N] [--host H]  # web-only mode
-microagent setup                      # setup wizard
-microagent doctor                     # validate config
-microagent config                     # show active config
+daimon web [--port N] [--host H]  # web-only mode
+daimon setup                      # setup wizard
+daimon doctor                     # validate config
+daimon config                     # show active config
 
-microagent mcp list|add|remove|test|validate|manage
-microagent skills add|list|info|remove
-microagent cron list|info|delete
+daimon mcp list|add|remove|test|validate|manage
+daimon skills add|list|info|remove
+daimon cron list|info|delete
 ```
 
 ## Contributing

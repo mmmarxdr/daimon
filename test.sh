@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test.sh — Contributor verification script for microagent
+# test.sh — Contributor verification script for daimon
 #
 # Runs all checks required to validate a working build:
 #   1. Go toolchain present
@@ -30,8 +30,8 @@ go version
 # 2. Build
 # ----------------------------------------------------------------------------
 echo "==> Building..."
-go build -ldflags="-s -w" -o /tmp/microagent-test-build ./cmd/microagent
-rm -f /tmp/microagent-test-build
+go build -ldflags="-s -w" -o /tmp/daimon-test-build ./cmd/daimon
+rm -f /tmp/daimon-test-build
 
 # ----------------------------------------------------------------------------
 # 3. Unit tests

@@ -1,11 +1,12 @@
 #!/bin/sh
-# Microagent installer — downloads the latest release binary.
+# Daimon installer — downloads the latest release binary.
 # Usage: curl -fsSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
+# Note: the GitHub repo URL will be updated to mmmarxdr/daimon after the repo rename (Phase 5).
 set -e
 
 REPO="mmmarxdr/micro-claw"
 INSTALL_DIR="/usr/local/bin"
-BINARY="microagent"
+BINARY="daimon"
 
 # Detect OS.
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -33,7 +34,7 @@ fi
 FILENAME="${BINARY}_${VERSION}_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/${FILENAME}"
 
-echo "Installing microagent v${VERSION} (${OS}/${ARCH})..."
+echo "Installing daimon v${VERSION} (${OS}/${ARCH})..."
 
 # Download and extract to temp dir.
 TMP=$(mktemp -d)
@@ -55,6 +56,6 @@ echo ""
 echo "  Installed: ${INSTALL_DIR}/${BINARY} (v${VERSION})"
 echo ""
 echo "  Get started:"
-echo "    microagent web        # Start dashboard + setup wizard"
-echo "    microagent --setup    # Terminal setup wizard"
+echo "    daimon web        # Start dashboard + setup wizard"
+echo "    daimon --setup    # Terminal setup wizard"
 echo ""

@@ -55,7 +55,7 @@ tools:
           EMAIL_PASS: "your-app-password-no-spaces"
 ```
 
-4. Verify the connection: `microagent mcp test gmail`
+4. Verify the connection: `daimon mcp test gmail`
 5. Ask the agent: *"Show me my unread emails."*
 
 ## Setup: Google Calendar (OAuth)
@@ -67,12 +67,12 @@ OAuth servers require a one-time browser authorization before they work.
 1. Create a project in the [Google Cloud Console](https://console.cloud.google.com).
 2. Enable **Google Calendar API** (APIs & Services > Library).
 3. Create OAuth credentials (Desktop app).
-4. Download the JSON and save it to `~/.microagent/google-credentials.json`.
+4. Download the JSON and save it to `~/.daimon/google-credentials.json`.
 
 **Step 2 — Authorize** (one-time, run outside Daimon):
 
 ```bash
-GOOGLE_OAUTH_CREDENTIALS=/home/you/.microagent/google-credentials.json \
+GOOGLE_OAUTH_CREDENTIALS=/home/you/.daimon/google-credentials.json \
   npx -y @cocal/google-calendar-mcp auth
 ```
 
@@ -89,7 +89,7 @@ tools:
         command: ["npx", "-y", "@cocal/google-calendar-mcp"]
         prefix_tools: true
         env:
-          GOOGLE_OAUTH_CREDENTIALS: "/home/you/.microagent/google-credentials.json"
+          GOOGLE_OAUTH_CREDENTIALS: "/home/you/.daimon/google-credentials.json"
 ```
 
 Restart and ask: *"What events do I have this week?"*
@@ -123,11 +123,11 @@ context tokens on every message. See [docs/SKILLS.md](SKILLS.md).
 ## Managing MCP servers
 
 ```bash
-microagent mcp list                # show configured servers
-microagent mcp test <name>         # live connection test
-microagent mcp add --name X --transport stdio --command "npx ..."
-microagent mcp remove <name>
-microagent mcp validate            # check config + env vars
+daimon mcp list                # show configured servers
+daimon mcp test <name>         # live connection test
+daimon mcp add --name X --transport stdio --command "npx ..."
+daimon mcp remove <name>
+daimon mcp validate            # check config + env vars
 ```
 
 Or manage from the web dashboard: **Integrations** page (add from catalog,

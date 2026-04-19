@@ -38,7 +38,7 @@ tools:
     max_response_size: 1MB   # default: 1MB
     blocked_domains: []      # domain blocklist
     jina_enabled: true       # enables Tier 2 fallback (default: false)
-    jina_api_key: ""         # optional — or MICROAGENT_JINA_API_KEY env var
+    jina_api_key: ""         # optional — or DAIMON_JINA_API_KEY env var
 ```
 
 ### Examples

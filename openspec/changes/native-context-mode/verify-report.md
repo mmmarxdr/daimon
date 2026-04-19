@@ -22,20 +22,20 @@
 
 **Tests**: ✅ All passed
 ```
-ok  	microagent/cmd/microagent	(cached)
-ok  	microagent/internal/agent	(cached)
-ok  	microagent/internal/audit	(cached)
-ok  	microagent/internal/channel	(cached)
-ok  	microagent/internal/config	(cached)
-ok  	microagent/internal/cron	(cached)
-ok  	microagent/internal/filter	(cached)
-ok  	microagent/internal/mcp	(cached)
-ok  	microagent/internal/provider	(cached)
-ok  	microagent/internal/setup	(cached)
-ok  	microagent/internal/skill	(cached)
-ok  	microagent/internal/store	(cached)
-ok  	microagent/internal/tool	(cached)
-ok  	microagent/internal/tui	(cached)
+ok  	daimon/cmd/daimon	(cached)
+ok  	daimon/internal/agent	(cached)
+ok  	daimon/internal/audit	(cached)
+ok  	daimon/internal/channel	(cached)
+ok  	daimon/internal/config	(cached)
+ok  	daimon/internal/cron	(cached)
+ok  	daimon/internal/filter	(cached)
+ok  	daimon/internal/mcp	(cached)
+ok  	daimon/internal/provider	(cached)
+ok  	daimon/internal/setup	(cached)
+ok  	daimon/internal/skill	(cached)
+ok  	daimon/internal/store	(cached)
+ok  	daimon/internal/tool	(cached)
+ok  	daimon/internal/tui	(cached)
 ```
 
 **Context-Mode Specific Tests**: ✅ All passed

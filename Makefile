@@ -3,8 +3,8 @@ COMMIT  ?= $(shell git rev-parse --short HEAD)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-FRONTEND_DIR  ?= ../micro-claw-frontend
-FRONTEND_REPO ?= mmmarxdr/micro-claw-frontend
+FRONTEND_DIR  ?= ../daimon-frontend
+FRONTEND_REPO ?= mmmarxdr/daimon-frontend
 FRONTEND_TAG  ?= latest
 STATIC_DIR    := internal/web/static
 
@@ -27,7 +27,7 @@ frontend:
 	fi
 	@echo "Frontend installed into $(STATIC_DIR)/assets/"
 
-# Copy from a local checkout of micro-claw-frontend (for developers).
+# Copy from a local checkout of daimon-frontend (for developers).
 copy-frontend:
 	@echo "Copying frontend dist to $(STATIC_DIR)/..."
 	rm -rf $(STATIC_DIR)/assets
@@ -41,7 +41,7 @@ copy-frontend:
 
 # Build without frontend — TUI-only, API still works.
 build:
-	go build -ldflags="$(LDFLAGS)" -o bin/microagent ./cmd/microagent
+	go build -ldflags="$(LDFLAGS)" -o bin/daimon ./cmd/daimon
 
 # Build with frontend (downloads if not already present).
 build-full: frontend build
@@ -76,10 +76,10 @@ ci: vet lint test-race
 # ---------------------------------------------------------------------------
 
 docker-build:
-	docker build -t microagent:$(VERSION) .
+	docker build -t daimon:$(VERSION) .
 
 clean:
 	rm -rf bin/ dist/ $(STATIC_DIR)/assets/
 
 dev-run:
-	go run ./cmd/microagent $(ARGS)
+	go run ./cmd/daimon $(ARGS)

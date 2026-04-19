@@ -473,7 +473,7 @@ Server pushes a metrics snapshot every 30 seconds or when a conversation complet
 **Goal:** Historical data visualization and a single binary for end users.
 
 **Backend:**
-- [ ] Persist daily metrics to `~/.microagent/data/metrics.json` (flush on shutdown + every 5 minutes)
+- [ ] Persist daily metrics to `~/.daimon/data/metrics.json` (flush on shutdown + every 5 minutes)
 - [ ] `GET /api/metrics/history?days=30` endpoint
 - [ ] `WS /ws/metrics` push
 - [ ] Embed compiled dashboard using `//go:embed` (see below)
@@ -519,17 +519,17 @@ build-dashboard:
 	cd dashboard && npm ci && npm run build
 
 build-go:
-	go build -o microagent ./cmd/microagent
+	go build -o daimon ./cmd/daimon
 
 # Dev mode — no embedding needed
 dev-go:
-	go run ./cmd/microagent --dashboard
+	go run ./cmd/daimon --dashboard
 
 dev-ui:
 	cd dashboard && npm run dev
 ```
 
-CI/GitHub Actions runs `make build` — the resulting `microagent` binary contains the full dashboard.
+CI/GitHub Actions runs `make build` — the resulting `daimon` binary contains the full dashboard.
 
 **Users never need Node.js.** They download (or build) the binary once. That's it.
 
@@ -552,26 +552,26 @@ CI/GitHub Actions runs `make build` — the resulting `microagent` binary contai
 The goal is a single command that a user pastes from the README or landing page:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/you/microagent/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/mmmarxdr/micro-claw/main/install.sh | sh
 ```
 
 The script does:
 
 1. Detect OS + architecture (`linux/amd64`, `darwin/arm64`, etc.)
 2. Download the latest pre-built binary from GitHub Releases
-3. Place it at `/usr/local/bin/microagent` (or `~/.local/bin/` if no sudo)
-4. Create `~/.microagent/config.yaml` with a commented-out default config if it does not exist
-5. Print next steps: "Edit `~/.microagent/config.yaml` and run `microagent`"
+3. Place it at `/usr/local/bin/daimon` (or `~/.local/bin/` if no sudo)
+4. Create `~/.daimon/config.yaml` with a commented-out default config if it does not exist
+5. Print next steps: "Edit `~/.daimon/config.yaml` and run `daimon`"
 
 **No Go, no Node.js, no Docker required by the user.** The binary is self-contained.
 
 For users who want to build from source:
 
 ```bash
-git clone https://github.com/you/microagent
-cd microagent
+git clone https://github.com/mmmarxdr/micro-claw
+cd micro-claw
 make build        # requires Go 1.22+ and Node.js 20+ (dev only)
-./microagent
+./daimon
 ```
 
 ---
@@ -592,7 +592,7 @@ make build        # requires Go 1.22+ and Node.js 20+ (dev only)
 
 ```bash
 # Terminal 1 — Go server
-go run ./cmd/microagent --dashboard
+go run ./cmd/daimon --dashboard
 
 # Terminal 2 — React dev server
 cd dashboard && npm run dev

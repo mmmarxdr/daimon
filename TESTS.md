@@ -1,6 +1,6 @@
 # MicroAgent — Test Plan MVP
 
-> Este documento define todos los tests necesarios para validar que el MVP de MicroAgent cumple con la especificación de `MICROAGENT.md`. Cada test es concreto, implementable, y mapea directamente a un requisito del Definition of Done o a un contrato de interfaz.
+> Este documento define todos los tests necesarios para validar que el MVP de Daimon cumple con la especificación de `DAIMON.md`. Cada test es concreto, implementable, y mapea directamente a un requisito del Definition of Done o a un contrato de interfaz.
 
 ---
 
@@ -64,7 +64,7 @@ func TestLoadConfig_EnvVarResolution(t *testing.T)
 func TestLoadConfig_TildeExpansion(t *testing.T)
 ```
 
-- Verificar que `store.path: "~/.microagent/data"` se expande a `$HOME/.microagent/data`.
+- Verificar que `store.path: "~/.daimon/data"` se expande a `$HOME/.daimon/data`.
 - Verificar que `tools.file.base_path: "~/workspace"` se expande correctamente.
 - Verificar que paths sin `~` no se modifican.
 
@@ -89,7 +89,7 @@ func TestLoadConfig_FilePriority(t *testing.T)
 ```
 
 - Con `--config` flag explícito → usa ese archivo.
-- Sin flag, con `~/.microagent/config.yaml` presente → usa ese.
+- Sin flag, con `~/.daimon/config.yaml` presente → usa ese.
 - Sin flag, con `./config.yaml` presente → usa ese.
 - Sin ningún archivo → error claro.
 
@@ -873,8 +873,8 @@ func TestSecurity_FileSizeLimits(t *testing.T)
 ```bash
 #!/bin/bash
 # test_binary_size.sh
-CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/microagent ./cmd/microagent
-SIZE=$(stat -c%s /tmp/microagent 2>/dev/null || stat -f%z /tmp/microagent)
+CGO_ENABLED=0 go build -ldflags="-s -w" -o /tmp/daimon ./cmd/daimon
+SIZE=$(stat -c%s /tmp/daimon 2>/dev/null || stat -f%z /tmp/daimon)
 MAX=$((15 * 1024 * 1024))  # 15MB
 if [ "$SIZE" -gt "$MAX" ]; then
     echo "FAIL: binary size ${SIZE} exceeds 15MB limit"

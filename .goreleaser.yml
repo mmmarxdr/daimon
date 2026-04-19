@@ -1,13 +1,13 @@
 version: 2
-project_name: microagent
+project_name: daimon
 
 before:
   hooks:
     - make frontend
 
 builds:
-  - main: ./cmd/microagent
-    binary: microagent
+  - main: ./cmd/daimon
+    binary: daimon
     env:
       - CGO_ENABLED=0
     goos:

@@ -62,6 +62,6 @@ See `_shared/skill-resolver.md` for the full resolution protocol.
 
 | File | Path | Notes |
 |------|------|-------|
-| MICROAGENT.md | MICROAGENT.md | Primary AI Context Document, single source of truth |
+| DAIMON.md | DAIMON.md | Primary AI Context Document, single source of truth |
 | TESTS.md | TESTS.md | Defines all tests for the MVP and DoD |
 | TUI_IMPROVEMENTS.md | TUI_IMPROVEMENTS.md | TUI-specific improvement plans |

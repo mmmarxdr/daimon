@@ -44,19 +44,19 @@ Documentation and build files MUST NOT reference `./dev.sh` if the file does not
 - WHEN the cleanup is applied
 - THEN those references MUST be removed or replaced with the correct invocation
 
-### Requirement: microagent setup Subcommand
+### Requirement: daimon setup Subcommand
 
-The system MUST support `microagent setup` as a subcommand that launches the interactive wizard, equivalent to `microagent --setup`.
+The system MUST support `daimon setup` as a subcommand that launches the interactive wizard, equivalent to `daimon --setup`.
 
 #### Scenario: setup subcommand launches wizard
 
-- GIVEN the user runs `microagent setup` in an interactive terminal
+- GIVEN the user runs `daimon setup` in an interactive terminal
 - WHEN the command is parsed
 - THEN the setup wizard MUST launch with identical behavior to `--setup`
 
 #### Scenario: setup subcommand rejects non-TTY
 
-- GIVEN the user runs `microagent setup` in a non-interactive context (pipe, CI)
+- GIVEN the user runs `daimon setup` in a non-interactive context (pipe, CI)
 - WHEN the command checks for TTY
 - THEN it MUST print "Setup wizard requires an interactive terminal." to stderr and exit with code 1
 
@@ -91,28 +91,28 @@ The wizard MUST check for an existing local `./config.yaml` before writing and o
 
 - GIVEN no `./config.yaml` exists
 - WHEN the wizard writes config
-- THEN it MUST write to `~/.microagent/config.yaml`
+- THEN it MUST write to `~/.daimon/config.yaml`
 
-### Requirement: microagent doctor Command
+### Requirement: daimon doctor Command
 
-The system MUST provide `microagent doctor` that validates the runtime environment.
+The system MUST provide `daimon doctor` that validates the runtime environment.
 
 #### Scenario: doctor validates config file
 
 - GIVEN a config file exists at the expected path
-- WHEN `microagent doctor` runs
+- WHEN `daimon doctor` runs
 - THEN it MUST report whether the config parses and validates successfully
 
 #### Scenario: doctor checks required env vars
 
 - GIVEN the config references `${SOME_VAR}` placeholders
-- WHEN `microagent doctor` runs
+- WHEN `daimon doctor` runs
 - THEN it MUST report which environment variables are set and which are missing
 
 #### Scenario: doctor checks store path accessibility
 
 - GIVEN the config specifies a store.path
-- WHEN `microagent doctor` runs
+- WHEN `daimon doctor` runs
 - THEN it MUST report whether the directory exists and is writable
 
 ## MODIFIED Requirements

@@ -30,10 +30,10 @@ tool the agent can call.
 ## Installing and managing skills
 
 ```bash
-microagent skills add https://example.com/react-patterns.md
-microagent skills list
-microagent skills info <name>
-microagent skills remove <name>
+daimon skills add https://example.com/react-patterns.md
+daimon skills list
+daimon skills info <name>
+daimon skills remove <name>
 ```
 
 ## Tool priority
@@ -55,5 +55,5 @@ system prompt small.
 ```yaml
 skills:
   skills: []                         # explicit skill file paths
-  skills_dir: ~/.microagent/skills   # directory where installed skills live
+  skills_dir: ~/.daimon/skills   # directory where installed skills live
 ```
