@@ -141,6 +141,86 @@ func TestHandlePutConfig_PartialUpdate(t *testing.T) {
 	}
 }
 
+// TestHandlePutConfig_ToolsShellPersists verifies that PUT /api/config persists
+// changes to tools.shell (regression: previously the patchBody narrowed to
+// providers + models only, silently dropping tool toggles from the UI).
+func TestHandlePutConfig_ToolsShellPersists(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Web.AuthToken = "secret-token"
+	cfg.Tools.Shell.Enabled = false
+	cfg.Tools.Shell.AllowAll = false
+	// Pre-populate web_fetch with a non-default value so we can verify it is preserved.
+	cfg.Tools.WebFetch.MaxResponseSize = "preserve-me"
+
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	s := newConfigTestServer(cfg, cfgPath)
+
+	body := []byte(`{"tools":{"shell":{"enabled":true,"allow_all":true,"allowed_commands":["ls"],"working_dir":"/tmp"}}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader("secret-token"))
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if got := s.deps.Config.Tools.Shell.Enabled; got != true {
+		t.Errorf("shell.enabled: want true, got %v", got)
+	}
+	if got := s.deps.Config.Tools.Shell.AllowAll; got != true {
+		t.Errorf("shell.allow_all: want true, got %v", got)
+	}
+	if got := s.deps.Config.Tools.Shell.WorkingDir; got != "/tmp" {
+		t.Errorf("shell.working_dir: want /tmp, got %q", got)
+	}
+	// Critically — web_fetch (NOT in the patch) MUST be preserved.
+	if got := s.deps.Config.Tools.WebFetch.MaxResponseSize; got != "preserve-me" {
+		t.Errorf("web_fetch.max_response_size should be preserved: want preserve-me, got %q", got)
+	}
+}
+
+// TestHandlePutConfig_ToolsAbsentSubtreesPreserved verifies that omitting a
+// tool subtree from the patch preserves the stored value (only the sent
+// subtrees are replaced).
+func TestHandlePutConfig_ToolsAbsentSubtreesPreserved(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Web.AuthToken = "secret-token"
+	cfg.Tools.Shell.Enabled = true
+	cfg.Tools.File.Enabled = true
+	cfg.Tools.HTTP.Enabled = true
+
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+
+	s := newConfigTestServer(cfg, cfgPath)
+
+	// Only patch tools.file — shell + http MUST stay enabled.
+	body := []byte(`{"tools":{"file":{"enabled":false,"base_path":"/x","max_file_size":"2MB"}}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader("secret-token"))
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if got := s.deps.Config.Tools.File.Enabled; got != false {
+		t.Errorf("file.enabled: want false, got %v", got)
+	}
+	if got := s.deps.Config.Tools.Shell.Enabled; got != true {
+		t.Errorf("shell.enabled should be preserved: want true, got %v", got)
+	}
+	if got := s.deps.Config.Tools.HTTP.Enabled; got != true {
+		t.Errorf("http.enabled should be preserved: want true, got %v", got)
+	}
+}
+
 // TestHandlePutConfig_ModelsDefaultUpdate verifies AS-15: models.default update succeeds
 // when the target provider already has credentials.
 func TestHandlePutConfig_ModelsDefaultUpdate(t *testing.T) {

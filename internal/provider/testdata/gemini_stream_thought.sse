@@ -1,0 +1,8 @@
+data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"Let me think about this carefully..."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":0}}
+
+data: {"candidates":[{"content":{"parts":[{"text":"Here is my answer."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5}}
+
+data: {"candidates":[{"content":{"parts":[{"thought":true,"text":"More reasoning here."},{"text":"And more text."}],"role":"model"},"index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":12}}
+
+data: {"candidates":[{"content":{"parts":[{"thought":true,"text":""}],"role":"model"},"index":0,"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":12}}
+

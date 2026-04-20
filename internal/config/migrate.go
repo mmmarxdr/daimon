@@ -1,6 +1,9 @@
 package config
 
-import "log"
+import (
+	"log"
+	"log/slog"
+)
 
 // MigrateLegacyProviderPublic is the exported wrapper for migrateLegacyProvider.
 // Use this when you have already unmarshaled a Config and need to apply migration
@@ -61,4 +64,60 @@ func migrateLegacyProvider(cfg *Config) {
 
 	log.Printf("config: migrated legacy provider block into providers/models (v1→v2); file will be rewritten on next save")
 	cfg.Provider = nil
+}
+
+// migrateThinkingConfig migrates legacy top-level thinking fields on each ProviderCredentials
+// entry to the unified nested Thinking block. Idempotent.
+//
+// Rules (per ADR 6):
+//  1. If unified Thinking block is present → it wins; legacy fields are ignored (no warn).
+//  2. If only legacy fields are present → synthesise Thinking from them + emit slog.Warn once per provider.
+//  3. If neither → leave Thinking nil (capability-map auto-activation applies at request time).
+func migrateThinkingConfig(cfg *Config) {
+	if len(cfg.Providers) == 0 {
+		return
+	}
+	updated := make(map[string]ProviderCredentials, len(cfg.Providers))
+	for name, creds := range cfg.Providers {
+		hasLegacyEffort := creds.ThinkingEffort != ""
+		hasLegacyBudget := creds.ThinkingBudgetTokens != nil
+		hasLegacy := hasLegacyEffort || hasLegacyBudget
+
+		if creds.Thinking != nil {
+			// Unified block present — it wins. No migration, no warning.
+			updated[name] = creds
+			continue
+		}
+
+		if hasLegacy {
+			// Emit deprecation warning.
+			legacyKeys := make([]string, 0, 2)
+			if hasLegacyEffort {
+				legacyKeys = append(legacyKeys, "thinking_effort")
+			}
+			if hasLegacyBudget {
+				legacyKeys = append(legacyKeys, "thinking_budget_tokens")
+			}
+			for _, k := range legacyKeys {
+				slog.Warn("config: deprecated key detected; migrate to providers.<name>.thinking.*",
+					"provider", name,
+					"key", k,
+					"deprecated", k,
+				)
+			}
+
+			// Synthesise unified block.
+			tc := &ProviderThinkingConfig{}
+			if hasLegacyEffort {
+				tc.Effort = creds.ThinkingEffort
+			}
+			if hasLegacyBudget {
+				tc.BudgetTokens = *creds.ThinkingBudgetTokens
+			}
+			creds.Thinking = tc
+		}
+
+		updated[name] = creds
+	}
+	cfg.Providers = updated
 }

@@ -1,0 +1,4 @@
+{"model":"deepseek-r1:7b","created_at":"2024-01-01T00:00:00Z","message":{"role":"assistant","content":"","thinking":"Let me think about this."},"done":false}
+{"model":"deepseek-r1:7b","created_at":"2024-01-01T00:00:01Z","message":{"role":"assistant","content":"The answer is 42.","thinking":""},"done":false}
+{"model":"deepseek-r1:7b","created_at":"2024-01-01T00:00:02Z","message":{"role":"assistant","content":" More text.","thinking":"And more reasoning."},"done":false}
+{"model":"deepseek-r1:7b","created_at":"2024-01-01T00:00:03Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":25}

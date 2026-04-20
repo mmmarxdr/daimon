@@ -54,6 +54,16 @@ func NewStaticRegistry(cfg config.Config) *Registry {
 			ap.SetThinkingConfig(creds)
 		}
 
+		// Wire Gemini thinking config if configured.
+		if gp, ok := p.(*GeminiProvider); ok {
+			gp.SetThinkingConfig(creds)
+		}
+
+		// Wire Ollama thinking config if configured.
+		if op, ok := p.(*OllamaProvider); ok {
+			op.SetThinkingConfig(creds)
+		}
+
 		// Wire OpenRouter ModelInfoStore if available (cache is wired later via SetModelInfoStore).
 		// The caller can update this after construction with RegisterTransient.
 

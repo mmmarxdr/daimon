@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"daimon/internal/config"
@@ -15,9 +16,16 @@ import (
 // GeminiProvider implements the Provider interface via the Google AI Studio REST API
 // (generateContent endpoint). Works with any model: gemini-2.0-flash, gemini-1.5-pro, etc.
 type GeminiProvider struct {
-	config config.ProviderConfig
-	client *http.Client
-	media  mediaReader // optional; nil → text-only fallback for image/audio blocks
+	config   config.ProviderConfig
+	client   *http.Client
+	media    mediaReader              // optional; nil → text-only fallback for image/audio blocks
+	thinking config.ProviderCredentials // thinking config wired from registry
+}
+
+// SetThinkingConfig wires provider-level thinking settings into GeminiProvider.
+// Called by the registry after construction when config is available.
+func (p *GeminiProvider) SetThinkingConfig(creds config.ProviderCredentials) {
+	p.thinking = creds
 }
 
 func NewGeminiProvider(cfg config.ProviderConfig) *GeminiProvider {
@@ -35,6 +43,42 @@ func NewGeminiProvider(cfg config.ProviderConfig) *GeminiProvider {
 // blocks can be translated to base64 Gemini inlineData parts. Callers that do
 // not yet have a store (e.g. text-only test fixtures) leave this unset; the
 // provider falls back gracefully to placeholder text for any media blocks.
+// --------------------------------------------------------------------------
+// Gemini thinking capability map (ADR 1)
+// --------------------------------------------------------------------------
+
+// geminiCapability describes whether a Gemini model supports extended thinking.
+type geminiCapability struct {
+	SupportsThinking bool
+	DefaultBudget    int  // -1 = dynamic (let Gemini choose)
+	IncludeThoughts  bool // whether to request thought parts in the response
+}
+
+// geminiThinkingCapability maps canonical Gemini model IDs to their thinking capability.
+// Absence from the map implies no thinking support (safe default — non-2.5 models 400 on thinkingConfig).
+// Resolution: exact match first; if miss, strings.HasPrefix fallback to catch -preview-*/-exp-* variants.
+var geminiThinkingCapability = map[string]geminiCapability{
+	"gemini-2.5-pro":        {SupportsThinking: true, DefaultBudget: -1, IncludeThoughts: true},
+	"gemini-2.5-flash":      {SupportsThinking: true, DefaultBudget: -1, IncludeThoughts: true},
+	"gemini-2.5-flash-lite": {SupportsThinking: true, DefaultBudget: -1, IncludeThoughts: true},
+}
+
+// geminiCapabilityFor returns the thinking capability for the given model ID.
+// Performs exact match first, then prefix fallback for preview/exp variants.
+func geminiCapabilityFor(model string) (geminiCapability, bool) {
+	// 1. Exact match.
+	if cap, ok := geminiThinkingCapability[model]; ok {
+		return cap, true
+	}
+	// 2. Prefix fallback — catches gemini-2.5-pro-preview-*, gemini-2.5-flash-exp-*, etc.
+	for prefix, cap := range geminiThinkingCapability {
+		if strings.HasPrefix(model, prefix+"-") || strings.HasPrefix(model, prefix+"_") {
+			return cap, true
+		}
+	}
+	return geminiCapability{}, false
+}
+
 func (p *GeminiProvider) WithMediaReader(mr mediaReader) *GeminiProvider {
 	p.media = mr
 	return p
@@ -55,6 +99,17 @@ type geminiPart struct {
 	InlineData       *geminiInlineData   `json:"inlineData,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionResp `json:"functionResponse,omitempty"`
+	// Thought is non-nil and true when this part contains reasoning tokens.
+	// Pointer semantics: nil = absent (not a thought part), false = explicit non-thought.
+	Thought *bool `json:"thought,omitempty"`
+}
+
+// geminiThinkingConfig is injected into generationConfig when a capable model
+// is detected and thinking is not explicitly disabled.
+type geminiThinkingConfig struct {
+	// ThinkingBudget controls the token budget. -1 = dynamic (Gemini chooses).
+	ThinkingBudget  int  `json:"thinkingBudget"`
+	IncludeThoughts bool `json:"includeThoughts"`
 }
 
 // geminiInlineData carries base64-encoded media for image and audio blocks.
@@ -100,7 +155,8 @@ type geminiRequest struct {
 }
 
 type geminiGenerationConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens,omitempty"`
+	MaxOutputTokens int                   `json:"maxOutputTokens,omitempty"`
+	Thinking        *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
 }
 
 type geminiResponse struct {
@@ -558,11 +614,16 @@ func (p *GeminiProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 		if len(id) > 7 && id[:7] == "models/" {
 			id = id[7:]
 		}
-		models = append(models, ModelInfo{
+		info := ModelInfo{
 			ID:            id,
 			Name:          m.DisplayName,
 			ContextLength: m.InputTokenLimit,
-		})
+		}
+		// ADR 7: annotate models that support thinking with "reasoning" in SupportedParameters.
+		if _, ok := geminiCapabilityFor(id); ok {
+			info.SupportedParameters = []string{"reasoning"}
+		}
+		models = append(models, info)
 	}
 	return models, nil
 }

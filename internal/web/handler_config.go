@@ -11,13 +11,28 @@ import (
 )
 
 // patchBody is the narrow request shape accepted by PUT /api/config.
-// We deliberately decode only providers + models — every other top-level
-// field (agent, tools, web, channel, etc.) is preserved from the stored
-// config as-is. Decoding into a full config.Config{} would zero out absent
+// We decode only the fields the UI can edit. Every other top-level field
+// (web, channel, agent, store, audit, etc.) is preserved from the stored
+// config as-is — decoding into a full config.Config{} would zero out absent
 // fields, destroying unrelated configuration on every PUT.
+//
+// Tools uses a narrow patch shape so the UI-editable subtrees (shell, file,
+// http) can be replaced without touching tools.web_fetch or tools.mcp, which
+// the UI does not expose.
 type patchBody struct {
 	Providers map[string]config.ProviderCredentials `json:"providers,omitempty"`
-	Models    *config.ModelsConfig                   `json:"models,omitempty"`
+	Models    *config.ModelsConfig                  `json:"models,omitempty"`
+	Tools     *patchTools                           `json:"tools,omitempty"`
+}
+
+// patchTools mirrors config.ToolsConfig but with pointer fields so absent
+// keys are distinguishable from zero-valued ones. Only the UI-exposed
+// subtrees are accepted; web_fetch and mcp are deliberately omitted and
+// preserved from the stored config.
+type patchTools struct {
+	Shell *config.ShellToolConfig `json:"shell,omitempty"`
+	File  *config.FileToolConfig  `json:"file,omitempty"`
+	HTTP  *config.HTTPToolConfig  `json:"http,omitempty"`
 }
 
 // maxPutBodySize is the hard limit for PUT /api/config request bodies (64 KB).
@@ -136,6 +151,20 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Models.Default.Model != "" {
 			merged.Models.Default.Model = patch.Models.Default.Model
+		}
+	}
+
+	// Merge body.Tools (subtree-level: a present subtree fully replaces the
+	// stored one; absent subtrees — and web_fetch / mcp — are preserved).
+	if patch.Tools != nil {
+		if patch.Tools.Shell != nil {
+			merged.Tools.Shell = *patch.Tools.Shell
+		}
+		if patch.Tools.File != nil {
+			merged.Tools.File = *patch.Tools.File
+		}
+		if patch.Tools.HTTP != nil {
+			merged.Tools.HTTP = *patch.Tools.HTTP
 		}
 	}
 

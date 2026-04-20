@@ -157,3 +157,112 @@ func TestOllamaProvider_ListModels_EmptyResponse(t *testing.T) {
 		t.Errorf("expected 0 models for empty response, got %d", len(models))
 	}
 }
+
+// --------------------------------------------------------------------------
+// Phase 6 — isOllamaReasoningModel heuristic
+// --------------------------------------------------------------------------
+
+func TestIsOllamaReasoningModel(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		// Positive — well-known reasoning models
+		{"deepseek-r1:7b", true},
+		{"deepseek-r1:70b", true},
+		{"deepseek-r1:latest", true},
+		{"qwq:32b", true},
+		{"qwq:latest", true},
+		{"qwen3:14b-thinking", true},
+		{"marco-o1", true},
+		{"marco-o1:latest", true},
+		{"reflection:latest", true},
+		{"reflection:70b", true},
+		// Negative — standard models
+		{"llama3:latest", false},
+		{"llama3.2:3b", false},
+		{"mistral:7b", false},
+		{"mistral:latest", false},
+		{"gemma3:4b", false},
+		{"phi4:latest", false},
+		// Negative — qwen without "thinking" suffix
+		{"qwen3:14b", false},
+		{"qwen2.5:7b", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := isOllamaReasoningModel(tc.name)
+			if got != tc.want {
+				t.Errorf("isOllamaReasoningModel(%q) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// --------------------------------------------------------------------------
+// Phase 9 — Ollama ListModels reasoning flag
+// --------------------------------------------------------------------------
+
+func TestOllamaListModels_ReasoningFlag(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]any{
+			"models": []any{
+				map[string]any{"name": "deepseek-r1:7b"},
+				map[string]any{"name": "llama3:latest"},
+				map[string]any{"name": "qwq:32b"},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	p := newOllamaProviderWithBaseURL(t, ts.URL)
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels() error: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(models))
+	}
+
+	for _, m := range models {
+		wantReasoning := isOllamaReasoningModel(m.ID)
+		hasReasoning := false
+		for _, p := range m.SupportedParameters {
+			if p == "reasoning" {
+				hasReasoning = true
+				break
+			}
+		}
+		if hasReasoning != wantReasoning {
+			t.Errorf("model %q: SupportedParameters has reasoning=%v, want %v", m.ID, hasReasoning, wantReasoning)
+		}
+	}
+}
+
+func TestOllamaListModels_NonMatchingModel_NoFlag(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]any{
+			"models": []any{
+				map[string]any{"name": "llama3:latest"},
+				map[string]any{"name": "mistral:7b"},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	p := newOllamaProviderWithBaseURL(t, ts.URL)
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels() error: %v", err)
+	}
+	for _, m := range models {
+		if len(m.SupportedParameters) != 0 {
+			t.Errorf("model %q: expected empty SupportedParameters, got %v", m.ID, m.SupportedParameters)
+		}
+	}
+}

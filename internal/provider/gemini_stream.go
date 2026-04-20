@@ -147,6 +147,14 @@ func (p *GeminiProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 						ToolInput: string(inputBytes),
 					}
 					events <- StreamEvent{Type: StreamEventToolCallEnd}
+				} else if part.Thought != nil && *part.Thought {
+					// Reasoning/thought part — ADR 3: emit ReasoningDelta, do NOT accumulate into textContent.
+					if part.Text != "" {
+						events <- StreamEvent{
+							Type: StreamEventReasoningDelta,
+							Text: part.Text,
+						}
+					}
 				} else if part.Text != "" {
 					textContent.WriteString(part.Text)
 					events <- StreamEvent{
@@ -264,6 +272,11 @@ func (p *GeminiProvider) fetchMedia(ctx context.Context, b content.ContentBlock)
 // Shared by Chat() and ChatStream().
 // ctx is forwarded to translateBlocks so that media bytes can be fetched from
 // the backing media store.
+//
+// Thinking injection logic (ADR 1, ADR 2, Req 10):
+//   - If Thinking.Enabled == false (explicit pointer) → never inject (user opt-out wins).
+//   - Else if model is in geminiThinkingCapability map:
+//   - Inject thinkingConfig with the configured budget or -1 (dynamic) as default.
 func (p *GeminiProvider) buildGeminiRequest(ctx context.Context, req ChatRequest) geminiRequest {
 	apiReq := geminiRequest{}
 
@@ -274,9 +287,40 @@ func (p *GeminiProvider) buildGeminiRequest(ctx context.Context, req ChatRequest
 		}
 	}
 
-	// Generation config
+	// Generation config (always initialise so MaxTokens and ThinkingConfig share the struct)
+	genCfg := &geminiGenerationConfig{}
 	if req.MaxTokens > 0 {
-		apiReq.GenerationConfig = &geminiGenerationConfig{MaxOutputTokens: req.MaxTokens}
+		genCfg.MaxOutputTokens = req.MaxTokens
+	}
+
+	// Determine effective model for capability check.
+	model := req.Model
+	if model == "" {
+		model = p.config.Model
+	}
+	if model == "" {
+		model = "gemini-2.0-flash"
+	}
+
+	// Thinking injection: resolve per ADR 1 / ADR 2 / Req 10.
+	tc := p.thinking.Thinking // may be nil
+	if tc == nil || tc.Enabled == nil || *tc.Enabled {
+		// Not explicitly disabled — check capability map.
+		if cap, ok := geminiCapabilityFor(model); ok && cap.SupportsThinking {
+			budget := -1 // default: dynamic
+			if tc != nil && tc.BudgetTokens != 0 {
+				budget = tc.BudgetTokens
+			}
+			genCfg.Thinking = &geminiThinkingConfig{
+				ThinkingBudget:  budget,
+				IncludeThoughts: cap.IncludeThoughts,
+			}
+		}
+	}
+
+	// Only attach generationConfig if there's something to say.
+	if genCfg.MaxOutputTokens > 0 || genCfg.Thinking != nil {
+		apiReq.GenerationConfig = genCfg
 	}
 
 	// Tools → functionDeclarations

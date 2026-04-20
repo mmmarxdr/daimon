@@ -14,6 +14,13 @@ var _ Provider = (*OllamaProvider)(nil)
 // instead of sending image/audio blocks that would cause opaque API errors.
 type OllamaProvider struct {
 	*OpenAIProvider
+	thinking config.ProviderCredentials // thinking config wired from registry
+}
+
+// SetThinkingConfig wires the provider-level thinking settings into OllamaProvider.
+// Called by the registry after construction when config is available.
+func (o *OllamaProvider) SetThinkingConfig(creds config.ProviderCredentials) {
+	o.thinking = creds
 }
 
 // NewOllamaProvider constructs an OllamaProvider from cfg.

@@ -10,6 +10,36 @@ import (
 	"time"
 )
 
+// ollamaReasoningSignatures are model name substrings that indicate a reasoning model.
+// The check uses strings.Contains (case-insensitive via lowercasing) so variant tags
+// like ":7b", ":latest", "-preview" are transparent.
+var ollamaReasoningSignatures = []string{
+	"deepseek-r1",
+	"qwq",
+	"marco-o1",
+	"reflection",
+}
+
+// isOllamaReasoningModel returns true when the model name matches a known reasoning
+// model pattern. The heuristic covers:
+//   - Exact-prefix signatures (deepseek-r1, qwq, marco-o1, reflection)
+//   - qwen* models only when the name also contains "thinking"
+//
+// Name comparisons are case-insensitive.
+func isOllamaReasoningModel(name string) bool {
+	lower := strings.ToLower(name)
+	for _, sig := range ollamaReasoningSignatures {
+		if strings.Contains(lower, sig) {
+			return true
+		}
+	}
+	// Special compound: qwen models are only reasoning when "thinking" is present.
+	if strings.Contains(lower, "qwen") && strings.Contains(lower, "thinking") {
+		return true
+	}
+	return false
+}
+
 // ollamaTagsResponse is the wire format returned by GET /api/tags.
 type ollamaTagsResponse struct {
 	Models []struct {
@@ -65,11 +95,15 @@ func (o *OllamaProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 
 	models := make([]ModelInfo, 0, len(result.Models))
 	for _, m := range result.Models {
-		models = append(models, ModelInfo{
+		info := ModelInfo{
 			ID:   m.Name,
 			Name: m.Name,
 			Free: true,
-		})
+		}
+		if isOllamaReasoningModel(m.Name) {
+			info.SupportedParameters = []string{"reasoning"}
+		}
+		models = append(models, info)
 	}
 	return models, nil
 }
