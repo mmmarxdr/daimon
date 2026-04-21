@@ -98,6 +98,29 @@ Prefer the terminal? `daimon --setup` runs the same wizard in a TUI.
 
 Prefer a hand-written config? See **[docs/CONFIG.md](docs/CONFIG.md)**.
 
+### Optional: better PDF extraction
+
+Daimon ingests PDFs with a pure-Go parser by default. It handles most simple
+PDFs but struggles with academic papers, LaTeX-generated documents, and PDFs
+that use CID-encoded fonts (cards in the Memory tab show **`no text`** when
+extraction yields nothing).
+
+Installing **poppler-utils** unlocks the `pdftotext` CLI as a higher-quality
+extraction backend. Daimon detects it at startup and uses it automatically;
+the pure-Go parser remains the fallback. No config changes needed — restart
+daimon after installing.
+
+```bash
+# Debian / Ubuntu / WSL
+sudo apt install poppler-utils
+
+# macOS (Homebrew)
+brew install poppler
+
+# Arch
+sudo pacman -S poppler
+```
+
 ---
 
 ## Documentation
