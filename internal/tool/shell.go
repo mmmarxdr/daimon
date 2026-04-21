@@ -1,13 +1,17 @@
 package tool
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"os/user"
 	"strconv"
 	"strings"
+	"time"
 
 	"daimon/internal/config"
 )
@@ -46,6 +50,12 @@ type shellParams struct {
 	Command string `json:"command"`
 }
 
+// hardKillGrace is how long we wait after SIGKILL'ing the process group before
+// returning to the caller anyway. Bounds the worst case for processes stuck in
+// uninterruptible sleep (D-state) — common when reading from network filesystems
+// or NTFS mounts on WSL.
+const hardKillGrace = 500 * time.Millisecond
+
 func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var input shellParams
 	if err := json.Unmarshal(params, &input); err != nil {
@@ -73,7 +83,8 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	cmd := exec.Command("sh", "-c", cmdStr) //nolint:gosec // shell exec is the contract
+	setProcessGroup(cmd)
 	if t.config.WorkingDir != "" {
 		wd := t.config.WorkingDir
 		if strings.HasPrefix(wd, "~") {
@@ -84,8 +95,21 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		cmd.Dir = wd
 	}
 
-	out, err := cmd.CombinedOutput()
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
 
+	if err := cmd.Start(); err != nil {
+		return ToolResult{
+			IsError: true,
+			Content: fmt.Sprintf("Failed to start command: %v", err),
+			Meta:    map[string]string{"command": cmdStr, "exit_code": "-1"},
+		}, nil
+	}
+
+	waitErr := waitWithDeadline(ctx, cmd)
+
+	out := buf.Bytes()
 	const maxLen = 64 * 1024
 	outStr := string(out)
 	if len(outStr) > maxLen {
@@ -93,15 +117,23 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		outStr = outStr[:maxLen] + fmt.Sprintf("\n...(output truncated — showing first %d of %d bytes)", maxLen, originalLen)
 	}
 
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return ToolResult{IsError: true, Content: "Tool timed out", Meta: map[string]string{"command": cmdStr, "exit_code": "-1"}}, nil
+	if waitErr != nil {
+		if errors.Is(waitErr, context.DeadlineExceeded) || errors.Is(waitErr, context.Canceled) {
+			return ToolResult{
+				IsError: true,
+				Content: "Tool timed out (process group killed)",
+				Meta:    map[string]string{"command": cmdStr, "exit_code": "-1"},
+			}, nil
 		}
 		exitCode := "-1"
 		if cmd.ProcessState != nil {
 			exitCode = strconv.Itoa(cmd.ProcessState.ExitCode())
 		}
-		return ToolResult{IsError: true, Content: fmt.Sprintf("Command failed: %v\nOutput: %s", err, outStr), Meta: map[string]string{"command": cmdStr, "exit_code": exitCode}}, nil
+		return ToolResult{
+			IsError: true,
+			Content: fmt.Sprintf("Command failed: %v\nOutput: %s", waitErr, outStr),
+			Meta:    map[string]string{"command": cmdStr, "exit_code": exitCode},
+		}, nil
 	}
 
 	if len(outStr) == 0 {
@@ -109,4 +141,32 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 	}
 
 	return ToolResult{Content: outStr, Meta: map[string]string{"command": cmdStr, "exit_code": "0"}}, nil
+}
+
+// waitWithDeadline runs cmd.Wait in a goroutine and races it against ctx.Done.
+// On context cancellation it SIGKILLs the entire process group via
+// killProcessGroup and gives Wait up to hardKillGrace to drain pipes; if Wait
+// stays blocked past that (D-state child), the function returns ctx.Err()
+// anyway so the agent loop is never held hostage by a stuck child.
+func waitWithDeadline(ctx context.Context, cmd *exec.Cmd) error {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		if err := killProcessGroup(cmd); err != nil {
+			slog.Debug("shell: kill process group (best-effort)", "error", err)
+		}
+		select {
+		case <-done:
+			// Process exited cleanly after the kill; surface the timeout cause anyway.
+		case <-time.After(hardKillGrace):
+			// Child stuck in uninterruptible sleep. Stop waiting.
+			slog.Warn("shell: process did not exit within grace period after SIGKILL — likely D-state",
+				"grace", hardKillGrace, "pid", cmd.Process.Pid)
+		}
+		return ctx.Err()
+	}
 }

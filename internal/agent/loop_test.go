@@ -1989,3 +1989,35 @@ func TestProcessMessage_NoDegradationNotice_TextOnlyMessage(t *testing.T) {
 		t.Errorf("unexpected reply: %q", msgs[0].Text)
 	}
 }
+
+// ─── formatToolError ─────────────────────────────────────────────────────────
+
+func TestFormatToolError_DeadlineExceededIsActionable(t *testing.T) {
+	got := formatToolError("shell_exec", 30*time.Second, context.DeadlineExceeded)
+	if !strings.Contains(got, "shell_exec") {
+		t.Errorf("expected tool name in error, got %q", got)
+	}
+	if !strings.Contains(got, "30s") {
+		t.Errorf("expected timeout duration in error, got %q", got)
+	}
+	if !strings.Contains(got, "DO NOT retry") {
+		t.Errorf("expected 'DO NOT retry' guidance for the LLM, got %q", got)
+	}
+}
+
+func TestFormatToolError_CancelledHasItsOwnCopy(t *testing.T) {
+	got := formatToolError("read_file", 30*time.Second, context.Canceled)
+	if !strings.Contains(got, "cancelled") {
+		t.Errorf("expected 'cancelled' in error, got %q", got)
+	}
+	if strings.Contains(got, "DO NOT retry") {
+		t.Errorf("cancelled errors should NOT carry the timeout retry warning, got %q", got)
+	}
+}
+
+func TestFormatToolError_GenericErrorPassesThrough(t *testing.T) {
+	got := formatToolError("read_file", 30*time.Second, errors.New("file not found"))
+	if got != "file not found" {
+		t.Errorf("expected raw error message for non-deadline errors, got %q", got)
+	}
+}

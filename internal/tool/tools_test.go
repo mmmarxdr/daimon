@@ -230,8 +230,8 @@ func TestShellTool_ContextTimeout(t *testing.T) {
 	if !result.IsError {
 		t.Errorf("expected IsError=true for timed-out command, content: %q", result.Content)
 	}
-	if result.Content != "Tool timed out" {
-		t.Errorf("expected 'Tool timed out', got %q", result.Content)
+	if !strings.HasPrefix(result.Content, "Tool timed out") {
+		t.Errorf("expected content to start with 'Tool timed out', got %q", result.Content)
 	}
 }
 

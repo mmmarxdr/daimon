@@ -262,11 +262,35 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 
 		llmDuration := time.Since(llmStart)
 		if err != nil {
+			stopReason := "error"
+			if errors.Is(err, context.DeadlineExceeded) {
+				stopReason = "turn_timeout"
+			}
 			_ = a.auditor.Emit(ctx, audit.AuditEvent{
 				ID: uuid.New().String(), ScopeID: scope,
 				EventType: "llm_call", Timestamp: llmStart, DurationMs: llmDuration.Milliseconds(),
-				Iteration: i, StopReason: "error",
+				Iteration: i, StopReason: stopReason,
 			})
+			if stopReason == "turn_timeout" {
+				slog.Warn("turn timeout exceeded", "limit", totalTimeout, "iteration", i, "channel_id", msg.ChannelID)
+				if hasTelemetry {
+					_ = telemetry.EmitTelemetry(ctx, msg.ChannelID, map[string]any{
+						"type":            "turn_timeout_reached",
+						"limit_seconds":   int(totalTimeout.Seconds()),
+						"iteration":       i,
+						"conversation_id": conv.ID,
+					})
+				} else {
+					_ = a.channel.Send(ctx, channel.OutgoingMessage{
+						ChannelID: msg.ChannelID,
+						Text: fmt.Sprintf(
+							"(turn aborted — %s total-time limit reached. Raise `limits.total_timeout` in config if you need longer turns.)",
+							totalTimeout,
+						),
+					})
+				}
+				return
+			}
 			slog.Error("provider chat failed", "error", err, "channel_id", msg.ChannelID)
 			errMsg := channel.OutgoingMessage{
 				ChannelID: msg.ChannelID,
@@ -449,7 +473,10 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						result, err = executeWithRecover(toolCtx, t, tc.Input)
 						tCancel()
 						if err != nil {
-							result = tool.ToolResult{IsError: true, Content: err.Error()}
+							result = tool.ToolResult{
+								IsError: true,
+								Content: formatToolError(tc.Name, toolTimeout, err),
+							}
 						}
 					}
 				}
@@ -688,4 +715,25 @@ func truncateTelemetry(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// formatToolError converts an executor error into actionable copy for the LLM.
+// Generic Go errors like "context deadline exceeded" don't tell the model what
+// to do next — it often retries the same call and times out again. We rewrite
+// timeouts into an explicit instruction NOT to retry, and surface
+// cancellations as their own state so the model doesn't blame the tool.
+func formatToolError(toolName string, timeout time.Duration, err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return fmt.Sprintf(
+			"Tool %q exceeded the %s timeout. The previous approach is hanging or doing too much work. "+
+				"Try a different command, narrow the scope (smaller path, fewer files, more specific filter), or use a different tool. "+
+				"DO NOT retry the same call — it will time out again.",
+			toolName, timeout,
+		)
+	case errors.Is(err, context.Canceled):
+		return fmt.Sprintf("Tool %q was cancelled before completing (turn deadline or user cancel).", toolName)
+	default:
+		return err.Error()
+	}
 }
