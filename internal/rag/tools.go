@@ -192,7 +192,7 @@ func (t *searchDocsTool) Execute(ctx context.Context, params json.RawMessage) (t
 		}
 	}
 
-	results, err := t.deps.Store.SearchChunks(ctx, input.Query, queryVec, topK)
+	results, err := t.deps.Store.SearchChunks(ctx, input.Query, queryVec, SearchOptions{Limit: topK})
 	if err != nil {
 		return tool.ToolResult{IsError: true, Content: fmt.Sprintf("search failed: %v", err)}, nil
 	}

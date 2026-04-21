@@ -518,6 +518,20 @@ type MediaConfig struct {
 	AllowedMIMEPrefixes []string      `yaml:"allowed_mime_prefixes" json:"allowed_mime_prefixes"`
 }
 
+// RAGRetrievalConf holds retrieval-precision knobs for the RAG subsystem.
+// All fields default to zero = disabled; users opt in explicitly.
+//
+// BM25 vs cosine orientation:
+//   - MaxBM25Score is a ceiling (FTS5 bm25() returns lower/more-negative for
+//     better matches; reject if bm25() > MaxBM25Score). Zero = no threshold.
+//   - MinCosineScore is a floor (cosine similarity is "higher is better";
+//     reject if cosine < MinCosineScore). Zero = no threshold.
+type RAGRetrievalConf struct {
+	NeighborRadius int     `yaml:"neighbor_radius"  json:"neighbor_radius"`  // default 0 (opt-in)
+	MaxBM25Score   float64 `yaml:"max_bm25_score"   json:"max_bm25_score"`   // default 0 (disabled)
+	MinCosineScore float64 `yaml:"min_cosine_score" json:"min_cosine_score"` // default 0 (disabled)
+}
+
 // RAGConfig holds configuration for the Retrieval-Augmented Generation subsystem.
 // YAML key: rag
 type RAGConfig struct {
@@ -530,6 +544,7 @@ type RAGConfig struct {
 	MaxContextTokens int              `yaml:"max_context_tokens"  json:"max_context_tokens"` // default 10000
 	SummaryModel     string           `yaml:"summary_model"       json:"summary_model"`      // empty = provider's default model
 	Embedding        RAGEmbeddingConf `yaml:"embedding"           json:"embedding"`
+	Retrieval        RAGRetrievalConf `yaml:"retrieval"            json:"retrieval"`
 }
 
 // RAGEmbeddingConf configures a separate provider used ONLY for generating

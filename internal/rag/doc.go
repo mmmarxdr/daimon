@@ -61,3 +61,20 @@ type ChunkOptions struct {
 	Size    int // characters per chunk; default 512
 	Overlap int // overlap characters between consecutive chunks; default 64
 }
+
+// SearchOptions controls the behavior of SearchChunks.
+//
+// BM25 vs cosine orientation:
+//   - MaxBM25Score is a ceiling: FTS5 bm25() returns lower (more-negative) for
+//     better matches. A candidate is dropped when bm25() > MaxBM25Score.
+//     Zero means "no threshold" (disabled).
+//   - MinCosineScore is a floor: cosine similarity is "higher is better".
+//     A candidate is dropped when cosine < MinCosineScore.
+//     Applied only on the cosine-rerank path (queryVec provided + ≥2 embeddings).
+//     Zero means "no threshold" (disabled).
+type SearchOptions struct {
+	Limit          int     // maximum number of primary results; 0 defaults to 10
+	NeighborRadius int     // expand each primary hit by N adjacent chunks; 0 = disabled
+	MaxBM25Score   float64 // BM25 ceiling filter; 0 = disabled
+	MinCosineScore float64 // cosine floor filter; 0 = disabled
+}

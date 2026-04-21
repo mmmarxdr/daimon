@@ -41,13 +41,13 @@ func (m *mockDocStore) ListDocuments(ctx context.Context, namespace string) ([]r
 func (m *mockDocStore) GetDocument(ctx context.Context, id string) (rag.Document, error) {
 	return rag.Document{}, rag.ErrDocNotFound
 }
-func (m *mockDocStore) SearchChunks(ctx context.Context, query string, queryVec []float32, limit int) ([]rag.SearchResult, error) {
+func (m *mockDocStore) SearchChunks(ctx context.Context, query string, queryVec []float32, opts rag.SearchOptions) ([]rag.SearchResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.searchCalled++
 	m.lastQuery = query
 	m.lastVec = queryVec
-	m.lastLimit = limit
+	m.lastLimit = opts.Limit
 	return m.results, m.searchErr
 }
 

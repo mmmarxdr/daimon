@@ -139,7 +139,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		if limit <= 0 {
 			limit = 5
 		}
-		if results, err := a.ragStore.SearchChunks(ctx, queryText, queryVec, limit); err == nil {
+		searchOpts := rag.SearchOptions{
+			Limit:          limit,
+			NeighborRadius: a.ragRetrievalConf.NeighborRadius,
+			MaxBM25Score:   a.ragRetrievalConf.MaxBM25Score,
+			MinCosineScore: a.ragRetrievalConf.MinCosineScore,
+		}
+		if results, err := a.ragStore.SearchChunks(ctx, queryText, queryVec, searchOpts); err == nil {
 			ragResults = results
 		}
 	}

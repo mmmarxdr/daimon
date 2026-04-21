@@ -19,7 +19,7 @@ func newSearchableStore() *searchableStore {
 	return &searchableStore{trackingStore: newTrackingStore()}
 }
 
-func (s *searchableStore) SearchChunks(_ context.Context, _ string, _ []float32, _ int) ([]rag.SearchResult, error) {
+func (s *searchableStore) SearchChunks(_ context.Context, _ string, _ []float32, _ rag.SearchOptions) ([]rag.SearchResult, error) {
 	return s.searchResults, nil
 }
 

@@ -40,7 +40,8 @@ type patchTools struct {
 // added to the Settings UI, it MUST also be allow-listed here — otherwise the
 // JSON decoder silently drops it on PUT and the toast lies about success.
 type patchRAG struct {
-	Embedding *config.RAGEmbeddingConf `json:"embedding,omitempty"`
+	Embedding *config.RAGEmbeddingConf  `json:"embedding,omitempty"`
+	Retrieval *config.RAGRetrievalConf  `json:"retrieval,omitempty"`
 }
 
 // maxPutBodySize is the hard limit for PUT /api/config request bodies (64 KB).
@@ -190,6 +191,28 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 			newEmb.BaseURL = stored.BaseURL
 		}
 		merged.RAG.Embedding = newEmb
+	}
+
+	// Merge body.RAG.Retrieval field-by-field so that a partial PUT (e.g. only
+	// min_cosine_score) does not reset sibling fields to zero. Each field is
+	// only overwritten when the patch sends a non-zero value. Since zero is also
+	// a valid "disabled" sentinel for all three fields, we decode Retrieval as a
+	// pointer-to-struct so we can detect "sent vs absent" at the struct level.
+	// Within the struct we merge field-by-field because JSON has no nil for
+	// non-pointer scalars: a sent zero is indistinguishable from an absent field.
+	// Callers that want to reset a field to zero must omit the whole retrieval
+	// sub-tree and rely on the stored value already being zero.
+	if patch.RAG != nil && patch.RAG.Retrieval != nil {
+		p := *patch.RAG.Retrieval
+		if p.NeighborRadius != 0 {
+			merged.RAG.Retrieval.NeighborRadius = p.NeighborRadius
+		}
+		if p.MaxBM25Score != 0 {
+			merged.RAG.Retrieval.MaxBM25Score = p.MaxBM25Score
+		}
+		if p.MinCosineScore != 0 {
+			merged.RAG.Retrieval.MinCosineScore = p.MinCosineScore
+		}
 	}
 
 	// Validate active provider has credentials.

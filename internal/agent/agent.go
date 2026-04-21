@@ -101,10 +101,11 @@ type Agent struct {
 	bus             notify.Bus
 
 	// RAG fields — nil when RAG is not wired.
-	ragStore     rag.DocumentStore
-	ragEmbedFn   func(context.Context, string) ([]float32, error)
-	ragMaxChunks int
-	ragMaxTokens int
+	ragStore         rag.DocumentStore
+	ragEmbedFn       func(context.Context, string) ([]float32, error)
+	ragMaxChunks     int
+	ragMaxTokens     int
+	ragRetrievalConf rag.RAGRetrievalConf // neighbor expansion + score thresholds
 }
 
 func New(
@@ -282,6 +283,14 @@ func (a *Agent) WithRAGStore(st rag.DocumentStore, embedFn func(context.Context,
 	}
 	a.ragMaxChunks = maxChunks
 	a.ragMaxTokens = maxTokens
+	return a
+}
+
+// WithRAGRetrievalConf stores retrieval-precision options (neighbor radius,
+// score thresholds) that are applied on every SearchChunks call. Call this
+// after WithRAGStore when the user has opted into non-default retrieval behavior.
+func (a *Agent) WithRAGRetrievalConf(conf rag.RAGRetrievalConf) *Agent {
+	a.ragRetrievalConf = conf
 	return a
 }
 
