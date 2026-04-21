@@ -16,10 +16,11 @@ import (
 // GeminiProvider implements the Provider interface via the Google AI Studio REST API
 // (generateContent endpoint). Works with any model: gemini-2.0-flash, gemini-1.5-pro, etc.
 type GeminiProvider struct {
-	config   config.ProviderConfig
-	client   *http.Client
-	media    mediaReader              // optional; nil → text-only fallback for image/audio blocks
-	thinking config.ProviderCredentials // thinking config wired from registry
+	config         config.ProviderConfig
+	client         *http.Client
+	media          mediaReader                // optional; nil → text-only fallback for image/audio blocks
+	thinking       config.ProviderCredentials // thinking config wired from registry
+	embeddingModel string                     // empty = use geminiDefaultEmbeddingModel
 }
 
 // SetThinkingConfig wires provider-level thinking settings into GeminiProvider.
@@ -27,6 +28,20 @@ type GeminiProvider struct {
 func (p *GeminiProvider) SetThinkingConfig(creds config.ProviderCredentials) {
 	p.thinking = creds
 }
+
+// WithEmbeddingModel overrides the model passed to the embedding endpoint.
+// Empty resets to the default (text-embedding-004). Callers wiring a separate
+// embedding-only provider use this to pin the model.
+func (p *GeminiProvider) WithEmbeddingModel(model string) *GeminiProvider {
+	p.embeddingModel = model
+	return p
+}
+
+// geminiDefaultEmbeddingModel is the model used when rag.embedding.model is
+// empty. Updated 2026-04 — Google deprecated the text-embedding-004 endpoint;
+// the v1beta API now serves gemini-embedding-001 (stable) and
+// gemini-embedding-2-preview as the supported embedding models for embedContent.
+const geminiDefaultEmbeddingModel = "gemini-embedding-001"
 
 func NewGeminiProvider(cfg config.ProviderConfig) *GeminiProvider {
 	timeout := cfg.Timeout
@@ -426,11 +441,15 @@ type geminiEmbedResponse struct {
 }
 
 // Embed generates a text embedding via the Gemini embedding API using
-// text-embedding-004. Implements EmbeddingProvider.
+// gemini-embedding-001 by default (overridable via WithEmbeddingModel).
+// Implements EmbeddingProvider.
 // The returned vector length reflects the model output; callers should
 // normalize to the expected storage dimension (256) before persisting.
 func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, error) {
-	model := "text-embedding-004"
+	model := p.embeddingModel
+	if model == "" {
+		model = geminiDefaultEmbeddingModel
+	}
 
 	reqBody := geminiEmbedRequest{
 		Model: "models/" + model,
@@ -490,6 +509,100 @@ func (p *GeminiProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 // compile-time check: GeminiProvider implements EmbeddingProvider.
 var _ EmbeddingProvider = (*GeminiProvider)(nil)
+
+// geminiBatchEmbedRequest is the body for /models/{model}:batchEmbedContents.
+// Each entry mirrors the single-call shape and MUST repeat the model name
+// (Google's API quirk — the URL has it but the body needs it too).
+type geminiBatchEmbedRequest struct {
+	Requests []geminiEmbedRequest `json:"requests"`
+}
+
+type geminiBatchEmbedResponse struct {
+	Embeddings []struct {
+		Values []float64 `json:"values"`
+	} `json:"embeddings"`
+	Error *geminiErrorBody `json:"error,omitempty"`
+}
+
+// EmbedBatch implements BatchEmbeddingProvider via Gemini's batchEmbedContents
+// endpoint. Sends all texts in a single HTTP request — typically completes in
+// 100-500ms regardless of batch size, vs. N × 50-700ms for sequential calls.
+//
+// Returns one vector per input in the same order. On HTTP error or partial
+// response the entire batch fails; the worker decides whether to retry or
+// fall back to single-call Embed.
+func (p *GeminiProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	model := p.embeddingModel
+	if model == "" {
+		model = geminiDefaultEmbeddingModel
+	}
+
+	requests := make([]geminiEmbedRequest, len(texts))
+	for i, text := range texts {
+		requests[i] = geminiEmbedRequest{
+			Model: "models/" + model,
+			Content: geminiEmbedPart{
+				Parts: []struct {
+					Text string `json:"text"`
+				}{{Text: text}},
+			},
+		}
+	}
+	body, err := json.Marshal(geminiBatchEmbedRequest{Requests: requests})
+	if err != nil {
+		return nil, fmt.Errorf("gemini batch embed: marshaling request: %w", err)
+	}
+
+	baseURL := p.config.BaseURL
+	if baseURL == "" {
+		baseURL = "https://generativelanguage.googleapis.com"
+	}
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:batchEmbedContents?key=%s", baseURL, model, p.config.APIKey)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("gemini batch embed: creating request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("gemini batch embed: request failed: %w", wrapNetworkError(err))
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyGeminiError(resp.StatusCode, respBody)
+	}
+
+	var apiResp geminiBatchEmbedResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("gemini batch embed: parsing response: %w", err)
+	}
+	if apiResp.Error != nil {
+		return nil, fmt.Errorf("gemini batch embed api error %d: %s", apiResp.Error.Code, apiResp.Error.Message)
+	}
+	if len(apiResp.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("gemini batch embed: expected %d embeddings, got %d", len(texts), len(apiResp.Embeddings))
+	}
+
+	out := make([][]float32, len(apiResp.Embeddings))
+	for i, e := range apiResp.Embeddings {
+		vec := make([]float32, len(e.Values))
+		for j, v := range e.Values {
+			vec[j] = float32(v)
+		}
+		out[i] = vec
+	}
+	return out, nil
+}
+
+// compile-time check: GeminiProvider implements BatchEmbeddingProvider.
+var _ BatchEmbeddingProvider = (*GeminiProvider)(nil)
 
 // geminiAllowedSchemaKeys is the documented subset of JSON Schema keywords Gemini accepts
 // in function declarations. Everything else is stripped to avoid 400 errors.

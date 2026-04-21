@@ -98,13 +98,14 @@ const (
 // OpenAIProvider calls the OpenAI Chat Completions API (or any compatible API
 // such as Ollama via a custom base_url).
 type OpenAIProvider struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	timeout    time.Duration
-	maxRetries int
-	client     *http.Client
-	media      mediaReader // optional; nil → text-only fallback for image blocks
+	baseURL        string
+	apiKey         string
+	model          string
+	embeddingModel string // empty = use openAIDefaultEmbeddingModel
+	timeout        time.Duration
+	maxRetries     int
+	client         *http.Client
+	media          mediaReader // optional; nil → text-only fallback for image blocks
 }
 
 // WithMediaReader wires a mediaReader into the provider so that image blocks
@@ -115,6 +116,17 @@ func (p *OpenAIProvider) WithMediaReader(mr mediaReader) *OpenAIProvider {
 	p.media = mr
 	return p
 }
+
+// WithEmbeddingModel overrides the model passed to /v1/embeddings. Empty
+// resets to the default (text-embedding-3-small). Callers wiring a separate
+// embedding-only provider (rag.embedding) use this to pin a cheaper or larger
+// model without affecting chat completions.
+func (p *OpenAIProvider) WithEmbeddingModel(model string) *OpenAIProvider {
+	p.embeddingModel = model
+	return p
+}
+
+const openAIDefaultEmbeddingModel = "text-embedding-3-small"
 
 // NewOpenAIProvider constructs an OpenAIProvider from cfg.
 // Returns an error if the base URL points to OpenAI but no api_key is set.
@@ -492,8 +504,12 @@ type openaiEmbedResponse struct {
 // The returned vector length reflects the model output; callers should
 // normalize to the expected storage dimension (256) before persisting.
 func (p *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, error) {
+	model := p.embeddingModel
+	if model == "" {
+		model = openAIDefaultEmbeddingModel
+	}
 	reqBody := openaiEmbedRequest{
-		Model: "text-embedding-3-small",
+		Model: model,
 		Input: text,
 	}
 
@@ -544,6 +560,85 @@ func (p *OpenAIProvider) Embed(ctx context.Context, text string) ([]float32, err
 
 // compile-time check: OpenAIProvider implements EmbeddingProvider.
 var _ EmbeddingProvider = (*OpenAIProvider)(nil)
+
+// openaiBatchEmbedRequest mirrors openaiEmbedRequest but accepts an array.
+// OpenAI's /v1/embeddings endpoint natively supports both string and []string
+// for the Input field, but Go's tagged JSON forces us into a separate struct.
+type openaiBatchEmbedRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
+// EmbedBatch implements BatchEmbeddingProvider via OpenAI's native array input
+// on /v1/embeddings. Returns one vector per input in the same order
+// (OpenAI guarantees ordering via the `index` field; we sort defensively).
+//
+// OpenAI accepts up to 2048 inputs per call but enforces a per-request token
+// cap (~300K tokens for text-embedding-3-small). Callers should batch
+// conservatively — this method does not split internally.
+func (p *OpenAIProvider) EmbedBatch(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	model := p.embeddingModel
+	if model == "" {
+		model = openAIDefaultEmbeddingModel
+	}
+	bodyBytes, err := json.Marshal(openaiBatchEmbedRequest{Model: model, Input: texts})
+	if err != nil {
+		return nil, fmt.Errorf("openai batch embed: marshaling request: %w", err)
+	}
+
+	url := p.baseURL + "/embeddings"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("openai batch embed: creating request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if p.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("openai batch embed: request failed: %w", wrapNetworkError(err))
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, classifyOpenAIError(resp.StatusCode, respBody)
+	}
+
+	var apiResp openaiEmbedResponse
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("openai batch embed: parsing response: %w", err)
+	}
+	if apiResp.Error != nil {
+		return nil, fmt.Errorf("openai batch embed api error: %s", apiResp.Error.Message)
+	}
+	if len(apiResp.Data) != len(texts) {
+		return nil, fmt.Errorf("openai batch embed: expected %d embeddings, got %d", len(texts), len(apiResp.Data))
+	}
+
+	// OpenAI returns results in input order but the `index` field is
+	// authoritative — sort by it to be defensive against future API shifts.
+	out := make([][]float32, len(apiResp.Data))
+	for _, d := range apiResp.Data {
+		if d.Index < 0 || d.Index >= len(out) {
+			return nil, fmt.Errorf("openai batch embed: invalid index %d in response", d.Index)
+		}
+		vec := make([]float32, len(d.Embedding))
+		for j, v := range d.Embedding {
+			vec[j] = float32(v)
+		}
+		out[d.Index] = vec
+	}
+	return out, nil
+}
+
+// compile-time check: OpenAIProvider implements BatchEmbeddingProvider.
+var _ BatchEmbeddingProvider = (*OpenAIProvider)(nil)
 
 // ListModels fetches the list of available models from the OpenAI-compatible API.
 // Implements the provider.ModelLister interface.

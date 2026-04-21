@@ -118,6 +118,20 @@ type EmbeddingProvider interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
+// BatchEmbeddingProvider is an optional second interface for providers that
+// support batched embedding requests (e.g. OpenAI's array input, Gemini's
+// batchEmbedContents). Workers should type-assert and prefer batch when
+// available — a single batch HTTP request replaces N single calls, both
+// reducing latency and (for free tiers) consuming a single quota slot
+// instead of N.
+//
+// Implementations MUST return one vector per input in the same order, with
+// len(result) == len(texts). On any provider error the entire batch fails;
+// the caller decides whether to retry or fall back to single-call Embed.
+type BatchEmbeddingProvider interface {
+	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 // ModelInfo describes a model available from a provider.
 type ModelInfo struct {
 	ID             string   `json:"id"`
