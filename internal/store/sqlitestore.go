@@ -39,7 +39,10 @@ func NewSQLiteStore(cfg config.StoreConfig) (*SQLiteStore, error) {
 	// busy_timeout: wait up to 5 s on a locked write (fixes SQLITE_BUSY from
 	// the async IndexingWorker racing against the main agent loop).
 	// journal_mode=WAL: allows concurrent readers alongside a writer.
-	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", dbPath)
+	// foreign_keys: enforce ON DELETE CASCADE on document_chunks (and any future
+	// FK we add). SQLite defaults this OFF — without it, deleting a document
+	// leaves its chunks orphaned and search returns ghost results.
+	dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite database at %s: %w", dbPath, err)
@@ -344,11 +347,15 @@ func (s *SQLiteStore) AppendMemory(ctx context.Context, scopeID string, entry Me
 	if importance == 0 {
 		importance = 5
 	}
+	cluster := entry.Cluster
+	if cluster == "" {
+		cluster = "general"
+	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO memory (id, scope_id, topic, type, title, content, tags, source, created_at, importance)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO memory (id, scope_id, topic, type, title, content, tags, source, created_at, importance, cluster)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		entry.ID, scopeID, entry.Topic, entry.Type, entry.Title,
-		entry.Content, string(tagsJSON), entry.Source, entry.CreatedAt, importance,
+		entry.Content, string(tagsJSON), entry.Source, entry.CreatedAt, importance, cluster,
 	)
 	if err != nil {
 		return fmt.Errorf("appending memory entry %s: %w", entry.ID, err)
@@ -372,7 +379,7 @@ func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
 			&entry.ID, &entry.ScopeID, &entry.Topic, &entry.Type, &entry.Title,
 			&entry.Content, &tagsJSON, &entry.Source, &entry.CreatedAt,
 			&entry.AccessCount, &entry.LastAccessedAt, &entry.ArchivedAt,
-			&entry.Embedding, &entry.Importance,
+			&entry.Embedding, &entry.Importance, &entry.Cluster,
 		); err != nil {
 			return nil, fmt.Errorf("scanning memory row: %w", err)
 		}
@@ -411,6 +418,12 @@ func scanMemoryRows(rows *sql.Rows) ([]MemoryEntry, error) {
 // are logged but not propagated).
 //
 // limit <= 0 means no limit.
+//
+// Scope semantics: an empty scopeID means "all scopes" (used by the dashboard
+// /api/memory endpoint to surface every memory regardless of channel). All
+// non-empty scopeIDs filter to that exact scope. The agent loop and tools
+// always pass a non-empty scope, so this only relaxes the contract for
+// administrative read paths.
 func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query string, limit int) ([]MemoryEntry, error) {
 	var rows *sql.Rows
 	var err error
@@ -419,9 +432,9 @@ func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query st
 	// Includes v2 columns (access_count, last_accessed_at, archived_at) and
 	// the v3 embedding BLOB column.
 	const memCols = `id, scope_id, topic, type, title, content, tags, source, created_at,
-	                 access_count, last_accessed_at, archived_at, embedding, importance`
+	                 access_count, last_accessed_at, archived_at, embedding, importance, cluster`
 	const memColsM = `m.id, m.scope_id, m.topic, m.type, m.title, m.content, m.tags, m.source, m.created_at,
-	                  m.access_count, m.last_accessed_at, m.archived_at, m.embedding, m.importance`
+	                  m.access_count, m.last_accessed_at, m.archived_at, m.embedding, m.importance, m.cluster`
 
 	// ftsLimit is how many candidates to fetch for potential embedding reranking.
 	// We fetch more than the user-requested limit to have a meaningful shortlist.
@@ -430,12 +443,21 @@ func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query st
 		ftsLimit = limit
 	}
 
+	// scopeFilter / scopeArgs build a conditional `scope_id = ?` clause that
+	// vanishes when scopeID is empty (administrative all-scopes read).
+	scopeFilter := ""
+	var scopeArgs []any
+	if scopeID != "" {
+		scopeFilter = " AND scope_id = ?"
+		scopeArgs = []any{scopeID}
+	}
+	scopeFilterM := strings.ReplaceAll(scopeFilter, "scope_id", "m.scope_id")
+
 	if query == "" {
-		// Empty query: return all non-archived entries for scope ordered by created_at DESC.
+		// Empty query: return all non-archived entries (optionally scope-filtered) ordered by created_at DESC.
 		q := `SELECT ` + memCols + `
-		      FROM memory WHERE scope_id = ? AND archived_at IS NULL ORDER BY created_at DESC`
-		var args []any
-		args = append(args, scopeID)
+		      FROM memory WHERE archived_at IS NULL` + scopeFilter + ` ORDER BY created_at DESC`
+		args := append([]any{}, scopeArgs...)
 		if limit > 0 {
 			q += ` LIMIT ?`
 			args = append(args, limit)
@@ -466,10 +488,11 @@ func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query st
 			q := `SELECT ` + memColsM + `
 			      FROM memory m
 			      JOIN memory_fts ON memory_fts.rowid = m.rowid
-			      WHERE memory_fts MATCH ? AND m.scope_id = ? AND m.archived_at IS NULL
+			      WHERE memory_fts MATCH ? AND m.archived_at IS NULL` + scopeFilterM + `
 			      ORDER BY (bm25(memory_fts) + 0.001 * MAX(0, julianday('now') - julianday(substr(m.created_at,1,19)))) ASC
 			      LIMIT ?`
-			args := []any{ftsQuery, scopeID, ftsLimit}
+			args := append([]any{ftsQuery}, scopeArgs...)
+			args = append(args, ftsLimit)
 			rows, err = s.db.QueryContext(ctx, q, args...)
 			if err != nil {
 				return nil, fmt.Errorf("searching memory in scope %s: %w", scopeID, err)
@@ -497,10 +520,11 @@ func (s *SQLiteStore) SearchMemory(ctx context.Context, scopeID string, query st
 		likePattern := "%" + strings.ToLower(query) + "%"
 		q := `SELECT ` + memCols + `
 		      FROM memory
-		      WHERE scope_id = ? AND archived_at IS NULL
+		      WHERE archived_at IS NULL` + scopeFilter + `
 		        AND (lower(content) LIKE ? OR lower(tags) LIKE ?)
 		      ORDER BY created_at DESC`
-		args := []any{scopeID, likePattern, likePattern}
+		args := append([]any{}, scopeArgs...)
+		args = append(args, likePattern, likePattern)
 		if limit > 0 {
 			q += ` LIMIT ?`
 			args = append(args, limit)
@@ -611,10 +635,14 @@ func (s *SQLiteStore) UpdateMemory(ctx context.Context, scopeID string, entry Me
 	if err != nil {
 		return fmt.Errorf("marshalling tags: %w", err)
 	}
+	cluster := entry.Cluster
+	if cluster == "" {
+		cluster = "general"
+	}
 	_, err = s.db.ExecContext(ctx,
-		`UPDATE memory SET topic = ?, type = ?, title = ?, tags = ?, content = ?, importance = ?, archived_at = ?
+		`UPDATE memory SET topic = ?, type = ?, title = ?, tags = ?, content = ?, importance = ?, cluster = ?, archived_at = ?
 		 WHERE id = ? AND scope_id = ?`,
-		entry.Topic, entry.Type, entry.Title, string(tagsJSON), entry.Content, entry.Importance, entry.ArchivedAt,
+		entry.Topic, entry.Type, entry.Title, string(tagsJSON), entry.Content, entry.Importance, cluster, entry.ArchivedAt,
 		entry.ID, scopeID,
 	)
 	if err != nil {

@@ -46,6 +46,11 @@ type MemoryEntry struct {
 	// Default value is 5 (neutral). Added in schema v8.
 	Importance int `json:"importance"`
 
+	// Cluster groups memories into high-level buckets for UI organization:
+	// identity, preferences, projects, relationships, technical, general.
+	// Assigned by the Curator alongside Importance. Default 'general'. Added in v11.
+	Cluster string `json:"cluster,omitempty"`
+
 	// Embedding stores a 256-dimensional float32 vector serialized as
 	// little-endian binary (1,024 bytes). Added in schema v3.
 	// Not serialized to JSON — internal transport only.

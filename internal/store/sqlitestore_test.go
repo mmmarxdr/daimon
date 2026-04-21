@@ -398,6 +398,52 @@ func TestSQLiteStore_SearchMemory_EmptyQuery(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_SearchMemory_EmptyScopeReturnsAll verifies that the
+// administrative read path (passing scopeID="") returns memories from every
+// scope. This is what the dashboard /api/memory endpoint relies on.
+func TestSQLiteStore_SearchMemory_EmptyScopeReturnsAll(t *testing.T) {
+	s := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	for i, scope := range []string{"web:abc", "telegram:xyz", "cli:1"} {
+		e := MemoryEntry{
+			ID:        fmt.Sprintf("cross-%d", i),
+			Content:   fmt.Sprintf("entry from %s", scope),
+			CreatedAt: time.Now(),
+		}
+		if err := s.AppendMemory(ctx, scope, e); err != nil {
+			t.Fatalf("AppendMemory %s: %v", scope, err)
+		}
+	}
+
+	// Empty scope: must return all 3 across scopes.
+	all, err := s.SearchMemory(ctx, "", "", 10)
+	if err != nil {
+		t.Fatalf("SearchMemory all: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("expected 3 entries with scope=\"\", got %d", len(all))
+	}
+
+	// Non-empty scope: must still filter strictly.
+	web, err := s.SearchMemory(ctx, "web:abc", "", 10)
+	if err != nil {
+		t.Fatalf("SearchMemory web: %v", err)
+	}
+	if len(web) != 1 {
+		t.Errorf("expected 1 entry for scope=web:abc, got %d", len(web))
+	}
+
+	// Empty scope with FTS query: must search across all scopes.
+	matches, err := s.SearchMemory(ctx, "", "telegram", 10)
+	if err != nil {
+		t.Fatalf("SearchMemory FTS all: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Errorf("expected 1 FTS match across scopes, got %d", len(matches))
+	}
+}
+
 func TestSQLiteStore_SearchMemory_CaseInsensitive(t *testing.T) {
 	s := newTestSQLiteStore(t)
 	ctx := context.Background()
@@ -751,6 +797,45 @@ func TestSQLiteStore_ScanMemoryRows_ScansNewColumns(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_Cluster_RoundTrip verifies Append → Search returns the same
+// cluster value, and that empty cluster on append defaults to "general".
+func TestSQLiteStore_Cluster_RoundTrip(t *testing.T) {
+	s := newTestSQLiteStore(t)
+	ctx := context.Background()
+
+	// Explicit cluster is preserved.
+	if err := s.AppendMemory(ctx, "scope1", MemoryEntry{
+		ID: "c-1", Content: "explicit cluster entry about identity data", Cluster: "identity",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("AppendMemory: %v", err)
+	}
+
+	// Empty cluster falls back to 'general'.
+	if err := s.AppendMemory(ctx, "scope1", MemoryEntry{
+		ID: "c-2", Content: "legacy entry without cluster assignment",
+		CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("AppendMemory legacy: %v", err)
+	}
+
+	// Lookup via non-FTS path — empty-query list path returns all entries.
+	results, err := s.SearchMemory(ctx, "scope1", "", 10)
+	if err != nil {
+		t.Fatalf("SearchMemory: %v", err)
+	}
+	got := make(map[string]string, len(results))
+	for _, r := range results {
+		got[r.ID] = r.Cluster
+	}
+	if got["c-1"] != "identity" {
+		t.Errorf("expected c-1 cluster=identity, got %q", got["c-1"])
+	}
+	if got["c-2"] != "general" {
+		t.Errorf("expected c-2 cluster=general (legacy default), got %q", got["c-2"])
+	}
+}
+
 // ─── UpdateMemory tests ───────────────────────────────────────────────────────
 
 func TestSQLiteStore_UpdateMemory_UpdatesTitleAndTags(t *testing.T) {
@@ -956,8 +1041,8 @@ func TestIntegration_Scenario5_IdempotentMigration(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 10 {
-		t.Errorf("Scenario 5: expected version=10 after re-run, got %d", version)
+	if version != 13 {
+		t.Errorf("Scenario 5: expected version=13 after re-run, got %d", version)
 	}
 
 	results, err := s.SearchMemory(ctx, "scope1", "data", 5)

@@ -23,6 +23,12 @@ type classificationResult struct {
 	Type       string `json:"type"`
 	Topic      string `json:"topic"`
 	Title      string `json:"title"`
+	Cluster    string `json:"cluster"`
+	// MemorableFact is the 1-2 sentence atomic fact extracted from the response.
+	// Empty means "nothing memorable here" — the entry is skipped instead of
+	// persisted. This is the actual `Content` of the memory entry; the raw
+	// response is NEVER persisted (it lives in the conversation transcript).
+	MemorableFact string `json:"memorable_fact"`
 }
 
 // validMemoryTypes is the set of recognised type values from classification.
@@ -33,6 +39,18 @@ var validMemoryTypes = map[string]bool{
 	"decision":    true,
 	"context":     true,
 	"skip":        true,
+}
+
+// validClusters is the set of recognised cluster values. Memories outside these
+// buckets fall back to 'general'. Kept in sync with the frontend Memory.cluster
+// union in daimon-frontend/src/design/memoryMocks.ts.
+var validClusters = map[string]bool{
+	"identity":      true,
+	"preferences":   true,
+	"projects":      true,
+	"relationships": true,
+	"technical":     true,
+	"general":       true,
 }
 
 // Curator is a synchronous write-time intelligence layer that classifies,
@@ -142,14 +160,35 @@ func (c *Curator) classify(ctx context.Context, userMsg, response string) (class
 	classCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	prompt := "Classify this assistant response for long-term memory storage.\n" +
-		"Respond in JSON only: {\"importance\": 0-10, \"type\": \"fact|preference|instruction|decision|context|skip\", \"topic\": \"short-topic-label\", \"title\": \"one-line-summary\"}\n\n" +
-		"Rules:\n" +
-		"- importance 0-3: greetings, filler, errors, \"I don't know\" → type: skip\n" +
-		"- importance 4-6: contextual info, partial answers, general knowledge\n" +
-		"- importance 7-10: user preferences, personal facts, decisions, specific instructions\n\n" +
-		"Response to classify:\n" + truncateForClassification(response, 500) + "\n\n" +
-		"User message that prompted it:\n" + truncateForClassification(userMsg, 200)
+	prompt := "Decide whether the assistant's response contains anything worth remembering long-term about the USER (their identity, preferences, projects, relationships, environment) or a USER-CONFIRMED decision/instruction.\n\n" +
+		"Most assistant responses are explanations, summaries, or generic answers — they belong in the conversation transcript, NOT in long-term memory. Only persist atomic facts about the user.\n\n" +
+		"Respond in JSON only:\n" +
+		`{"memorable_fact": "...", "importance": 0-10, "type": "fact|preference|instruction|decision|context|skip", "cluster": "identity|preferences|projects|relationships|technical|general", "topic": "short-topic-label", "title": "one-line-summary"}` + "\n\n" +
+		"memorable_fact rules:\n" +
+		"- 1-2 plain-prose sentences in third person describing what to remember about the user.\n" +
+		"- NO markdown, NO code blocks, NO tables, NO lists, NO emojis.\n" +
+		"- If the response is generic explanation/tutorial/summary with no user-specific fact: return EMPTY STRING.\n" +
+		"- Examples of memorable facts:\n" +
+		"    \"User's payments service is in Go and runs on Helix's monorepo.\"\n" +
+		"    \"User prefers TypeScript over Python for new services.\"\n" +
+		"    \"User decided to migrate from Postgres 14 to 16 next quarter.\"\n" +
+		"- Examples that should return empty memorable_fact:\n" +
+		"    A long markdown explanation of how Kubernetes works.\n" +
+		"    A summary of what a library does.\n" +
+		"    A how-to walkthrough with code samples.\n\n" +
+		"Importance scale (applies to memorable_fact, not the raw response):\n" +
+		"- 0-3: filler, greetings, refusals → type: skip\n" +
+		"- 4-6: weak signals, inferred patterns → cluster appropriately, type: context\n" +
+		"- 7-10: explicit personal facts, preferences, decisions, instructions\n\n" +
+		"Cluster guide:\n" +
+		"- identity: name, role, employer, location, demographics about the user\n" +
+		"- preferences: likes, dislikes, writing style, language, interaction style\n" +
+		"- projects: specific work, codebases, initiatives the user is engaged with\n" +
+		"- relationships: partners, family, colleagues, teammates mentioned by name\n" +
+		"- technical: tools, stack, hardware, environment, infrastructure choices\n" +
+		"- general: anything that doesn't fit the buckets above\n\n" +
+		"Response to classify:\n" + truncateForClassification(response, 1500) + "\n\n" +
+		"User message that prompted it:\n" + truncateForClassification(userMsg, 300)
 
 	req := provider.ChatRequest{
 		Model:        c.model,
@@ -157,7 +196,7 @@ func (c *Curator) classify(ctx context.Context, userMsg, response string) (class
 		Messages: []provider.ChatMessage{
 			{Role: "user", Content: content.TextBlock(prompt)},
 		},
-		MaxTokens: 100,
+		MaxTokens: 300,
 	}
 
 	resp, err := c.prov.Chat(classCtx, req)
@@ -183,8 +222,18 @@ func (c *Curator) classify(ctx context.Context, userMsg, response string) (class
 	if !validMemoryTypes[result.Type] {
 		result.Type = "context"
 	}
+	if !validClusters[result.Cluster] {
+		result.Cluster = "general"
+	}
+	result.MemorableFact = strings.TrimSpace(result.MemorableFact)
 	if result.Title == "" {
-		result.Title = truncateTitle(response, 80)
+		// Title falls back to the memorable_fact (when present) before the raw
+		// response so the dashboard never shows raw markdown headers.
+		if result.MemorableFact != "" {
+			result.Title = truncateTitle(result.MemorableFact, 80)
+		} else {
+			result.Title = truncateTitle(response, 80)
+		}
 	}
 
 	return result, nil
@@ -193,11 +242,16 @@ func (c *Curator) classify(ctx context.Context, userMsg, response string) (class
 // fallbackClassification returns a neutral classification used when the LLM
 // call fails or the response cannot be parsed.
 func (c *Curator) fallbackClassification(response string) classificationResult {
+	// On classification failure we cannot synthesize a clean memorable fact
+	// without an LLM call, so we leave it empty — the caller's empty-fact gate
+	// will skip persistence rather than dump the raw response into memory.
 	return classificationResult{
-		Importance: 5,
-		Type:       "context",
-		Topic:      "",
-		Title:      truncateTitle(response, 80),
+		Importance:    0,
+		Type:          "skip",
+		Topic:         "",
+		Title:         truncateTitle(response, 80),
+		Cluster:       "general",
+		MemorableFact: "",
 	}
 }
 
@@ -318,8 +372,20 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 		return nil
 	}
 
-	// 5. Deduplication check.
-	duplicateID, dedupErr := c.checkDedup(ctx, scope, response, result)
+	// 4b. Empty memorable_fact gate. The classifier explicitly says "nothing
+	// worth remembering about the user here" — typically a generic
+	// explanation, tutorial, or summary. The conversation transcript already
+	// preserves it; persisting the raw markdown to memory clutters the dashboard.
+	if result.MemorableFact == "" {
+		slog.Debug("curator: dropping response with empty memorable_fact",
+			"importance", result.Importance, "type", result.Type, "title", result.Title)
+		return nil
+	}
+
+	// 5. Deduplication check — uses the distilled fact, not the raw response,
+	// so semantically-identical facts collapse together regardless of how
+	// verbose the source response was.
+	duplicateID, dedupErr := c.checkDedup(ctx, scope, result.MemorableFact, result)
 	if dedupErr != nil {
 		slog.Warn("curator: dedup check failed, proceeding with new save", "error", dedupErr)
 		// Fall through to new save.
@@ -331,11 +397,12 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 		updated := store.MemoryEntry{
 			ID:         duplicateID,
 			ScopeID:    scope,
-			Content:    response,
+			Content:    result.MemorableFact,
 			Topic:      result.Topic,
 			Type:       result.Type,
 			Title:      result.Title,
 			Importance: result.Importance,
+			Cluster:    result.Cluster,
 			Source:     convID,
 			CreatedAt:  now,
 		}
@@ -344,12 +411,13 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 		}
 		slog.Debug("curator: memory deduplicated", "existing_id", duplicateID)
 
-		// Re-enqueue workers for the updated entry.
+		// Re-enqueue workers for the updated entry. Embed against the fact too,
+		// so vector search matches the same surface area shown in the UI.
 		if c.enricher != nil {
 			c.enricher.Enqueue(updated)
 		}
 		if c.embWorker != nil {
-			c.embWorker.Enqueue(updated.ID, scope, response)
+			c.embWorker.Enqueue(updated.ID, scope, result.MemorableFact)
 		}
 		return nil
 	}
@@ -361,9 +429,10 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 		Topic:      result.Topic,
 		Type:       result.Type,
 		Title:      result.Title,
-		Content:    response,
+		Content:    result.MemorableFact,
 		Source:     convID,
 		Importance: result.Importance,
+		Cluster:    result.Cluster,
 		CreatedAt:  time.Now(),
 	}
 
@@ -374,12 +443,13 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 	slog.Debug("curator: memory saved",
 		"entry_id", entry.ID, "importance", entry.Importance, "topic", entry.Topic)
 
-	// 8. Enqueue async workers.
+	// 8. Enqueue async workers. Embed against the persisted fact (same as
+	// what the UI shows) so vector search and dashboard render align.
 	if c.enricher != nil {
 		c.enricher.Enqueue(entry)
 	}
 	if c.embWorker != nil {
-		c.embWorker.Enqueue(entry.ID, scope, response)
+		c.embWorker.Enqueue(entry.ID, scope, result.MemorableFact)
 	}
 
 	return nil

@@ -25,7 +25,6 @@ import (
 	"daimon/internal/mcp"
 	"daimon/internal/notify"
 	"daimon/internal/provider"
-	"daimon/internal/rag"
 	"daimon/internal/setup"
 	"daimon/internal/skill"
 	"daimon/internal/store"
@@ -42,12 +41,14 @@ var (
 )
 
 var (
-	cfgPath     = flag.String("config", "", "path to config file (searches ~/.daimon/config.yaml and ./config.yaml if empty)")
-	showVersion = flag.Bool("version", false, "print version and exit")
-	dashboard   = flag.Bool("dashboard", false, "open read-only TUI dashboard and exit")
-	runSetup    = flag.Bool("setup", false, "run the interactive setup wizard and exit")
-	daemon      = flag.Bool("daemon", false, "run as background daemon (no interactive channel; cron only)")
-	webFlag     = flag.Bool("web", false, "also start web dashboard alongside the agent")
+	cfgPath        = flag.String("config", "", "path to config file (searches ~/.daimon/config.yaml and ./config.yaml if empty)")
+	showVersion    = flag.Bool("version", false, "print version and exit")
+	dashboard      = flag.Bool("dashboard", false, "open read-only TUI dashboard and exit")
+	runSetup       = flag.Bool("setup", false, "run the interactive setup wizard and exit")
+	daemon         = flag.Bool("daemon", false, "run as background daemon (no interactive channel; cron only)")
+	webFlag        = flag.Bool("web", false, "also start web dashboard alongside the agent")
+	pruneMemories  = flag.Bool("prune-memories", false, "list memory entries that look like transcripts (long + markdown structure); pair with --confirm to delete them")
+	pruneConfirm   = flag.Bool("confirm", false, "actually delete when used with --prune-memories (defaults to dry-run)")
 )
 
 // extractFlagValue scans args for "--flag value" or "--flag=value" and returns
@@ -155,6 +156,14 @@ func main() {
 		}
 		if _, err := setup.RunWizard(); err != nil {
 			fmt.Fprintf(os.Stderr, "Setup wizard failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if *pruneMemories {
+		if err := runPruneMemories(*cfgPath, *pruneConfirm); err != nil {
+			fmt.Fprintf(os.Stderr, "prune-memories failed: %v\n", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
@@ -482,10 +491,10 @@ func main() {
 		WithBus(notifyBus).
 		WithCronCommands(cronScheduler, cronSt)
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
-	ragWorker := wireRAG(cfg, st, prov, ag, toolsRegistry)
-	if ragWorker != nil {
-		ragWorker.Start(ctx)
-		defer ragWorker.Stop()
+	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
+	if ragWiring.Worker != nil {
+		ragWiring.Worker.Start(ctx)
+		defer ragWiring.Worker.Stop()
 	}
 
 	// Start web dashboard if enabled in config or via --web flag.
@@ -509,20 +518,11 @@ func main() {
 			WithBus(notifyBus).
 			WithCronCommands(cronScheduler, cronSt)
 		wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
-		// Re-wire RAG into the rebuilt agent (web path).
-		if ragWorker != nil {
+		// Re-wire RAG into the rebuilt agent (web path). Reuse the DocumentStore
+		// + embed function built by wireRAG — do NOT construct a second store.
+		if ragWiring.Worker != nil && ragWiring.Store != nil {
 			ragCfg := cfg.RAG
-			sqlStore, ok := st.(*store.SQLiteStore)
-			if ok {
-				docStore := rag.NewSQLiteDocumentStore(sqlStore.DB(), ragCfg.MaxDocuments, ragCfg.MaxChunks)
-				var embedFn func(ctx context.Context, text string) ([]float32, error)
-				if ep, ok2 := prov.(provider.EmbeddingProvider); ok2 {
-					embedFn = func(ctx context.Context, text string) ([]float32, error) {
-						return ep.Embed(ctx, text)
-					}
-				}
-				ag.WithRAGStore(docStore, embedFn, ragCfg.TopK, ragCfg.MaxContextTokens)
-			}
+			ag.WithRAGStore(ragWiring.Store, ragWiring.EmbedFn, ragCfg.TopK, ragCfg.MaxContextTokens)
 		}
 
 		resolvedCfgPath, _ := config.FindConfigPath(*cfgPath)
@@ -549,6 +549,8 @@ func main() {
 			Version:          version,
 			WebChannel:       webCh,
 			MediaStore:       mediaStore,
+			DocStore:         ragWiring.Store,
+			IngestWorker:     ragWiring.Worker,
 		})
 		if err := webSrv.Start(); err != nil {
 			slog.Error("failed to start web dashboard", "error", err)

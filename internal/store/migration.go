@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS memory (
 	tags       TEXT,
 	source     TEXT,
 	created_at DATETIME NOT NULL,
-	importance INTEGER NOT NULL DEFAULT 5
+	importance INTEGER NOT NULL DEFAULT 5,
+	cluster    TEXT NOT NULL DEFAULT 'general'
 );
 
 CREATE TABLE IF NOT EXISTS secrets (
@@ -142,6 +143,34 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 		if err := s.migrateV10(); err != nil {
 			return fmt.Errorf("migration v10: %w", err)
 		}
+	}
+	if version < 11 {
+		if err := s.migrateV11(); err != nil {
+			return fmt.Errorf("migration v11: %w", err)
+		}
+	}
+	if version < 12 {
+		if err := s.migrateV12(); err != nil {
+			return fmt.Errorf("migration v12: %w", err)
+		}
+	}
+	if version < 13 {
+		if err := s.migrateV13(); err != nil {
+			return fmt.Errorf("migration v13: %w", err)
+		}
+	}
+
+	// One-shot orphan cleanup (idempotent; runs every startup). Document chunks
+	// can be left behind by databases created before foreign_keys was enabled
+	// in the DSN — under that regime, deleting a document did NOT cascade to
+	// its chunks. After the FK fix went in, those orphans accumulate ghost
+	// hits in FTS5 search and waste embedding budget on dead vectors. The
+	// cleanup is a single DELETE; its WHERE clause matches nothing on a clean
+	// DB so the cost is a no-op there.
+	if _, err := s.db.Exec(
+		`DELETE FROM document_chunks WHERE doc_id NOT IN (SELECT id FROM documents)`,
+	); err != nil {
+		return fmt.Errorf("cleaning orphan document_chunks: %w", err)
 	}
 
 	return nil
@@ -611,6 +640,172 @@ func (s *SQLiteStore) migrateV9() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 9"); err != nil {
 		return fmt.Errorf("updating schema version to 9: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV11 adds the cluster column to the memory table. The cluster groups
+// memories into high-level buckets (identity, preferences, projects,
+// relationships, technical, general) assigned by the Curator. Existing rows
+// default to 'general'. New databases get the column via the base schema.
+// Advances schema_version to 11.
+//
+// Idempotent: checks for column existence via PRAGMA table_info before
+// issuing ALTER TABLE, so re-running on an already-migrated database is safe.
+func (s *SQLiteStore) migrateV11() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.Query(`PRAGMA table_info(memory)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for memory: %w", err)
+	}
+	hasCluster := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		if name == "cluster" {
+			hasCluster = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !hasCluster {
+		if _, err := tx.Exec(`ALTER TABLE memory ADD COLUMN cluster TEXT NOT NULL DEFAULT 'general'`); err != nil {
+			return fmt.Errorf("adding cluster column to memory: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 11"); err != nil {
+		return fmt.Errorf("updating schema version to 11: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV12 adds trust-surface columns to the RAG documents table so the
+// Knowledge tab can render injection counts, last-used timestamps, LLM-
+// generated summaries, and PDF/DOCX page counts. All new columns are nullable
+// except access_count (defaults to 0) because legacy rows have no signal.
+// Advances schema_version to 12.
+//
+// Idempotent: checks PRAGMA table_info before ALTER so re-running is safe.
+func (s *SQLiteStore) migrateV12() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.Query(`PRAGMA table_info(documents)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for documents: %w", err)
+	}
+	existing := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		existing[name] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	type col struct {
+		name string
+		ddl  string
+	}
+	adds := []col{
+		{"access_count", `ALTER TABLE documents ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`},
+		{"last_accessed_at", `ALTER TABLE documents ADD COLUMN last_accessed_at DATETIME`},
+		{"summary", `ALTER TABLE documents ADD COLUMN summary TEXT`},
+		{"page_count", `ALTER TABLE documents ADD COLUMN page_count INTEGER`},
+	}
+	for _, c := range adds {
+		if existing[c.name] {
+			continue
+		}
+		if _, err := tx.Exec(c.ddl); err != nil {
+			return fmt.Errorf("adding %s column to documents: %w", c.name, err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 12"); err != nil {
+		return fmt.Errorf("updating schema version to 12: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV13 adds the ingested_at column on documents. The ingestion worker
+// stamps this timestamp after processJob completes (regardless of whether any
+// chunks were produced) so the API can distinguish three states:
+//   - chunk_count > 0          → ready
+//   - chunk_count == 0, ingested_at NOT NULL → empty (worker ran, no text)
+//   - chunk_count == 0, ingested_at IS NULL  → indexing (worker not done)
+//
+// Without this column the empty case is indistinguishable from "still
+// indexing" and the UI hangs forever on PDFs the extractor cannot read.
+//
+// Idempotent: skips ALTER when the column already exists.
+func (s *SQLiteStore) migrateV13() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.Query(`PRAGMA table_info(documents)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for documents: %w", err)
+	}
+	hasCol := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		if name == "ingested_at" {
+			hasCol = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !hasCol {
+		if _, err := tx.Exec(`ALTER TABLE documents ADD COLUMN ingested_at DATETIME`); err != nil {
+			return fmt.Errorf("adding ingested_at column to documents: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 13"); err != nil {
+		return fmt.Errorf("updating schema version to 13: %w", err)
 	}
 
 	return tx.Commit()

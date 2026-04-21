@@ -151,9 +151,28 @@ func disabledDedupCfg() config.DeduplicationConfig {
 }
 
 // classifyJSON returns a well-formed JSON classification string for tests.
+// Includes a non-empty memorable_fact so the Curator's empty-fact gate
+// doesn't drop the entry — tests that want to exercise the gate should use
+// classifyJSONNoFact instead.
 func classifyJSON(importance int, typ, topic, title string) string {
-	return fmt.Sprintf(`{"importance":%d,"type":%q,"topic":%q,"title":%q}`,
-		importance, typ, topic, title)
+	return fmt.Sprintf(`{"importance":%d,"type":%q,"topic":%q,"title":%q,"memorable_fact":%q}`,
+		importance, typ, topic, title, "User stated a memorable fact about themselves.")
+}
+
+// classifyJSONWithCluster returns a well-formed JSON classification string
+// including the cluster field. Includes a non-empty memorable_fact for the
+// same reason as classifyJSON.
+func classifyJSONWithCluster(importance int, typ, cluster, topic, title string) string {
+	return fmt.Sprintf(`{"importance":%d,"type":%q,"cluster":%q,"topic":%q,"title":%q,"memorable_fact":%q}`,
+		importance, typ, cluster, topic, title, "User stated a memorable fact about themselves.")
+}
+
+// classifyJSONNoFact returns a classification with an empty memorable_fact —
+// used to verify the Curator drops the entry instead of persisting the raw
+// response.
+func classifyJSONNoFact(importance int, typ, title string) string {
+	return fmt.Sprintf(`{"importance":%d,"type":%q,"cluster":"general","topic":"","title":%q,"memorable_fact":""}`,
+		importance, typ, title)
 }
 
 // longResponse returns a string of n repeated characters — useful to exceed
@@ -294,15 +313,21 @@ func TestCurator_Classify_ParseError_Fallback(t *testing.T) {
 
 	response := longResponse(100)
 	result, err := c.classify(context.Background(), "user msg", response)
-	// Parse error → nil error (fallback is used silently), importance=5.
+	// Parse error → nil error (fallback is used silently). The new fallback
+	// returns importance=0/type=skip with empty memorable_fact so the
+	// downstream persistence path drops the entry rather than dumping raw
+	// text into memory under a guessed-importance.
 	if err != nil {
 		t.Fatalf("expected nil error on parse fallback, got %v", err)
 	}
-	if result.Importance != 5 {
-		t.Errorf("expected fallback importance=5, got %d", result.Importance)
+	if result.Importance != 0 {
+		t.Errorf("expected fallback importance=0 (skip), got %d", result.Importance)
 	}
-	if result.Type != "context" {
-		t.Errorf("expected fallback type=context, got %q", result.Type)
+	if result.Type != "skip" {
+		t.Errorf("expected fallback type=skip, got %q", result.Type)
+	}
+	if result.MemorableFact != "" {
+		t.Errorf("expected fallback memorable_fact empty, got %q", result.MemorableFact)
 	}
 }
 
@@ -375,15 +400,20 @@ func TestCurator_Curate_HighImportance_Saved(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCurator_Curate_Dedup_UpdatesExisting(t *testing.T) {
+	// Dedup compares the distilled memorable_fact against existing entries,
+	// not the raw response. The mock returns the canned fact from the
+	// classifyJSON helper — so the existing candidate must mirror that text
+	// for Jaccard similarity to fire. (This shifted with the memorable_fact
+	// refactor: previously dedup compared raw response to existing content.)
 	prov := &curatorMockProvider{
 		response: classifyJSON(7, "fact", "cooking", "User likes pasta"),
 	}
 
-	existingContent := "The user enjoys cooking pasta dishes and making Italian food at home on weekends regularly."
+	existingContent := "User stated a memorable fact about themselves."
 	existingID := "existing-mem-id"
 
 	st := &curatorMockStore{
-		// Pre-seed a candidate with high Jaccard similarity to the incoming response.
+		// Pre-seed a candidate with high Jaccard similarity to the incoming fact.
 		candidates: []store.MemoryEntry{
 			{
 				ID:      existingID,
@@ -402,8 +432,10 @@ func TestCurator_Curate_Dedup_UpdatesExisting(t *testing.T) {
 	}
 	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), dedupCfg)
 
-	// Use the same content as the existing candidate to guarantee Jaccard > 0.7.
-	err := c.Curate(context.Background(), "scope-1", "do you like pasta?", existingContent, "conv-2")
+	// Response is verbose; the classifier-extracted fact (canned via
+	// classifyJSON) is what matters for dedup matching.
+	verboseResponse := "Yes, the user enjoys cooking pasta dishes and making Italian food at home on weekends regularly. " + longResponse(50)
+	err := c.Curate(context.Background(), "scope-1", "do you like pasta?", verboseResponse, "conv-2")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -418,5 +450,127 @@ func TestCurator_Curate_Dedup_UpdatesExisting(t *testing.T) {
 	updated := st.lastUpdate()
 	if updated.ID != existingID {
 		t.Errorf("expected UpdateMemory called with existing ID %q, got %q", existingID, updated.ID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cluster: Curator persists cluster from classification output
+// ---------------------------------------------------------------------------
+
+func TestCurator_Cluster_PersistedFromLLM(t *testing.T) {
+	prov := &curatorMockProvider{
+		response: classifyJSONWithCluster(8, "preference", "preferences", "lang", "prefers Go"),
+	}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	err := c.Curate(context.Background(), "scope-1", "what do you prefer?", longResponse(100), "conv-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if st.appendCount() != 1 {
+		t.Fatalf("expected 1 AppendMemory call, got %d", st.appendCount())
+	}
+	if got := st.lastAppend().Cluster; got != "preferences" {
+		t.Errorf("expected Cluster=preferences, got %q", got)
+	}
+}
+
+func TestCurator_Cluster_FallbackOnUnknown(t *testing.T) {
+	// Cluster outside the enum must fall back to "general".
+	prov := &curatorMockProvider{
+		response: classifyJSONWithCluster(8, "fact", "bogus-cluster", "t", "hello"),
+	}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	err := c.Curate(context.Background(), "scope-1", "u", longResponse(100), "conv-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := st.lastAppend().Cluster; got != "general" {
+		t.Errorf("expected fallback Cluster=general for unknown bucket, got %q", got)
+	}
+}
+
+func TestCurator_Cluster_FallbackOnMissing(t *testing.T) {
+	// Older classifyJSON helper omits cluster entirely — must fall back to "general".
+	prov := &curatorMockProvider{
+		response: classifyJSON(8, "fact", "t", "hello"),
+	}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	err := c.Curate(context.Background(), "scope-1", "u", longResponse(100), "conv-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := st.lastAppend().Cluster; got != "general" {
+		t.Errorf("expected fallback Cluster=general when field omitted, got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// memorable_fact: persisted Content + skip-on-empty
+// ---------------------------------------------------------------------------
+
+func TestCurator_MemorableFact_PersistedAsContent(t *testing.T) {
+	// The whole point: even when the LLM response is a 5KB markdown wall, the
+	// memory entry should hold the distilled 1-sentence fact, never the raw
+	// response.
+	prov := &curatorMockProvider{
+		response: `{"importance":8,"type":"fact","cluster":"technical","topic":"stack","title":"User runs payments service in Go","memorable_fact":"User runs the payments service at Helix and it is written in Go."}`,
+	}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	hugeMarkdown := "## Big tutorial\n\n" + strings.Repeat("blah ", 1000)
+	if err := c.Curate(context.Background(), "scope-1", "tell me about Go", hugeMarkdown, "conv-1"); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+	if st.appendCount() != 1 {
+		t.Fatalf("expected 1 AppendMemory, got %d", st.appendCount())
+	}
+	got := st.lastAppend()
+	if got.Content != "User runs the payments service at Helix and it is written in Go." {
+		t.Errorf("Content should be the memorable_fact, got %q", got.Content)
+	}
+	if strings.Contains(got.Content, "##") || strings.Contains(got.Content, "blah") {
+		t.Errorf("Content must not contain raw response markdown, got %q", got.Content)
+	}
+}
+
+func TestCurator_EmptyMemorableFact_DoesNotPersist(t *testing.T) {
+	// Generic explanation/tutorial → classifier returns empty memorable_fact
+	// → entry dropped, conversation transcript still has the response.
+	prov := &curatorMockProvider{response: classifyJSONNoFact(7, "context", "Generic Kubernetes tutorial")}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	if err := c.Curate(context.Background(), "scope-1", "explain k8s", longResponse(2000), "conv-1"); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+	if st.appendCount() != 0 {
+		t.Errorf("expected NO Append calls when memorable_fact is empty, got %d", st.appendCount())
+	}
+	if st.updateCount() != 0 {
+		t.Errorf("expected NO Update calls when memorable_fact is empty, got %d", st.updateCount())
+	}
+}
+
+func TestCurator_ClassifyParseFailure_DoesNotPersist(t *testing.T) {
+	// Defensive fallback: when the classifier output cannot be parsed, the
+	// Curator must NOT save anything. Previously it would save with a
+	// guessed importance=5/type=context, which is how raw markdown started
+	// leaking into the dashboard.
+	prov := &curatorMockProvider{response: "definitely not valid json"}
+	st := &curatorMockStore{}
+	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+
+	if err := c.Curate(context.Background(), "scope-1", "u", longResponse(200), "conv-1"); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+	if st.appendCount() != 0 {
+		t.Errorf("expected NO Append on parse failure, got %d", st.appendCount())
 	}
 }

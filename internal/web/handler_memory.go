@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,26 +15,80 @@ import (
 )
 
 // memoryEntryResponse is the API shape the frontend expects for a MemoryEntry.
+// Fields beyond ID/Content/Tags were added when the Memory page shifted from a
+// static list to the Liminal trust surface (confidence / cluster / source conv).
 type memoryEntryResponse struct {
-	ID                   string   `json:"id"`
-	Content              string   `json:"content"`
-	Tags                 []string `json:"tags"`
-	SourceConversationID string   `json:"source_conversation_id"`
-	CreatedAt            string   `json:"created_at"`
+	ID                      string   `json:"id"`
+	Content                 string   `json:"content"`
+	Tags                    []string `json:"tags"`
+	Type                    string   `json:"type,omitempty"`
+	Cluster                 string   `json:"cluster"`
+	Importance              int      `json:"importance"`
+	AccessCount             int      `json:"access_count"`
+	LastAccessedAt          string   `json:"last_accessed_at,omitempty"`
+	SourceConversationID    string   `json:"source_conversation_id"`
+	SourceConversationTitle string   `json:"source_conversation_title,omitempty"`
+	CreatedAt               string   `json:"created_at"`
 }
 
-func toMemoryEntryResponse(e store.MemoryEntry) memoryEntryResponse {
+func toMemoryEntryResponse(e store.MemoryEntry, convTitle string) memoryEntryResponse {
 	tags := e.Tags
 	if tags == nil {
 		tags = []string{}
 	}
-	return memoryEntryResponse{
-		ID:                   e.ID,
-		Content:              e.Content,
-		Tags:                 tags,
-		SourceConversationID: e.Source,
-		CreatedAt:            e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	cluster := e.Cluster
+	if cluster == "" {
+		cluster = "general"
 	}
+	var lastAccessed string
+	if e.LastAccessedAt != nil && !e.LastAccessedAt.IsZero() {
+		lastAccessed = e.LastAccessedAt.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return memoryEntryResponse{
+		ID:                      e.ID,
+		Content:                 e.Content,
+		Tags:                    tags,
+		Type:                    e.Type,
+		Cluster:                 cluster,
+		Importance:              e.Importance,
+		AccessCount:             e.AccessCount,
+		LastAccessedAt:          lastAccessed,
+		SourceConversationID:    e.Source,
+		SourceConversationTitle: convTitle,
+		CreatedAt:               e.CreatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+}
+
+// resolveConvTitle derives a human-readable label for a conversation by
+// trimming its first user message to 60 runes. Uses a per-request cache so a
+// list of N memories referencing K conversations hits the store K times at most.
+// Returns "" on any failure (missing conv, no user messages, etc.).
+func resolveConvTitle(ctx context.Context, st store.Store, convID string, cache map[string]string) string {
+	if convID == "" {
+		return ""
+	}
+	if title, ok := cache[convID]; ok {
+		return title
+	}
+	conv, err := st.LoadConversation(ctx, convID)
+	if err != nil {
+		cache[convID] = ""
+		return ""
+	}
+	for _, m := range conv.Messages {
+		if m.Role != "user" {
+			continue
+		}
+		text := strings.TrimSpace(m.Content.TextOnly())
+		if text == "" {
+			continue
+		}
+		title := truncate(text, 60)
+		cache[convID] = title
+		return title
+	}
+	cache[convID] = ""
+	return ""
 }
 
 func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
@@ -51,9 +107,11 @@ func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	titleCache := make(map[string]string, 8)
 	items := make([]memoryEntryResponse, 0, len(entries))
 	for _, e := range entries {
-		items = append(items, toMemoryEntryResponse(e))
+		convTitle := resolveConvTitle(r.Context(), s.deps.Store, e.Source, titleCache)
+		items = append(items, toMemoryEntryResponse(e, convTitle))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -86,7 +144,8 @@ func (s *Server) handlePostMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, toMemoryEntryResponse(entry))
+	// Direct POST path does not resolve a conv title — caller knows its own source.
+	writeJSON(w, http.StatusCreated, toMemoryEntryResponse(entry, ""))
 }
 
 func (s *Server) handleDeleteMemory(w http.ResponseWriter, r *http.Request) {

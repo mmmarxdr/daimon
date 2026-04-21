@@ -74,8 +74,8 @@ func TestMigration_V10_FreshDBSchemaVersion(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 10 {
-		t.Errorf("expected schema_version=10, got %d", version)
+	if version != 13 {
+		t.Errorf("expected schema_version=13, got %d", version)
 	}
 }
 
@@ -93,8 +93,8 @@ func TestMigration_V10_RerunIsNoOp(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 10 {
-		t.Errorf("expected schema_version=10 after re-run, got %d", version)
+	if version != 13 {
+		t.Errorf("expected schema_version=13 after re-run, got %d", version)
 	}
 	s.Close()
 }
