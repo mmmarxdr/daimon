@@ -3,6 +3,7 @@ package rag_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -281,5 +282,132 @@ func TestSQLiteDocumentStore_AddChunks_UpdatesChunkCount(t *testing.T) {
 	}
 	if docs[0].ChunkCount != 3 {
 		t.Errorf("expected ChunkCount=3, got %d", docs[0].ChunkCount)
+	}
+}
+
+// TestSQLiteDocumentStore_V12Fields_RoundTrip verifies that AccessCount,
+// LastAccessedAt, Summary, and PageCount round-trip through Add/List.
+func TestSQLiteDocumentStore_V12Fields_RoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	store := rag.NewSQLiteDocumentStore(db, 0, 0)
+	ctx := context.Background()
+
+	pages := 42
+	lastAccessed := time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+
+	doc := makeDoc("v12-doc", "global", "v12 round-trip")
+	doc.AccessCount = 7
+	doc.LastAccessedAt = &lastAccessed
+	doc.Summary = "LLM-generated summary"
+	doc.PageCount = &pages
+
+	if err := store.AddDocument(ctx, doc); err != nil {
+		t.Fatalf("AddDocument: %v", err)
+	}
+
+	got, err := store.GetDocument(ctx, "v12-doc")
+	if err != nil {
+		t.Fatalf("GetDocument: %v", err)
+	}
+	if got.AccessCount != 7 {
+		t.Errorf("AccessCount: expected 7, got %d", got.AccessCount)
+	}
+	if got.Summary != "LLM-generated summary" {
+		t.Errorf("Summary: expected set, got %q", got.Summary)
+	}
+	if got.PageCount == nil || *got.PageCount != 42 {
+		t.Errorf("PageCount: expected *42, got %v", got.PageCount)
+	}
+	if got.LastAccessedAt == nil || !got.LastAccessedAt.Equal(lastAccessed) {
+		t.Errorf("LastAccessedAt: expected %v, got %v", lastAccessed, got.LastAccessedAt)
+	}
+}
+
+// TestSQLiteDocumentStore_SearchBumpsAccessCount verifies that a successful
+// SearchChunks call increments access_count and sets last_accessed_at on the
+// parent document (best-effort, not required for the search to succeed).
+func TestSQLiteDocumentStore_SearchBumpsAccessCount(t *testing.T) {
+	db := openTestDB(t)
+	store := rag.NewSQLiteDocumentStore(db, 0, 0)
+	ctx := context.Background()
+
+	if err := store.AddDocument(ctx, makeDoc("bump-doc", "global", "Bump target")); err != nil {
+		t.Fatalf("AddDocument: %v", err)
+	}
+	if err := store.AddChunks(ctx, "bump-doc", []rag.DocumentChunk{
+		{ID: "c1", DocID: "bump-doc", Index: 0, Content: "alpha beta gamma delta", TokenCount: 4},
+	}); err != nil {
+		t.Fatalf("AddChunks: %v", err)
+	}
+
+	results, err := store.SearchChunks(ctx, "alpha", nil, 5)
+	if err != nil {
+		t.Fatalf("SearchChunks: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected at least one result for FTS match")
+	}
+
+	got, err := store.GetDocument(ctx, "bump-doc")
+	if err != nil {
+		t.Fatalf("GetDocument: %v", err)
+	}
+	if got.AccessCount != 1 {
+		t.Errorf("expected AccessCount=1 after search, got %d", got.AccessCount)
+	}
+	if got.LastAccessedAt == nil {
+		t.Error("expected LastAccessedAt to be set after search")
+	}
+}
+
+func TestSQLiteDocumentStore_SumTokensByDoc(t *testing.T) {
+	db := openTestDB(t)
+	store := rag.NewSQLiteDocumentStore(db, 0, 0)
+	ctx := context.Background()
+
+	if err := store.AddDocument(ctx, makeDoc("d1", "global", "D1")); err != nil {
+		t.Fatalf("AddDocument d1: %v", err)
+	}
+	if err := store.AddDocument(ctx, makeDoc("d2", "global", "D2")); err != nil {
+		t.Fatalf("AddDocument d2: %v", err)
+	}
+	if err := store.AddChunks(ctx, "d1", []rag.DocumentChunk{
+		{ID: "d1-0", Index: 0, Content: "a", TokenCount: 10},
+		{ID: "d1-1", Index: 1, Content: "b", TokenCount: 20},
+	}); err != nil {
+		t.Fatalf("AddChunks d1: %v", err)
+	}
+	if err := store.AddChunks(ctx, "d2", []rag.DocumentChunk{
+		{ID: "d2-0", Index: 0, Content: "c", TokenCount: 5},
+	}); err != nil {
+		t.Fatalf("AddChunks d2: %v", err)
+	}
+
+	sums, err := store.SumTokensByDoc(ctx, []string{"d1", "d2", "missing"})
+	if err != nil {
+		t.Fatalf("SumTokensByDoc: %v", err)
+	}
+	if sums["d1"] != 30 {
+		t.Errorf("d1: expected 30 tokens, got %d", sums["d1"])
+	}
+	if sums["d2"] != 5 {
+		t.Errorf("d2: expected 5 tokens, got %d", sums["d2"])
+	}
+	if _, ok := sums["missing"]; ok {
+		t.Error("missing doc should be absent from result map")
+	}
+}
+
+func TestSQLiteDocumentStore_GetDocument_NotFound(t *testing.T) {
+	db := openTestDB(t)
+	store := rag.NewSQLiteDocumentStore(db, 0, 0)
+	ctx := context.Background()
+
+	_, err := store.GetDocument(ctx, "no-such-doc")
+	if err == nil {
+		t.Fatal("expected error for missing doc")
+	}
+	if !errors.Is(err, rag.ErrDocNotFound) {
+		t.Errorf("expected ErrDocNotFound, got %v", err)
 	}
 }

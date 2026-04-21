@@ -16,6 +16,7 @@ import (
 	"daimon/internal/config"
 	"daimon/internal/mcp"
 	"daimon/internal/provider"
+	"daimon/internal/rag"
 	"daimon/internal/store"
 	"daimon/internal/tool"
 	"daimon/internal/web/modelcache"
@@ -55,6 +56,11 @@ type ServerDeps struct {
 	WebChannel      *channel.WebChannel // nil disables the /ws/chat endpoint
 	MediaStore      store.MediaStore    // nil when media uploads are not configured
 	ProviderFactory providerFactory     // nil defaults to provider.NewFromConfig
+
+	// RAG — nil when the RAG subsystem is disabled. /api/knowledge endpoints
+	// return 501 Not Implemented when DocStore is nil.
+	DocStore     rag.DocumentStore
+	IngestWorker *rag.DocIngestionWorker
 }
 
 // Server is the HTTP dashboard server.
@@ -232,6 +238,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/memory", s.handleListMemory)
 	s.mux.Handle("POST /api/memory", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handlePostMemory)))
 	s.mux.Handle("DELETE /api/memory/{id}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteMemory)))
+	s.mux.HandleFunc("GET /api/knowledge", s.handleListKnowledge)
+	s.mux.Handle("POST /api/knowledge", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handlePostKnowledge)))
+	s.mux.Handle("DELETE /api/knowledge/{id}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteKnowledge)))
 	s.mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
 	s.mux.HandleFunc("GET /api/metrics/history", s.handleGetMetricsHistory)
 	s.mux.HandleFunc("GET /api/mcp/servers", s.handleListMCPServers)

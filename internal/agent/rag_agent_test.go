@@ -38,6 +38,9 @@ func (m *mockDocStore) DeleteDocument(ctx context.Context, docID string) error {
 func (m *mockDocStore) ListDocuments(ctx context.Context, namespace string) ([]rag.Document, error) {
 	return nil, nil
 }
+func (m *mockDocStore) GetDocument(ctx context.Context, id string) (rag.Document, error) {
+	return rag.Document{}, rag.ErrDocNotFound
+}
 func (m *mockDocStore) SearchChunks(ctx context.Context, query string, queryVec []float32, limit int) ([]rag.SearchResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

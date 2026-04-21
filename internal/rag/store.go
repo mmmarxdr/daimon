@@ -33,4 +33,8 @@ type DocumentStore interface {
 	// ListDocuments returns all documents in namespace. An empty namespace
 	// string returns all documents across all namespaces.
 	ListDocuments(ctx context.Context, namespace string) ([]Document, error)
+
+	// GetDocument returns a single document by ID. Returns ErrDocNotFound when
+	// no row matches.
+	GetDocument(ctx context.Context, id string) (Document, error)
 }

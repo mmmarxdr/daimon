@@ -89,13 +89,36 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 
 const defaultMaxBodySize = 1 << 20 // 1 MB
 
+// uploadPathPrefixes are routes whose handlers wrap the body with their own
+// (larger) MaxBytesReader sourced from media.max_attachment_bytes. Wrapping
+// twice would trip the smaller default limit first, so these are exempted.
+var uploadPathPrefixes = []string{
+	"/api/upload",
+	"/api/knowledge",
+}
+
 func bodySizeLimitMiddleware(maxBytes int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil && r.ContentLength != 0 {
+		if r.Body != nil && r.ContentLength != 0 && !isUploadPath(r) {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isUploadPath reports whether the request targets an upload route that owns
+// its own body size enforcement. Matches by prefix so subpaths like
+// /api/knowledge/{id} stay exempted (DELETE has no body, but exempt is safe).
+func isUploadPath(r *http.Request) bool {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		return false
+	}
+	for _, p := range uploadPathPrefixes {
+		if r.URL.Path == p || strings.HasPrefix(r.URL.Path, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // --------------------------------------------------------------------------

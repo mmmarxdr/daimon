@@ -36,3 +36,6 @@ func (m *mockDocumentStore) DeleteDocument(_ context.Context, _ string) error { 
 func (m *mockDocumentStore) ListDocuments(_ context.Context, _ string) ([]rag.Document, error) {
 	return nil, nil
 }
+func (m *mockDocumentStore) GetDocument(_ context.Context, _ string) (rag.Document, error) {
+	return rag.Document{}, rag.ErrDocNotFound
+}

@@ -3,7 +3,9 @@ package rag
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -49,12 +51,27 @@ func (s *SQLiteDocumentStore) AddDocument(ctx context.Context, doc Document) err
 		doc.UpdatedAt = now
 	}
 
+	var lastAccessed any
+	if doc.LastAccessedAt != nil && !doc.LastAccessedAt.IsZero() {
+		lastAccessed = doc.LastAccessedAt.UTC().Format(time.RFC3339)
+	}
+	var pageCount any
+	if doc.PageCount != nil {
+		pageCount = *doc.PageCount
+	}
+	var ingested any
+	if doc.IngestedAt != nil && !doc.IngestedAt.IsZero() {
+		ingested = doc.IngestedAt.UTC().Format(time.RFC3339)
+	}
+
 	_, err := s.db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO documents
-			(id, namespace, title, source_sha256, mime, chunk_count, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, namespace, title, source_sha256, mime, chunk_count, created_at, updated_at,
+			 access_count, last_accessed_at, summary, page_count, ingested_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		doc.ID, doc.Namespace, doc.Title, doc.SourceSHA256, doc.MIME,
 		doc.ChunkCount, doc.CreatedAt.Format(time.RFC3339), doc.UpdatedAt.Format(time.RFC3339),
+		doc.AccessCount, lastAccessed, doc.Summary, pageCount, ingested,
 	)
 	if err != nil {
 		return fmt.Errorf("rag: insert document %s: %w", doc.ID, err)
@@ -202,6 +219,7 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 					Score:    sc.score,
 				})
 			}
+			s.bumpAccessCounters(ctx, results)
 			return results, nil
 		}
 	}
@@ -217,7 +235,43 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 			DocTitle: c.docTitle,
 		})
 	}
+	s.bumpAccessCounters(ctx, results)
 	return results, nil
+}
+
+// bumpAccessCounters increments access_count and sets last_accessed_at for the
+// distinct parent documents of the supplied results. Best-effort: failures are
+// logged at debug level and never propagated — a logged failure must not mask
+// a successful search.
+func (s *SQLiteDocumentStore) bumpAccessCounters(ctx context.Context, results []SearchResult) {
+	if len(results) == 0 {
+		return
+	}
+	seen := make(map[string]struct{}, len(results))
+	ids := make([]any, 0, len(results))
+	for _, r := range results {
+		if r.Chunk.DocID == "" {
+			continue
+		}
+		if _, ok := seen[r.Chunk.DocID]; ok {
+			continue
+		}
+		seen[r.Chunk.DocID] = struct{}{}
+		ids = append(ids, r.Chunk.DocID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := append([]any{time.Now().UTC().Format(time.RFC3339)}, ids...)
+	q := `UPDATE documents
+	      SET access_count = access_count + 1,
+	          last_accessed_at = ?
+	      WHERE id IN (` + placeholders + `)`
+	if _, err := s.db.ExecContext(ctx, q, args...); err != nil {
+		slog.Debug("rag: bump access counters (best-effort)", "error", err)
+	}
 }
 
 // DeleteDocument removes a document (and all its chunks via CASCADE).
@@ -241,17 +295,15 @@ func (s *SQLiteDocumentStore) ListDocuments(ctx context.Context, namespace strin
 		err  error
 	)
 
+	const docCols = `id, namespace, title, COALESCE(source_sha256,''), COALESCE(mime,''),
+	                 chunk_count, created_at, updated_at,
+	                 access_count, last_accessed_at, COALESCE(summary,''), page_count, ingested_at`
 	if namespace == "" {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, namespace, title, COALESCE(source_sha256,''), COALESCE(mime,''),
-			        chunk_count, created_at, updated_at
-			 FROM documents ORDER BY created_at DESC`)
+			`SELECT `+docCols+` FROM documents ORDER BY created_at DESC`)
 	} else {
 		rows, err = s.db.QueryContext(ctx,
-			`SELECT id, namespace, title, COALESCE(source_sha256,''), COALESCE(mime,''),
-			        chunk_count, created_at, updated_at
-			 FROM documents WHERE namespace = ?
-			 ORDER BY created_at DESC`,
+			`SELECT `+docCols+` FROM documents WHERE namespace = ? ORDER BY created_at DESC`,
 			namespace)
 	}
 	if err != nil {
@@ -261,20 +313,106 @@ func (s *SQLiteDocumentStore) ListDocuments(ctx context.Context, namespace strin
 
 	var docs []Document
 	for rows.Next() {
-		var d Document
-		var createdStr, updatedStr string
-		if err := rows.Scan(&d.ID, &d.Namespace, &d.Title, &d.SourceSHA256, &d.MIME,
-			&d.ChunkCount, &createdStr, &updatedStr); err != nil {
-			return nil, fmt.Errorf("rag: scan document row: %w", err)
+		d, scanErr := scanDocumentRow(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		d.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
-		d.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
 		docs = append(docs, d)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("rag: iterating document rows: %w", err)
 	}
 	return docs, nil
+}
+
+// SumTokensByDoc returns total token_count summed per document ID, for the
+// supplied doc IDs. Empty or nil input returns an empty map. Docs with no
+// chunks are absent from the result — callers should treat missing keys as 0.
+func (s *SQLiteDocumentStore) SumTokensByDoc(ctx context.Context, docIDs []string) (map[string]int, error) {
+	out := make(map[string]int, len(docIDs))
+	if len(docIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.Repeat("?,", len(docIDs))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(docIDs))
+	for i, id := range docIDs {
+		args[i] = id
+	}
+	q := `SELECT doc_id, COALESCE(SUM(token_count), 0)
+	      FROM document_chunks
+	      WHERE doc_id IN (` + placeholders + `)
+	      GROUP BY doc_id`
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("rag: sum tokens by doc: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var total int
+		if err := rows.Scan(&id, &total); err != nil {
+			return nil, fmt.Errorf("rag: scan token sum row: %w", err)
+		}
+		out[id] = total
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rag: iterating token sum rows: %w", err)
+	}
+	return out, nil
+}
+
+// GetDocument returns a single document by ID. Returns ErrDocNotFound when no
+// row matches.
+func (s *SQLiteDocumentStore) GetDocument(ctx context.Context, id string) (Document, error) {
+	const docCols = `id, namespace, title, COALESCE(source_sha256,''), COALESCE(mime,''),
+	                 chunk_count, created_at, updated_at,
+	                 access_count, last_accessed_at, COALESCE(summary,''), page_count, ingested_at`
+	row := s.db.QueryRowContext(ctx,
+		`SELECT `+docCols+` FROM documents WHERE id = ?`, id)
+	d, err := scanDocumentRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Document{}, fmt.Errorf("%w: %s", ErrDocNotFound, id)
+		}
+		return Document{}, err
+	}
+	return d, nil
+}
+
+// scanDocumentRow reads a single document row using the canonical column order
+// expected by docCols (ListDocuments, GetDocument).
+func scanDocumentRow(r interface {
+	Scan(dest ...any) error
+}) (Document, error) {
+	var d Document
+	var createdStr, updatedStr string
+	var lastAccessedStr, ingestedStr sql.NullString
+	var pageCount sql.NullInt64
+	if err := r.Scan(
+		&d.ID, &d.Namespace, &d.Title, &d.SourceSHA256, &d.MIME,
+		&d.ChunkCount, &createdStr, &updatedStr,
+		&d.AccessCount, &lastAccessedStr, &d.Summary, &pageCount, &ingestedStr,
+	); err != nil {
+		return Document{}, fmt.Errorf("rag: scan document row: %w", err)
+	}
+	d.CreatedAt, _ = time.Parse(time.RFC3339, createdStr)
+	d.UpdatedAt, _ = time.Parse(time.RFC3339, updatedStr)
+	if lastAccessedStr.Valid {
+		if t, err := time.Parse(time.RFC3339, lastAccessedStr.String); err == nil {
+			d.LastAccessedAt = &t
+		}
+	}
+	if pageCount.Valid {
+		pc := int(pageCount.Int64)
+		d.PageCount = &pc
+	}
+	if ingestedStr.Valid {
+		if t, err := time.Parse(time.RFC3339, ingestedStr.String); err == nil {
+			d.IngestedAt = &t
+		}
+	}
+	return d, nil
 }
 
 // sanitizeFTSQuery converts a raw user query to an FTS5 MATCH expression.
