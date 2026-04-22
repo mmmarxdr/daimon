@@ -33,7 +33,7 @@ func (f *fakeDocStore) AddDocument(_ context.Context, d rag.Document) error {
 func (f *fakeDocStore) AddChunks(_ context.Context, _ string, _ []rag.DocumentChunk) error {
 	return nil
 }
-func (f *fakeDocStore) SearchChunks(_ context.Context, _ string, _ []float32, _ int) ([]rag.SearchResult, error) {
+func (f *fakeDocStore) SearchChunks(_ context.Context, _ string, _ []float32, _ rag.SearchOptions) ([]rag.SearchResult, error) {
 	return nil, nil
 }
 func (f *fakeDocStore) DeleteDocument(_ context.Context, id string) error {

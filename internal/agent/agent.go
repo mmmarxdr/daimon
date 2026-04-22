@@ -11,6 +11,7 @@ import (
 	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/rag"
+	"daimon/internal/rag/metrics"
 	"daimon/internal/skill"
 	"daimon/internal/store"
 	"daimon/internal/tool"
@@ -101,10 +102,18 @@ type Agent struct {
 	bus             notify.Bus
 
 	// RAG fields — nil when RAG is not wired.
-	ragStore     rag.DocumentStore
-	ragEmbedFn   func(context.Context, string) ([]float32, error)
-	ragMaxChunks int
-	ragMaxTokens int
+	ragStore         rag.DocumentStore
+	ragEmbedFn       func(context.Context, string) ([]float32, error)
+	ragMaxChunks     int
+	ragMaxTokens     int
+	ragRetrievalConf rag.RAGRetrievalConf // neighbor expansion + score thresholds
+
+	// HyDE fields — zero/nil when HyDE is disabled.
+	ragHydeConf      config.RAGHydeConf
+	ragHypothesisFn  func(context.Context, string) (string, error)
+
+	// Metrics recorder — nil means no-op (NoopRecorder equivalent).
+	ragMetrics metrics.Recorder
 }
 
 func New(
@@ -282,6 +291,39 @@ func (a *Agent) WithRAGStore(st rag.DocumentStore, embedFn func(context.Context,
 	}
 	a.ragMaxChunks = maxChunks
 	a.ragMaxTokens = maxTokens
+	return a
+}
+
+// WithRAGRetrievalConf stores retrieval-precision options (neighbor radius,
+// score thresholds) that are applied on every SearchChunks call. Call this
+// after WithRAGStore when the user has opted into non-default retrieval behavior.
+func (a *Agent) WithRAGRetrievalConf(conf rag.RAGRetrievalConf) *Agent {
+	a.ragRetrievalConf = conf
+	return a
+}
+
+// RAGRetrievalConfig returns the retrieval-precision options currently in
+// effect on the agent. Exposed so wiring regression tests can verify startup
+// paths populated the config (the bug this guards against shipped in PR #2
+// and went undetected for ~24h because existing tests only exercised the
+// setter directly, never the wiring).
+func (a *Agent) RAGRetrievalConfig() rag.RAGRetrievalConf {
+	return a.ragRetrievalConf
+}
+
+// WithRAGHydeConf stores the HyDE configuration and hypothesis function.
+// hypothesisFn may be nil — when nil, HyDE is effectively disabled regardless
+// of conf.Enabled, and the baseline retrieval path is always used.
+func (a *Agent) WithRAGHydeConf(conf config.RAGHydeConf, hypothesisFn func(context.Context, string) (string, error)) *Agent {
+	a.ragHydeConf = conf
+	a.ragHypothesisFn = hypothesisFn
+	return a
+}
+
+// WithRAGMetrics sets the metrics recorder for the RAG retrieval path.
+// When r is nil the agent behaves as if a NoopRecorder is set — no panic, no log.
+func (a *Agent) WithRAGMetrics(r metrics.Recorder) *Agent {
+	a.ragMetrics = r
 	return a
 }
 

@@ -1049,3 +1049,62 @@ When a module is mocked with `vi.mock('../../api/client', factory)` and the same
 ### Global `@tanstack/react-virtual` mock
 
 Place the mock at `src/__mocks__/@tanstack/react-virtual.ts`. jsdom has no layout engine — `useVirtualizer` always returns 0 visible items without this mock. The global mock returns up to 12 items (simulating a visible window) so test assertions can find list options. Individual test files still call `vi.mock('@tanstack/react-virtual')` to activate it — but they can omit the factory argument; the global mock file is used automatically.
+
+---
+
+## 14. Eval Suite — RAG Retrieval Quality
+
+The RAG eval suite measures retrieval precision with and without HyDE across a
+curated set of queries against real indexed content.
+
+### Running the eval
+
+```bash
+go test -tags=eval -v ./internal/rag/...
+```
+
+The suite is gated behind the `eval` build tag so it never runs in `go test ./...`
+(which would fail on CI machines without the required database).
+
+### What it measures
+
+- **Precision@5** — fraction of the top-5 retrieved chunks that are marked
+  relevant in the ground-truth label file, measured separately for HyDE-on and
+  HyDE-off retrieval paths.
+- **Hard-fail condition**: any lexical query where the baseline (HyDE-off) was
+  previously correct but now returns wrong results fails the suite outright.
+  Semantic and mixed queries report regressions as warnings, not failures.
+
+### Query set
+
+Queries live in `internal/rag/testdata/eval_queries.json`. The schema is:
+
+```json
+[
+  {
+    "query": "the natural language query",
+    "type": "semantic" | "lexical" | "mixed" | "edge",
+    "relevant_chunk_ids": ["chunk-uuid-1", "chunk-uuid-2"]
+  }
+]
+```
+
+There are currently 10 queries: 3 semantic, 3 lexical, 2 mixed, 2 edge cases.
+
+### Database requirement
+
+The eval suite reads from the user's actual indexed database at
+`~/.daimon/data/daimon.db`. It **skips** (not fails) when the database is
+absent or when the expected documents are not indexed. Index the relevant
+documents via the Knowledge tab before running the suite.
+
+### Adding new queries
+
+1. Index the target document via the web dashboard.
+2. Run a retrieval query to find the chunk IDs of the relevant passages
+   (use `GET /api/knowledge` to browse).
+3. Append a new entry to `internal/rag/testdata/eval_queries.json` with the
+   query text, type (`semantic`, `lexical`, `mixed`, or `edge`), and
+   `relevant_chunk_ids`.
+4. Re-run `go test -tags=eval -v ./internal/rag/...` to verify the new query
+   passes with the current retrieval setup.

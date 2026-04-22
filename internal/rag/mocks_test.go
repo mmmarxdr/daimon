@@ -29,7 +29,7 @@ func (m *mockDocumentStore) AddDocument(_ context.Context, _ rag.Document) error
 func (m *mockDocumentStore) AddChunks(_ context.Context, _ string, _ []rag.DocumentChunk) error {
 	return nil
 }
-func (m *mockDocumentStore) SearchChunks(_ context.Context, _ string, _ []float32, _ int) ([]rag.SearchResult, error) {
+func (m *mockDocumentStore) SearchChunks(_ context.Context, _ string, _ []float32, _ rag.SearchOptions) ([]rag.SearchResult, error) {
 	return nil, nil
 }
 func (m *mockDocumentStore) DeleteDocument(_ context.Context, _ string) error { return nil }

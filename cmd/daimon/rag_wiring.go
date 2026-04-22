@@ -12,19 +12,28 @@ import (
 	"daimon/internal/content"
 	"daimon/internal/provider"
 	"daimon/internal/rag"
+	"daimon/internal/rag/metrics"
 	"daimon/internal/store"
 	"daimon/internal/tool"
 )
 
+// Compile-time assertions: config.*Conf and rag.*Conf must stay in sync
+// (dual-mirror pattern per proposal §2.9 risk table). If a field is added
+// to one and not the other, this assignment will fail at compile time.
+var _ = config.RAGHydeConf(rag.RAGHydeConf{})
+var _ = config.RAGMetricsConf(rag.RAGMetricsConf{})
+
 // RAGWiring is what wireRAG returns when RAG is enabled: the background
 // ingestion worker (caller owns lifecycle via Start/Stop), the DocumentStore
-// (used by web handlers for list/delete/get), and the embed function if the
-// active provider supports embeddings. All fields are nil when RAG is disabled.
+// (used by web handlers for list/delete/get), the embed function if the
+// active provider supports embeddings, and the metrics recorder for the
+// GET /api/metrics/rag endpoint. All fields are nil when RAG is disabled.
 type RAGWiring struct {
 	Worker   *rag.DocIngestionWorker
 	Store    rag.DocumentStore
 	EmbedFn  func(ctx context.Context, text string) ([]float32, error)
 	MediaRef rag.MediaStoreReader
+	Metrics  *metrics.RingRecorder
 }
 
 // wireRAG sets up the RAG subsystem: DocumentStore, DocIngestionWorker, and RAG tools.
@@ -55,6 +64,14 @@ func wireRAG(
 	ragCfg := cfg.RAG
 	docStore := rag.NewSQLiteDocumentStore(db, ragCfg.MaxDocuments, ragCfg.MaxChunks)
 
+	// Remove trailing junk chunks left by the pre-fix chunker bug.
+	// Idempotent and safe — log counts, never fail startup on error.
+	if scanned, deleted, cleanErr := docStore.CleanupJunkChunks(context.Background()); cleanErr != nil {
+		slog.Warn("rag: cleanup junk chunks failed", "error", cleanErr)
+	} else {
+		slog.Info("rag: cleanup junk chunks", "docs_scanned", scanned, "chunks_deleted", deleted)
+	}
+
 	// Derive the embed function. When rag.embedding.enabled, build a SEPARATE
 	// provider just for embeddings (lets users pair OpenRouter for chat with
 	// OpenAI/Gemini for vectors). Falls back to the main chat provider when
@@ -63,6 +80,23 @@ func wireRAG(
 
 	// Wire document store into the agent for per-turn RAG search.
 	ag.WithRAGStore(docStore, embedFn, ragCfg.TopK, ragCfg.MaxContextTokens)
+
+	// Propagate retrieval precision config (neighbor radius, BM25/cosine
+	// thresholds) into the agent. Without this call, SearchOptions construction
+	// in the loop + search_docs tool silently falls back to zero-valued defaults
+	// regardless of what the user set in rag.retrieval.*. This was a real
+	// regression — shipped dead for ~24h before an audit caught it.
+	ag.WithRAGRetrievalConf(rag.RAGRetrievalConf{
+		NeighborRadius: ragCfg.Retrieval.NeighborRadius,
+		MaxBM25Score:   ragCfg.Retrieval.MaxBM25Score,
+		MinCosineScore: ragCfg.Retrieval.MinCosineScore,
+	})
+
+	// Construct the in-memory metrics ring buffer (always-on when RAG is enabled).
+	// Default capacity: N=200. The recorder is passed to the agent and the web
+	// server so both the retrieval path and the API endpoint share the same ring.
+	metricsRec := metrics.NewRingRecorder(200)
+	ag.WithRAGMetrics(metricsRec)
 
 	// Build the ingestion worker. PDF and DOCX extractors ordered first so
 	// structured formats resolve before the generic text/markdown fallback.
@@ -89,6 +123,21 @@ func wireRAG(
 	// optional `rag.summary_model` override lets users point this at a cheaper
 	// model than the main chat without touching agent.enrich_model.
 	summaryFn := buildSummaryFn(prov, ragCfg.SummaryModel)
+
+	// Build the hypothesis function for HyDE. Model fallback chain resolved at
+	// wire time: hyde.model → rag.summary_model → "" (provider's default model).
+	// Only constructed when HyDE is enabled to avoid unnecessary provider calls.
+	if ragCfg.Hyde.Enabled {
+		hydeModel := ragCfg.Hyde.Model
+		if hydeModel == "" {
+			hydeModel = ragCfg.SummaryModel
+		}
+		hypothesisFn := buildHypothesisFn(prov, hydeModel)
+		slog.Info("rag: HyDE enabled", "model", hydeModel)
+		hydeCfg := ragCfg.Hyde
+		hydeCfg.Model = hydeModel // persist resolved model for logging
+		ag.WithRAGHydeConf(hydeCfg, hypothesisFn)
+	}
 
 	// Pace single-call embeds when the active provider has a known low quota.
 	// Gemini free tier caps at 100 req/min/model — 700ms keeps us under at
@@ -119,11 +168,37 @@ func wireRAG(
 		},
 	})
 
+	// Build the hypothesis function for the tool path. Mirrors the agent-loop
+	// wiring above: only constructed when HyDE is enabled. The tool path shares
+	// the same HyDE config and model resolution so both paths stay in sync.
+	var toolHypothesisFn func(ctx context.Context, query string) (string, error)
+	if ragCfg.Hyde.Enabled {
+		hydeModel := ragCfg.Hyde.Model
+		if hydeModel == "" {
+			hydeModel = ragCfg.SummaryModel
+		}
+		toolHypothesisFn = buildHypothesisFn(prov, hydeModel)
+	}
+
 	// Register RAG tools (index_doc, search_docs).
+	// search_docs now runs HyDE when enabled — same config as the agent loop.
 	ragTools := rag.BuildRAGTools(rag.RAGToolDeps{
 		Worker:  worker,
 		Store:   docStore,
 		EmbedFn: embedFn,
+		HypothesisFn: toolHypothesisFn,
+		HydeConf: rag.HydeSearchConfig{
+			Enabled:           ragCfg.Hyde.Enabled,
+			HypothesisTimeout: ragCfg.Hyde.HypothesisTimeout,
+			QueryWeight:       ragCfg.Hyde.QueryWeight,
+			MaxCandidates:     ragCfg.Hyde.MaxCandidates,
+		},
+		RetrievalConf: rag.RetrievalSearchConfig{
+			NeighborRadius: ragCfg.Retrieval.NeighborRadius,
+			MaxBM25Score:   ragCfg.Retrieval.MaxBM25Score,
+			MinCosineScore: ragCfg.Retrieval.MinCosineScore,
+		},
+		Recorder: metricsRec,
 	})
 	for _, t := range ragTools {
 		name := t.Name()
@@ -144,6 +219,7 @@ func wireRAG(
 		Store:    docStore,
 		EmbedFn:  embedFn,
 		MediaRef: mediaReader,
+		Metrics:  metricsRec,
 	}
 }
 
@@ -228,6 +304,38 @@ func newEmbeddingProvider(c config.RAGEmbeddingConf) (provider.EmbeddingProvider
 		return p.WithEmbeddingModel(c.Model), nil
 	default:
 		return nil, fmt.Errorf("rag: embedding provider %q not supported", c.Provider)
+	}
+}
+
+// buildHypothesisFn returns a closure that generates a hypothetical document
+// excerpt for the given query (the HyDE technique). Mirrors buildSummaryFn:
+// modelOverride resolves as hyde.model → rag.summary_model → "" (provider
+// default). Returns nil when prov is nil — callers treat nil as "HyDE disabled".
+//
+// Prompt text is frozen per proposal §2.7 — do not rewrite.
+func buildHypothesisFn(prov provider.Provider, modelOverride string) func(ctx context.Context, query string) (string, error) {
+	if prov == nil {
+		return nil
+	}
+	return func(ctx context.Context, query string) (string, error) {
+		prompt := "Write a realistic excerpt from a document that would best answer the user's query.\n" +
+			"Write 2-4 sentences, plain prose, no preamble or framing, as if extracted verbatim.\n" +
+			"If the query asks to find or summarize a document, describe what that document contains.\n\n" +
+			"Query: " + query
+
+		req := provider.ChatRequest{
+			Model:        modelOverride,
+			SystemPrompt: "You are a retrieval assistant. Respond with a realistic document excerpt only.",
+			Messages: []provider.ChatMessage{
+				{Role: "user", Content: content.TextBlock(prompt)},
+			},
+			MaxTokens: 200,
+		}
+		resp, err := prov.Chat(ctx, req)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(resp.Content), nil
 	}
 }
 

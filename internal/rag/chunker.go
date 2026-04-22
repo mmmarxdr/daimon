@@ -75,11 +75,22 @@ func (c FixedSizeChunker) Chunk(text string, opts ChunkOptions) []DocumentChunk 
 		})
 		index++
 
+		// Fix 1: stop immediately after emitting the final chunk.
+		if end == total {
+			break
+		}
+
 		// Advance start, accounting for overlap.
+		// Fix 2: clamp advance to at least Size/2 so no rune appears in 3+
+		// consecutive chunks (triple-overlap). Overlap is best-effort — correctness
+		// wins when snap pulls end far back.
 		next := end - opts.Overlap
-		if next <= start {
-			// Prevent infinite loop — advance at least 1 rune.
-			next = start + 1
+		minAdvance := opts.Size / 2
+		if minAdvance < 1 {
+			minAdvance = 1
+		}
+		if next < start+minAdvance {
+			next = start + minAdvance
 		}
 		start = next
 	}

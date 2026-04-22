@@ -125,8 +125,22 @@ func (s *SQLiteDocumentStore) AddChunks(ctx context.Context, docID string, chunk
 
 // SearchChunks performs FTS5 full-text search on query, then optionally
 // reranks candidates by cosine similarity against queryVec.  Returns up to
-// limit results ordered by relevance descending.
-func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, queryVec []float32, limit int) ([]SearchResult, error) {
+// opts.Limit results ordered by relevance descending.
+//
+// When opts.NeighborRadius > 0, each primary hit is expanded with adjacent
+// chunks (±radius within the same document). De-duplication is by chunk ID.
+// Neighbors inherit the primary hit's score.
+//
+// opts.MaxBM25Score filters on the BM25 path (lower/more-negative = better;
+// reject when bm25() > threshold). Zero = disabled.
+// opts.MinCosineScore filters on the cosine path; reject when cosine < threshold.
+// Zero = disabled.
+func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, queryVec []float32, opts SearchOptions) ([]SearchResult, error) {
+	if opts.SkipFTS {
+		return s.pureVectorSearch(ctx, queryVec, opts)
+	}
+
+	limit := opts.Limit
 	if limit <= 0 {
 		limit = 10
 	}
@@ -143,7 +157,8 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT dc.id, dc.doc_id, dc.idx, dc.content, dc.embedding, dc.token_count,
-		        COALESCE(d.title, '') AS doc_title
+		        COALESCE(d.title, '') AS doc_title,
+		        bm25(document_chunks_fts) AS bm25_score
 		 FROM document_chunks dc
 		 JOIN document_chunks_fts fts ON fts.rowid = dc.rowid
 		 LEFT JOIN documents d ON d.id = dc.doc_id
@@ -158,8 +173,9 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 	defer rows.Close()
 
 	type candidate struct {
-		chunk    DocumentChunk
-		docTitle string
+		chunk     DocumentChunk
+		docTitle  string
+		bm25Score float64
 	}
 
 	var candidates []candidate
@@ -169,7 +185,7 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 		if err := rows.Scan(
 			&c.chunk.ID, &c.chunk.DocID, &c.chunk.Index,
 			&c.chunk.Content, &embBlob, &c.chunk.TokenCount,
-			&c.docTitle,
+			&c.docTitle, &c.bm25Score,
 		); err != nil {
 			return nil, fmt.Errorf("rag: scan chunk row: %w", err)
 		}
@@ -208,35 +224,254 @@ func (s *SQLiteDocumentStore) SearchChunks(ctx context.Context, query string, qu
 			sort.SliceStable(scoredList, func(i, j int) bool {
 				return scoredList[i].score > scoredList[j].score
 			})
-			results := make([]SearchResult, 0, min(len(scoredList), limit))
+
+			// Apply MinCosineScore threshold (cosine path only).
+			primaries := make([]SearchResult, 0, min(len(scoredList), limit))
 			for _, sc := range scoredList {
-				if len(results) >= limit {
+				if len(primaries) >= limit {
 					break
 				}
-				results = append(results, SearchResult{
+				if opts.MinCosineScore > 0 && sc.score < opts.MinCosineScore {
+					continue
+				}
+				primaries = append(primaries, SearchResult{
 					Chunk:    sc.c.chunk,
 					DocTitle: sc.c.docTitle,
 					Score:    sc.score,
 				})
+			}
+
+			results, err := s.expandNeighbors(ctx, primaries, opts.NeighborRadius)
+			if err != nil {
+				return nil, err
 			}
 			s.bumpAccessCounters(ctx, results)
 			return results, nil
 		}
 	}
 
-	// No cosine rerank — return FTS5 results trimmed to limit.
-	results := make([]SearchResult, 0, min(len(candidates), limit))
-	for i, c := range candidates {
-		if i >= limit {
+	// No cosine rerank — apply BM25 threshold and return FTS5 results trimmed to limit.
+	primaries := make([]SearchResult, 0, min(len(candidates), limit))
+	for _, c := range candidates {
+		if len(primaries) >= limit {
 			break
 		}
-		results = append(results, SearchResult{
+		// Apply MaxBM25Score threshold (BM25 path only; lower/more-negative = better).
+		if opts.MaxBM25Score != 0 && c.bm25Score > opts.MaxBM25Score {
+			continue
+		}
+		primaries = append(primaries, SearchResult{
 			Chunk:    c.chunk,
 			DocTitle: c.docTitle,
 		})
 	}
+
+	results, err := s.expandNeighbors(ctx, primaries, opts.NeighborRadius)
+	if err != nil {
+		return nil, err
+	}
 	s.bumpAccessCounters(ctx, results)
 	return results, nil
+}
+
+// pureVectorSearch does cosine-only search against all chunks with embeddings.
+// No FTS5 prefilter. Iterates every chunk with a non-null embedding, computes
+// cosine similarity against queryVec, sorts top-Limit descending, applies
+// MinCosineScore threshold, and expands NeighborRadius.
+//
+// Returns nil, nil when queryVec is empty — pure-vector search requires a vector.
+func (s *SQLiteDocumentStore) pureVectorSearch(ctx context.Context, queryVec []float32, opts SearchOptions) ([]SearchResult, error) {
+	if len(queryVec) == 0 {
+		return nil, nil
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT dc.id, dc.doc_id, dc.idx, dc.content, dc.embedding, dc.token_count,
+		        COALESCE(d.title, '') AS doc_title
+		 FROM document_chunks dc
+		 LEFT JOIN documents d ON d.id = dc.doc_id
+		 WHERE dc.embedding IS NOT NULL AND length(dc.embedding) > 0`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("rag: pure-vector scan: %w", err)
+	}
+	defer rows.Close()
+
+	type candidate struct {
+		chunk    DocumentChunk
+		docTitle string
+		score    float64
+	}
+
+	normQuery := NormalizeEmbedding(queryVec, 256)
+	var scored []candidate
+
+	for rows.Next() {
+		var ch DocumentChunk
+		var embBlob []byte
+		var docTitle string
+		if err := rows.Scan(
+			&ch.ID, &ch.DocID, &ch.Index,
+			&ch.Content, &embBlob, &ch.TokenCount,
+			&docTitle,
+		); err != nil {
+			return nil, fmt.Errorf("rag: pure-vector scan row: %w", err)
+		}
+		if len(embBlob) == 0 {
+			continue
+		}
+		ch.Embedding = DeserializeEmbedding(embBlob)
+		norm := NormalizeEmbedding(ch.Embedding, 256)
+		sc := CosineSimilarity(normQuery, norm)
+		scored = append(scored, candidate{chunk: ch, docTitle: docTitle, score: sc})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rag: pure-vector scan rows: %w", err)
+	}
+
+	// Sort descending by cosine score.
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Apply MinCosineScore threshold and cap at limit.
+	primaries := make([]SearchResult, 0, min(len(scored), limit))
+	for _, c := range scored {
+		if len(primaries) >= limit {
+			break
+		}
+		if opts.MinCosineScore > 0 && c.score < opts.MinCosineScore {
+			continue
+		}
+		cosine := c.score
+		primaries = append(primaries, SearchResult{
+			Chunk:       c.chunk,
+			DocTitle:    c.docTitle,
+			Score:       c.score,
+			CosineScore: &cosine,
+		})
+	}
+
+	results, err := s.expandNeighbors(ctx, primaries, opts.NeighborRadius)
+	if err != nil {
+		return nil, err
+	}
+	s.bumpAccessCounters(ctx, results)
+	return results, nil
+}
+
+// expandNeighbors expands each primary SearchResult with adjacent chunks
+// (within ±radius of the same document). Neighbors inherit the primary's score.
+// De-duplication is by chunk ID. When radius <= 0, primaries are returned as-is.
+func (s *SQLiteDocumentStore) expandNeighbors(ctx context.Context, primaries []SearchResult, radius int) ([]SearchResult, error) {
+	if radius <= 0 || len(primaries) == 0 {
+		return primaries, nil
+	}
+
+	// Build a set of already-included chunk IDs and group primaries by doc.
+	seen := make(map[string]struct{}, len(primaries)*3)
+	// doc → list of windows to fetch
+	type fetchReq struct {
+		docID string
+		lo    int
+		hi    int
+		score float64
+		title string
+	}
+	var fetches []fetchReq
+
+	for _, r := range primaries {
+		seen[r.Chunk.ID] = struct{}{}
+		fetches = append(fetches, fetchReq{
+			docID: r.Chunk.DocID,
+			lo:    r.Chunk.Index - radius,
+			hi:    r.Chunk.Index + radius,
+			score: r.Score,
+			title: r.DocTitle,
+		})
+	}
+
+	// Clamp lo to 0 (SQL BETWEEN handles the upper bound naturally since there
+	// are no idx values beyond the actual chunks).
+	type neighbor struct {
+		chunk    DocumentChunk
+		docTitle string
+		score    float64
+	}
+	var neighbors []neighbor
+
+	for _, f := range fetches {
+		lo := f.lo
+		if lo < 0 {
+			lo = 0
+		}
+
+		rows, err := s.db.QueryContext(ctx,
+			`SELECT dc.id, dc.doc_id, dc.idx, dc.content, dc.embedding, dc.token_count,
+			        COALESCE(d.title, '') AS doc_title
+			 FROM document_chunks dc
+			 LEFT JOIN documents d ON d.id = dc.doc_id
+			 WHERE dc.doc_id = ? AND dc.idx BETWEEN ? AND ?
+			 ORDER BY dc.idx ASC`,
+			f.docID, lo, f.hi,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("rag: neighbor fetch for doc %s: %w", f.docID, err)
+		}
+
+		for rows.Next() {
+			var ch DocumentChunk
+			var embBlob []byte
+			var docTitle string
+			if err := rows.Scan(
+				&ch.ID, &ch.DocID, &ch.Index,
+				&ch.Content, &embBlob, &ch.TokenCount,
+				&docTitle,
+			); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("rag: scan neighbor row: %w", err)
+			}
+			if len(embBlob) > 0 {
+				ch.Embedding = DeserializeEmbedding(embBlob)
+			}
+			if _, ok := seen[ch.ID]; ok {
+				continue // already in primaries or a prior neighbor fetch
+			}
+			seen[ch.ID] = struct{}{}
+			neighbors = append(neighbors, neighbor{chunk: ch, docTitle: docTitle, score: f.score})
+		}
+		rows.Close()
+	}
+
+	// Merge primaries and neighbors. Build a map from chunk ID to its primary
+	// position so we can interleave neighbors in document order.
+	//
+	// Strategy: emit all results sorted by (docID, idx) within each cluster,
+	// keeping primaries with their inherited-score neighbors. For simplicity we
+	// collect everything and sort by (docID, idx).
+	all := make([]SearchResult, 0, len(primaries)+len(neighbors))
+	all = append(all, primaries...)
+	for _, n := range neighbors {
+		all = append(all, SearchResult{
+			Chunk:    n.chunk,
+			DocTitle: n.docTitle,
+			Score:    n.score,
+		})
+	}
+
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].Chunk.DocID != all[j].Chunk.DocID {
+			return all[i].Chunk.DocID < all[j].Chunk.DocID
+		}
+		return all[i].Chunk.Index < all[j].Chunk.Index
+	})
+
+	return all, nil
 }
 
 // bumpAccessCounters increments access_count and sets last_accessed_at for the

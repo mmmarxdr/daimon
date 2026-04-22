@@ -20,6 +20,7 @@ import (
 	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/rag"
+	"daimon/internal/rag/metrics"
 	"daimon/internal/store"
 	"daimon/internal/tool"
 )
@@ -126,6 +127,10 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	memories, _ := a.store.SearchMemory(ctx, scope, msg.Content.TextOnly(), a.config.MemoryResults)
 
 	// RAG: search for relevant document chunks when a DocumentStore is wired.
+	// When HyDE is enabled (and a hypothesis function is provided), we run a
+	// 3-way Reciprocal Rank Fusion merge across raw-BM25, hyde-BM25, and
+	// hyde-cosine lists. On any HyDE failure we fall through to the baseline
+	// path — retrieval must never fail.
 	var ragResults []rag.SearchResult
 	if a.ragStore != nil {
 		queryText := msg.Content.TextOnly()
@@ -139,8 +144,49 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		if limit <= 0 {
 			limit = 5
 		}
-		if results, err := a.ragStore.SearchChunks(ctx, queryText, queryVec, limit); err == nil {
-			ragResults = results
+		searchOpts := rag.SearchOptions{
+			Limit:          limit,
+			NeighborRadius: a.ragRetrievalConf.NeighborRadius,
+			MaxBM25Score:   a.ragRetrievalConf.MaxBM25Score,
+			MinCosineScore: a.ragRetrievalConf.MinCosineScore,
+		}
+
+		totalStart := time.Now()
+		hydeEnabled := a.ragHydeConf.Enabled && a.ragHypothesisFn != nil
+		if hydeEnabled {
+			// ragSearchWithHyDE delegates to rag.PerformHydeSearch which handles
+			// both the HyDE path and fallthrough-to-baseline internally.
+			// We trust it to always produce correct results — no re-run needed.
+			ragResults = a.ragSearchWithHyDE(ctx, queryText, queryVec, searchOpts)
+		}
+
+		// Baseline path: HyDE is disabled. PerformHydeSearch handles the
+		// disabled path itself when called via ragSearchWithHyDE, so this
+		// branch only runs when hydeEnabled=false (direct SearchChunks call).
+		usedBaseline := !hydeEnabled
+		if usedBaseline {
+			if results, err := a.ragStore.SearchChunks(ctx, queryText, queryVec, searchOpts); err == nil {
+				ragResults = results
+			}
+		}
+
+		// Record a baseline metrics event when HyDE was not used.
+		// The HyDE path (and its fallthrough) record their own events inside
+		// PerformHydeSearch, so we only record here for the pure-baseline case.
+		if usedBaseline && a.ragMetrics != nil {
+			prov := map[string]int{}
+			for range ragResults {
+				prov["raw-bm25"]++
+			}
+			a.ragMetrics.Record(metrics.Event{
+				Timestamp:           time.Now(),
+				Query:               queryText,
+				TotalDurationMs:     time.Since(totalStart).Milliseconds(),
+				BM25Hits:            len(ragResults),
+				HydeEnabled:         false,
+				FinalChunksReturned: len(ragResults),
+				ProvenanceBreakdown: prov,
+			})
 		}
 	}
 
@@ -736,4 +782,61 @@ func formatToolError(toolName string, timeout time.Duration, err error) string {
 	default:
 		return err.Error()
 	}
+}
+
+// ragSearchWithHyDE performs the HyDE-augmented retrieval path by delegating
+// to rag.PerformHydeSearch — the single source of truth for HyDE retrieval.
+//
+// The agent loop constructs HydeSearchDeps from its own fields and calls
+// PerformHydeSearch. On fallthrough (error, empty hypothesis, zero vector),
+// PerformHydeSearch returns baseline results directly — the loop's existing
+// nil-check triggers a redundant baseline call only when results are nil,
+// but PerformHydeSearch always returns non-nil on fallthrough.
+//
+// Never returns an error — retrieval must not fail.
+func (a *Agent) ragSearchWithHyDE(
+	ctx context.Context,
+	queryText string,
+	queryVec []float32,
+	searchOpts rag.SearchOptions,
+) []rag.SearchResult {
+	hydeCfg := rag.HydeSearchConfig{
+		Enabled:           a.ragHydeConf.Enabled,
+		HypothesisTimeout: a.ragHydeConf.HypothesisTimeout,
+		QueryWeight:       a.ragHydeConf.QueryWeight,
+		MaxCandidates:     a.ragHydeConf.MaxCandidates,
+	}
+	retrieval := rag.RetrievalSearchConfig{
+		Limit:          searchOpts.Limit,
+		NeighborRadius: searchOpts.NeighborRadius,
+		MaxBM25Score:   searchOpts.MaxBM25Score,
+		MinCosineScore: searchOpts.MinCosineScore,
+	}
+
+	// Provide a pre-computed queryVec via a thin closure so PerformHydeSearch
+	// doesn't re-embed the raw query (the loop already computed it above).
+	embedFn := a.ragEmbedFn
+	if queryVec != nil && embedFn != nil {
+		originalEmbed := embedFn
+		embedFn = func(ctx2 context.Context, text string) ([]float32, error) {
+			if text == queryText {
+				return queryVec, nil
+			}
+			return originalEmbed(ctx2, text)
+		}
+	}
+
+	deps := rag.HydeSearchDeps{
+		Store:         a.ragStore,
+		HypothesisFn:  a.ragHypothesisFn,
+		EmbedFn:       embedFn,
+		HydeConf:      hydeCfg,
+		RetrievalConf: retrieval,
+		Recorder:      a.ragMetrics,
+	}
+
+	results, _ := rag.PerformHydeSearch(ctx, queryText, deps)
+	// PerformHydeSearch always returns results (never nil) even on fallthrough.
+	// Return them directly; the caller's nil-check will not trigger.
+	return results
 }

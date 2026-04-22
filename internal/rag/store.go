@@ -24,8 +24,9 @@ type DocumentStore interface {
 
 	// SearchChunks performs FTS5 full-text search on the query string, then
 	// optionally reranks with cosine similarity against queryVec (may be nil).
-	// Returns up to limit results sorted by relevance descending.
-	SearchChunks(ctx context.Context, query string, queryVec []float32, limit int) ([]SearchResult, error)
+	// Returns up to opts.Limit results sorted by relevance descending, with
+	// optional neighbor expansion and score-threshold filtering.
+	SearchChunks(ctx context.Context, query string, queryVec []float32, opts SearchOptions) ([]SearchResult, error)
 
 	// DeleteDocument removes a document and all its chunks (cascade).
 	DeleteDocument(ctx context.Context, docID string) error

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"daimon/internal/config"
 )
@@ -40,7 +41,21 @@ type patchTools struct {
 // added to the Settings UI, it MUST also be allow-listed here — otherwise the
 // JSON decoder silently drops it on PUT and the toast lies about success.
 type patchRAG struct {
-	Embedding *config.RAGEmbeddingConf `json:"embedding,omitempty"`
+	Embedding *config.RAGEmbeddingConf  `json:"embedding,omitempty"`
+	Retrieval *config.RAGRetrievalConf  `json:"retrieval,omitempty"`
+	Hyde      *patchRAGHyde             `json:"hyde,omitempty"`
+	Metrics   *config.RAGMetricsConf    `json:"metrics,omitempty"`
+}
+
+// patchRAGHyde is the narrow patch shape for rag.hyde. Enabled is a *bool so
+// we can distinguish "user sent enabled=false" from "user did not include
+// enabled at all" — an absent key must preserve the stored value.
+type patchRAGHyde struct {
+	Enabled           *bool         `json:"enabled,omitempty"`
+	Model             string        `json:"model,omitempty"`
+	HypothesisTimeout time.Duration `json:"hypothesis_timeout,omitempty"`
+	QueryWeight       float64       `json:"query_weight,omitempty"`
+	MaxCandidates     int           `json:"max_candidates,omitempty"`
 }
 
 // maxPutBodySize is the hard limit for PUT /api/config request bodies (64 KB).
@@ -190,6 +205,63 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 			newEmb.BaseURL = stored.BaseURL
 		}
 		merged.RAG.Embedding = newEmb
+	}
+
+	// Merge body.RAG.Retrieval field-by-field so that a partial PUT (e.g. only
+	// min_cosine_score) does not reset sibling fields to zero. Each field is
+	// only overwritten when the patch sends a non-zero value. Since zero is also
+	// a valid "disabled" sentinel for all three fields, we decode Retrieval as a
+	// pointer-to-struct so we can detect "sent vs absent" at the struct level.
+	// Within the struct we merge field-by-field because JSON has no nil for
+	// non-pointer scalars: a sent zero is indistinguishable from an absent field.
+	// Callers that want to reset a field to zero must omit the whole retrieval
+	// sub-tree and rely on the stored value already being zero.
+	if patch.RAG != nil && patch.RAG.Retrieval != nil {
+		p := *patch.RAG.Retrieval
+		if p.NeighborRadius != 0 {
+			merged.RAG.Retrieval.NeighborRadius = p.NeighborRadius
+		}
+		if p.MaxBM25Score != 0 {
+			merged.RAG.Retrieval.MaxBM25Score = p.MaxBM25Score
+		}
+		if p.MinCosineScore != 0 {
+			merged.RAG.Retrieval.MinCosineScore = p.MinCosineScore
+		}
+	}
+
+	// Merge body.RAG.Hyde field-by-field so that a partial PUT does not reset
+	// sibling fields to zero. Enabled uses *bool so absent key preserves the
+	// stored value; all other fields use zero as the "absent" sentinel.
+	if patch.RAG != nil && patch.RAG.Hyde != nil {
+		p := *patch.RAG.Hyde
+		if p.Enabled != nil {
+			merged.RAG.Hyde.Enabled = *p.Enabled
+		}
+		if p.Model != "" {
+			merged.RAG.Hyde.Model = p.Model
+		}
+		if p.HypothesisTimeout != 0 {
+			merged.RAG.Hyde.HypothesisTimeout = p.HypothesisTimeout
+		}
+		if p.QueryWeight != 0 {
+			merged.RAG.Hyde.QueryWeight = p.QueryWeight
+		}
+		if p.MaxCandidates != 0 {
+			merged.RAG.Hyde.MaxCandidates = p.MaxCandidates
+		}
+	}
+
+	// Merge body.RAG.Metrics field-by-field. Enabled uses bool (zero = false),
+	// so we only overwrite when the patch struct pointer is non-nil.
+	// BufferSize uses zero as the "absent" sentinel — only overwrite when non-zero.
+	if patch.RAG != nil && patch.RAG.Metrics != nil {
+		p := *patch.RAG.Metrics
+		// For Metrics.Enabled: always copy the sent value (pointer-nil check
+		// at struct level ensures the key was actually sent).
+		merged.RAG.Metrics.Enabled = p.Enabled
+		if p.BufferSize != 0 {
+			merged.RAG.Metrics.BufferSize = p.BufferSize
+		}
 	}
 
 	// Validate active provider has credentials.

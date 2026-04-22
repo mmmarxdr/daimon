@@ -147,7 +147,7 @@ func TestSQLiteDocumentStore_AddChunksAndSearch_FTS5(t *testing.T) {
 		t.Fatalf("AddChunks: %v", err)
 	}
 
-	results, err := store.SearchChunks(ctx, "golang", nil, 5)
+	results, err := store.SearchChunks(ctx, "golang", nil, rag.SearchOptions{Limit: 5})
 	if err != nil {
 		t.Fatalf("SearchChunks: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestSQLiteDocumentStore_SearchWithCosineRerank(t *testing.T) {
 	queryVec := make([]float32, 256)
 	queryVec[1] = 1.0
 
-	results, err := store.SearchChunks(ctx, "vector search", queryVec, 2)
+	results, err := store.SearchChunks(ctx, "vector search", queryVec, rag.SearchOptions{Limit: 2})
 	if err != nil {
 		t.Fatalf("SearchChunks with cosine: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestSQLiteDocumentStore_SearchBumpsAccessCount(t *testing.T) {
 		t.Fatalf("AddChunks: %v", err)
 	}
 
-	results, err := store.SearchChunks(ctx, "alpha", nil, 5)
+	results, err := store.SearchChunks(ctx, "alpha", nil, rag.SearchOptions{Limit: 5})
 	if err != nil {
 		t.Fatalf("SearchChunks: %v", err)
 	}

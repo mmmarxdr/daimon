@@ -61,7 +61,7 @@ func (s *trackingStore) AddChunks(_ context.Context, docID string, chunks []rag.
 	return nil
 }
 
-func (s *trackingStore) SearchChunks(_ context.Context, _ string, _ []float32, _ int) ([]rag.SearchResult, error) {
+func (s *trackingStore) SearchChunks(_ context.Context, _ string, _ []float32, _ rag.SearchOptions) ([]rag.SearchResult, error) {
 	return nil, nil
 }
 func (s *trackingStore) DeleteDocument(_ context.Context, _ string) error { return nil }
