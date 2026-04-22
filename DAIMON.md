@@ -822,6 +822,82 @@ Extended thinking / reasoning token support across providers. `StreamEventReason
 
 ---
 
+## 12c. RAG ARCHITECTURE
+
+### Pipeline
+
+```
+Upload → Extract → Chunk → Embed → Store
+                                     │
+                                     ▼
+User query ─────────────────── Retrieve
+                                  │
+                    ┌─────────────┴─────────────────┐
+                    │                               │
+                BM25 (FTS5)              Cosine (embeddings)
+                    │                               │
+                    │        HyDE pass (opt-in)     │
+                    │   hypothesis → embed → cosine │
+                    │                               │
+                    └─────────── RRF merge ─────────┘
+                                     │
+                              Neighbor expand
+                                     │
+                              Threshold filter
+                    (max_bm25_score / min_cosine_score)
+                                     │
+                            Inject top-K into prompt
+```
+
+**Extraction**: Pure-Go parser for most formats (PDF, DOCX, MD, TXT).
+`pdftotext` (poppler-utils) is used automatically when available — better for
+academic PDFs and LaTeX-generated documents.
+
+**Chunking**: Fixed-size token chunks with overlap. A startup migration
+(`CleanupJunkChunks`) deletes chunks matching the "1-rune-drop suffix" pattern
+from an old chunker bug. Idempotent and safe.
+
+**Retrieval stages**:
+1. BM25 (FTS5) keyword search — always active.
+2. Cosine reranking — active when `rag.embedding.enabled: true`.
+3. HyDE pass — active when `rag.hyde.enabled: true`. Generates a hypothetical
+   answer, embeds it, retrieves a second candidate set, merges with raw-query
+   results via 3-way RRF (k=60). Fails silently (slog.Warn + baseline fallback)
+   on timeout or model error.
+4. Neighbor expansion — expands each final chunk by including adjacent chunks
+   when `rag.retrieval.neighbor_radius > 0`.
+5. Threshold filtering — drops candidates outside BM25/cosine score bounds.
+
+**Curator**: Extracts `memorable_fact` tags from documents during ingestion.
+Raw response content is NOT persisted — only the extracted facts.
+
+### Dual-mirror config pattern
+
+RAG configuration structs exist in TWO packages and MUST be kept in sync:
+
+- `internal/config/config.go` — `RAGConfig`, `RAGEmbeddingConf`, `RAGRetrievalConf`, `RAGHydeConf`, `RAGMetricsConf`
+- `internal/rag/config.go` — mirrors of the same structs (used inside the `rag` package)
+
+When adding a field to either location, add it to BOTH. The `patchRAG` function
+in `internal/web/handler_config.go` copies fields from the config package to the
+rag package at runtime — extend `patchRAG` whenever new fields are added.
+
+### Startup-path duality
+
+Daimon has two startup paths that BOTH wire RAG:
+
+- **`daimon` (main.go)**: Calls `wireRAG`, wires stores and metrics into the
+  agent. If `--web` flag is set, re-wires into a rebuilt agent after adding the
+  `WebChannel` — the `ragWiring` struct is reused, no second store is created.
+- **`daimon web` (web_cmd.go)**: Calls `wireRAG` independently with the same
+  `ragWiring` pattern.
+
+Any new subsystem wiring (new stores, workers, metrics recorders) MUST be added
+to BOTH paths. Missing wiring in one path surfaces as `501` errors on the
+corresponding endpoints (as `daimon web` demonstrated before the fix).
+
+---
+
 ## 13. PHASE ROADMAP
 
 | Phase | Focus | Key deliverables |

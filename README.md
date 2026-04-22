@@ -123,6 +123,140 @@ sudo pacman -S poppler
 
 ---
 
+## Usage
+
+```
+daimon [flags]              # Start the agent (CLI, Telegram, Discord, or WhatsApp channel)
+daimon web                  # Start the web dashboard with a full agent loop
+daimon web token            # Print the current auth token
+daimon setup                # Run the interactive setup wizard
+daimon doctor               # Check configuration and connectivity
+daimon mcp [subcommand]     # Manage MCP server connections
+daimon skills [subcommand]  # Manage skills
+daimon cron [subcommand]    # Manage scheduled tasks
+daimon costs [subcommand]   # View token cost history
+daimon config [subcommand]  # Inspect or edit config
+```
+
+**Flags (main binary only):**
+
+| Flag | Description |
+| ---- | ----------- |
+| `--config <path>` | Path to config file |
+| `--web` | Also start web dashboard alongside the agent |
+| `--dashboard` | Open read-only TUI dashboard and exit |
+| `--setup` | Run the interactive setup wizard (TUI) and exit |
+| `--daemon` | Run as background daemon (cron only, no interactive channel) |
+| `--prune-memories` | List memory entries that look like transcripts |
+| `--confirm` | Actually delete when used with `--prune-memories` |
+
+`daimon web` is the recommended entry point for most users. It starts both the
+web dashboard and the full agent loop in one command. If no config is found, it
+launches the browser-based setup wizard automatically.
+
+---
+
+## Knowledge Base
+
+Daimon includes a built-in knowledge base. Documents uploaded via the Knowledge
+tab in the web dashboard (or via `POST /api/knowledge`) are extracted, chunked,
+embedded, and stored in SQLite. On each user message, the most relevant chunks
+are retrieved and injected into the LLM context.
+
+**Supported formats**: PDF, DOCX, Markdown, plain text.
+
+**PDF extraction**: Daimon uses a pure-Go parser by default. For academic PDFs
+and LaTeX-generated documents, install `poppler-utils` to enable the higher-quality
+`pdftotext` backend — Daimon detects and uses it automatically at startup.
+
+**API**: `GET /api/knowledge` lists documents, `POST /api/knowledge` uploads a
+file (multipart/form-data), `DELETE /api/knowledge/{id}` removes a document and
+all its chunks. All endpoints require the bearer auth token.
+
+---
+
+## RAG Configuration
+
+The RAG subsystem is configured under the `rag:` block. Full field reference
+is in [docs/CONFIG.md](docs/CONFIG.md). Key sub-blocks:
+
+### `rag.embedding` — dedicated embedding provider
+
+Pair any chat provider with a dedicated embedding provider. Required for cosine
+reranking and HyDE. Supports `openai` and `gemini`.
+
+```yaml
+rag:
+  enabled: true
+  embedding:
+    enabled: true
+    provider: openai
+    model: text-embedding-3-small    # empty = provider's canonical default
+    api_key: ${OPENAI_API_KEY}
+    base_url: ""                     # empty = provider's standard endpoint
+```
+
+### `rag.retrieval` — precision thresholds and neighbor expansion
+
+Filter low-quality candidates and expand context around retrieved chunks.
+Note the asymmetry: BM25 scores are negative (lower = better), so
+`max_bm25_score` is a ceiling; cosine similarity is positive (higher = better),
+so `min_cosine_score` is a floor.
+
+```yaml
+rag:
+  retrieval:
+    neighbor_radius: 1       # include 1 adjacent chunk on each side; 0 = disabled
+    max_bm25_score: 0.0      # 0 = no BM25 threshold
+    min_cosine_score: 0.0    # 0 = no cosine threshold
+```
+
+### `rag.hyde` — Hypothetical Document Embeddings (opt-in)
+
+When enabled, Daimon generates a short hypothetical answer to each query,
+embeds it, and uses it as a second retrieval signal merged with the raw query
+via Reciprocal Rank Fusion (RRF). Improves recall for semantic queries that
+have no keyword overlap with indexed content. Requires `rag.embedding.enabled: true`.
+
+```yaml
+rag:
+  hyde:
+    enabled: false             # opt-in; false by default
+    model: ""                  # fallback: summary_model → main provider
+    hypothesis_timeout: 10s
+    query_weight: 0.3          # raw query weight; HyDE weight = 1 - query_weight
+    max_candidates: 20
+```
+
+### `rag.metrics` — retrieval instrumentation
+
+In-memory ring buffer recording per-query retrieval events. Always-on by default.
+
+```yaml
+rag:
+  metrics:
+    enabled: true
+    buffer_size: 200
+```
+
+### `rag.summary_model` — per-document summarization override
+
+```yaml
+rag:
+  summary_model: ""   # empty = main provider model
+```
+
+---
+
+## Metrics
+
+`GET /api/metrics/rag` returns retrieval instrumentation data: aggregates
+(mean, p50, p95 for duration, hit counts, threshold rejections) and recent
+individual events from the ring buffer. Auth-token required. Returns `501` when
+`rag.metrics.enabled` is `false`.
+
+---
+
 ## Documentation
 
 | Topic | Document |
