@@ -55,6 +55,14 @@ func wireRAG(
 	ragCfg := cfg.RAG
 	docStore := rag.NewSQLiteDocumentStore(db, ragCfg.MaxDocuments, ragCfg.MaxChunks)
 
+	// Remove trailing junk chunks left by the pre-fix chunker bug.
+	// Idempotent and safe — log counts, never fail startup on error.
+	if scanned, deleted, cleanErr := docStore.CleanupJunkChunks(context.Background()); cleanErr != nil {
+		slog.Warn("rag: cleanup junk chunks failed", "error", cleanErr)
+	} else {
+		slog.Info("rag: cleanup junk chunks", "docs_scanned", scanned, "chunks_deleted", deleted)
+	}
+
 	// Derive the embed function. When rag.embedding.enabled, build a SEPARATE
 	// provider just for embeddings (lets users pair OpenRouter for chat with
 	// OpenAI/Gemini for vectors). Falls back to the main chat provider when
