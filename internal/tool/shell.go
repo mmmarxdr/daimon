@@ -29,7 +29,12 @@ func (t *ShellTool) Name() string {
 }
 
 func (t *ShellTool) Description() string {
-	desc := "Execute a shell command on the host system. Only whitelisted commands are allowed unless allow_all is true in config."
+	var desc string
+	if t.config.AllowAll {
+		desc = "Execute a shell command on the host system. All commands are allowed (allow_all=true) and are run through `sh -c`, so pipes, redirects, substitutions, and chaining work normally."
+	} else {
+		desc = "Execute a command on the host system. Only whitelisted base commands are permitted. Shell metacharacters (; & | < > $ ` ( ) { }) and newlines are rejected; the command is executed directly without a shell, so pipes, redirects, subshells, globs, and variable expansion are NOT available. Break multi-step workflows into separate tool calls."
+	}
 	if t.config.WorkingDir != "" {
 		desc += fmt.Sprintf(" Working directory: %s.", t.config.WorkingDir)
 	}
@@ -56,6 +61,24 @@ type shellParams struct {
 // or NTFS mounts on WSL.
 const hardKillGrace = 500 * time.Millisecond
 
+// firstShellMetachar returns the first shell metacharacter present in s, if
+// any. These characters let a single command string expand into multiple
+// commands or subvert a base-command whitelist when executed via `sh -c`:
+//
+//	; & | < > $ ` ( ) { } \n \r
+//
+// Globs (* ? [ ]) and tildes are deliberately NOT in this set — without a
+// shell they are passed as literal arguments, which is harmless.
+func firstShellMetachar(s string) (rune, bool) {
+	for _, r := range s {
+		switch r {
+		case ';', '&', '|', '<', '>', '$', '`', '(', ')', '{', '}', '\n', '\r':
+			return r, true
+		}
+	}
+	return 0, false
+}
+
 func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var input shellParams
 	if err := json.Unmarshal(params, &input); err != nil {
@@ -70,7 +93,12 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 	parts := strings.Fields(cmdStr)
 	baseCmd := parts[0]
 
-	if !t.config.AllowAll {
+	var cmd *exec.Cmd
+	if t.config.AllowAll {
+		// User explicitly opted into unrestricted execution. Keep sh -c so
+		// pipes, redirects, substitutions, and chaining continue to work.
+		cmd = exec.Command("sh", "-c", cmdStr) //nolint:gosec // shell exec is the documented contract when allow_all=true
+	} else {
 		allowed := false
 		for _, ac := range t.config.AllowedCommands {
 			if ac == baseCmd {
@@ -81,9 +109,19 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		if !allowed {
 			return ToolResult{IsError: true, Content: fmt.Sprintf("Command '%s' is not in the allowed list", baseCmd)}, nil
 		}
+		// Whitelist is active. Reject any shell metacharacter that could
+		// smuggle a second command past the base-command check (the
+		// classic `cat f; rm -rf ~` bypass), then exec the binary directly
+		// with no shell involved.
+		if bad, ok := firstShellMetachar(cmdStr); ok {
+			return ToolResult{
+				IsError: true,
+				Content: fmt.Sprintf("Command contains shell metacharacter %q which is not permitted when allow_all=false. Break it into separate tool calls, or enable tools.shell.allow_all.", bad),
+				Meta:    map[string]string{"command": cmdStr, "exit_code": "-1"},
+			}, nil
+		}
+		cmd = exec.Command(baseCmd, parts[1:]...) //nolint:gosec // whitelist + metachar check enforced above
 	}
-
-	cmd := exec.Command("sh", "-c", cmdStr) //nolint:gosec // shell exec is the contract
 	setProcessGroup(cmd)
 	if t.config.WorkingDir != "" {
 		wd := t.config.WorkingDir

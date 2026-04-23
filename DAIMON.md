@@ -494,7 +494,7 @@ tools:
       - echo
       - date
       - pwd
-    allow_all: false           # DANGER: set true to allow any command
+    allow_all: false           # DANGER: set true to allow any command via `sh -c` (no whitelist, no metachar check)
     working_dir: "~"
   file:
     enabled: true
@@ -537,7 +537,7 @@ limits:
 ```json
 {
   "name": "shell_exec",
-  "description": "Execute a shell command on the host system. Only whitelisted commands are allowed unless allow_all is true in config.",
+  "description": "Execute a command on the host. When allow_all=false, only whitelisted base commands run and shell metacharacters (; & | < > $ ` ( ) { } newline) are rejected — no pipes, redirects, subshells, globs, or variable expansion. When allow_all=true, the command goes through `sh -c` and shell features are available.",
   "input_schema": {
     "type": "object",
     "properties": {
