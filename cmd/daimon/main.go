@@ -517,7 +517,32 @@ func main() {
 			_ = titler.Stop(sctx)
 		}()
 	}
+	if cfg.AI.Compaction.Enabled {
+		if sq, ok := st.(*store.SQLiteStore); ok {
+			compactorCfg := agent.CompactorConfig{
+				Enabled:        true,
+				Model:          cfg.AI.Compaction.Model,
+				Interval:       time.Duration(cfg.AI.Compaction.IntervalSec) * time.Second,
+				IdleAfter:      time.Duration(cfg.AI.Compaction.IdleAfterSec) * time.Second,
+				CallTimeout:    time.Duration(cfg.AI.Compaction.CallTimeoutSec) * time.Second,
+				MaxConvsPerRun: cfg.AI.Compaction.MaxConvsPerRun,
+			}
+			if compactor := agent.NewConversationCompactor(sq, prov, compactorCfg); compactor != nil {
+				compactor.Start()
+				defer func() {
+					sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer scancel()
+					_ = compactor.Stop(sctx)
+				}()
+				slog.Info("conversation_compactor_started",
+					"interval_sec", cfg.AI.Compaction.IntervalSec,
+					"idle_after_sec", cfg.AI.Compaction.IdleAfterSec)
+			}
+		}
+	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
+	stopPricing := wireRuntimePricing(prov, 6*time.Hour)
+	defer stopPricing()
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
 	if ragWiring.Worker != nil {
 		ragWiring.Worker.Start(ctx)

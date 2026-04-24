@@ -332,12 +332,49 @@ func runWebCommand(args []string, cfgPath string) error {
 			_ = titler.Stop(sctx)
 		}()
 	}
+
+	// Conversation compactor: periodically summarises idle conversations and
+	// evicts their raw tool_outputs. The compactor needs *SQLiteStore (not
+	// the generic interface) because it calls the compaction-specific
+	// methods ListCompactableConversations + DeleteToolOutputsForConversation
+	// which live on the SQLite implementation only.
+	if cfg.AI.Compaction.Enabled {
+		if sq, ok := st.(*store.SQLiteStore); ok {
+			compactorCfg := agent.CompactorConfig{
+				Enabled:        true,
+				Model:          cfg.AI.Compaction.Model,
+				Interval:       time.Duration(cfg.AI.Compaction.IntervalSec) * time.Second,
+				IdleAfter:      time.Duration(cfg.AI.Compaction.IdleAfterSec) * time.Second,
+				CallTimeout:    time.Duration(cfg.AI.Compaction.CallTimeoutSec) * time.Second,
+				MaxConvsPerRun: cfg.AI.Compaction.MaxConvsPerRun,
+			}
+			if compactor := agent.NewConversationCompactor(sq, prov, compactorCfg); compactor != nil {
+				compactor.Start()
+				defer func() {
+					sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer scancel()
+					_ = compactor.Stop(sctx)
+				}()
+				slog.Info("conversation_compactor_started",
+					"interval_sec", cfg.AI.Compaction.IntervalSec,
+					"idle_after_sec", cfg.AI.Compaction.IdleAfterSec)
+			}
+		} else {
+			slog.Warn("conversation_compactor_disabled: store is not SQLite")
+		}
+	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
 	if ragWiring.Worker != nil {
 		ragWiring.Worker.Start(ctx)
 		defer ragWiring.Worker.Stop()
 	}
+
+	// Runtime pricing: lets EstimateCost price OpenRouter models (and any
+	// future provider with ListModels). Falls back to the offline map for
+	// providers that don't implement ModelLister.
+	stopPricing := wireRuntimePricing(prov, 6*time.Hour)
+	defer stopPricing()
 
 	// ---- Web server ----
 	resolvedCfgPath, _ := config.FindConfigPath(cfgPath)
@@ -352,6 +389,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		Config:           cfg,
 		ConfigPath:       resolvedCfgPath,
 		MCPService:       mcpSvc,
+		Agent:            ag, // hot-reload target for /api/mcp + skill installs
 		ProviderRegistry: provRegistry,
 		Tools:            toolsRegistry,
 		StartedAt:        time.Now(),
@@ -362,6 +400,8 @@ func runWebCommand(args []string, cfgPath string) error {
 		IngestWorker:     ragWiring.Worker,
 		RAGMetrics:       ragWiring.Metrics,
 	})
+	// Ensure hot-added MCP children get cleaned up on shutdown.
+	defer ag.CloseHotMCPServers()
 
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("web: failed to start server: %w", err)

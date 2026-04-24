@@ -125,7 +125,7 @@ func TestBuildSystemPrompt_WithRAGResults_BothSectionsPresent(t *testing.T) {
 		makeSearchResult("API Docs", 0, "The API accepts JSON."),
 	}
 
-	prompt := ag.buildSystemPrompt(memories, ragResults)
+	prompt := ag.buildSystemPrompt(memories, ragResults, "")
 
 	if !strings.Contains(prompt, "## Relevant Context:") {
 		t.Errorf("expected memory section '## Relevant Context:', got:\n%s", prompt)
@@ -143,7 +143,7 @@ func TestBuildSystemPrompt_WithRAGResults_BothSectionsPresent(t *testing.T) {
 
 func TestBuildSystemPrompt_WithNilRAGResults_NoRAGSection(t *testing.T) {
 	ag := minimalAgent()
-	prompt := ag.buildSystemPrompt(nil, nil)
+	prompt := ag.buildSystemPrompt(nil, nil, "")
 	if strings.Contains(prompt, "## Relevant Documents:") {
 		t.Errorf("expected no RAG section for nil results, got:\n%s", prompt)
 	}
@@ -151,7 +151,7 @@ func TestBuildSystemPrompt_WithNilRAGResults_NoRAGSection(t *testing.T) {
 
 func TestBuildSystemPrompt_WithEmptyRAGResults_NoRAGSection(t *testing.T) {
 	ag := minimalAgent()
-	prompt := ag.buildSystemPrompt(nil, []rag.SearchResult{})
+	prompt := ag.buildSystemPrompt(nil, []rag.SearchResult{}, "")
 	if strings.Contains(prompt, "## Relevant Documents:") {
 		t.Errorf("expected no RAG section for empty results, got:\n%s", prompt)
 	}
@@ -162,7 +162,7 @@ func TestBuildSystemPrompt_RAGSection_AfterMemorySection(t *testing.T) {
 	memories := []store.MemoryEntry{{Content: "memory item"}}
 	ragResults := []rag.SearchResult{makeSearchResult("MyDoc", 0, "rag content")}
 
-	prompt := ag.buildSystemPrompt(memories, ragResults)
+	prompt := ag.buildSystemPrompt(memories, ragResults, "")
 
 	memIdx := strings.Index(prompt, "## Relevant Context:")
 	ragIdx := strings.Index(prompt, "## Relevant Documents:")

@@ -149,6 +149,18 @@ type PruneConfig struct {
 // specific subsystem (memory, RAG). Today just title generation.
 type AIConfig struct {
 	TitleGeneration TitleGenYAMLConfig `yaml:"title_generation" json:"title_generation"`
+	Compaction      CompactionConfig   `yaml:"compaction"        json:"compaction"`
+}
+
+// CompactionConfig configures the background ConversationCompactor that
+// summarises idle conversations and evicts their raw tool_outputs.
+type CompactionConfig struct {
+	Enabled        bool          `yaml:"enabled"           json:"enabled"`
+	Model          string        `yaml:"model,omitempty"   json:"model,omitempty"`
+	IntervalSec    int           `yaml:"interval_sec"      json:"interval_sec"`        // default 3600 (1h)
+	IdleAfterSec   int           `yaml:"idle_after_sec"    json:"idle_after_sec"`      // default 604800 (7d)
+	CallTimeoutSec int           `yaml:"call_timeout_sec"  json:"call_timeout_sec"`    // default 60
+	MaxConvsPerRun int    `yaml:"max_convs_per_run" json:"max_convs_per_run"` // default 5
 }
 
 // TitleGenYAMLConfig configures the async LLM title worker. Empty Model

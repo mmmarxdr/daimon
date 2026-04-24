@@ -114,13 +114,14 @@ func (t *BatchExecTool) Execute(ctx context.Context, params json.RawMessage) (To
 
 			// Index the error output
 			indexErr := t.store.IndexOutput(ctx, store.ToolOutput{
-				ID:        uuid.New().String(),
-				ToolName:  t.Name(),
-				Command:   cmd,
-				Content:   fmt.Sprintf("execution error: %v", err),
-				Truncated: false,
-				ExitCode:  -1,
-				Timestamp: time.Now().UTC(),
+				ID:             uuid.New().String(),
+				ConversationID: ConvIDFromContext(ctx),
+				ToolName:       t.Name(),
+				Command:        cmd,
+				Content:        fmt.Sprintf("execution error: %v", err),
+				Truncated:      false,
+				ExitCode:       -1,
+				Timestamp:      time.Now().UTC(),
 			})
 			if indexErr != nil {
 				slog.Warn("batch_exec: failed to index output", "error", indexErr, "command_index", i)
@@ -134,52 +135,86 @@ func (t *BatchExecTool) Execute(ctx context.Context, params json.RawMessage) (To
 
 		// Index the output
 		indexErr := t.store.IndexOutput(ctx, store.ToolOutput{
-			ID:        uuid.New().String(),
-			ToolName:  t.Name(),
-			Command:   cmd,
-			Content:   result.Summary,
-			Truncated: result.Metrics.Truncated,
-			ExitCode:  result.Metrics.ExitCode,
-			Timestamp: time.Now().UTC(),
+			ID:             uuid.New().String(),
+			ConversationID: ConvIDFromContext(ctx),
+			ToolName:       t.Name(),
+			Command:        cmd,
+			Content:        result.Summary,
+			Truncated:      result.Metrics.Truncated,
+			ExitCode:       result.Metrics.ExitCode,
+			Timestamp:      time.Now().UTC(),
 		})
 		if indexErr != nil {
 			slog.Warn("batch_exec: failed to index output", "error", indexErr, "command_index", i)
 		}
 
-		// Track success/failure
-		if result.Metrics.ExitCode == 0 {
+		// Track success/failure. ErrorKind takes precedence over ExitCode so a
+		// timeout-killed process (which reports ExitCode=-1) is labeled clearly
+		// instead of as a generic "exit -1" — that confuses both humans and the
+		// LLM consuming this summary.
+		switch {
+		case result.Metrics.ErrorKind == ExecErrorTimeout:
+			errorOccurred = true
+			errorCount++
+			preview := trimPreviewRunes(strings.TrimSpace(result.Summary), 200)
+			summaryLines = append(summaryLines, fmt.Sprintf(
+				"[%d] TIMED OUT after %s (per-command limit). Partial output: %s",
+				i+1, t.config.Timeout, preview,
+			))
+			if input.StopOnError {
+				return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
+			}
+		case result.Metrics.ErrorKind == ExecErrorKilled:
+			errorOccurred = true
+			errorCount++
+			preview := trimPreviewRunes(strings.TrimSpace(result.Summary), 200)
+			summaryLines = append(summaryLines, fmt.Sprintf("[%d] KILLED by signal. Partial output: %s", i+1, preview))
+			if input.StopOnError {
+				return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
+			}
+		case result.Metrics.ErrorKind == ExecErrorStart:
+			errorOccurred = true
+			errorCount++
+			summaryLines = append(summaryLines, fmt.Sprintf("[%d] FAILED TO START: command not found or unrunnable", i+1))
+			if input.StopOnError {
+				return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
+			}
+		case result.Metrics.ExitCode == 0:
 			successCount++
-			// Include summary of successful commands (first few lines)
 			lines := strings.Split(strings.TrimSpace(result.Summary), "\n")
 			preview := trimPreviewRunes(strings.Join(lines[:min(3, len(lines))], "; "), 100)
 			summaryLines = append(summaryLines, fmt.Sprintf("[%d] OK: %s", i+1, preview))
-		} else {
+		default:
 			errorOccurred = true
 			errorCount++
-			summaryLines = append(summaryLines, fmt.Sprintf("[%d] ERROR (exit %d): %s", i+1, result.Metrics.ExitCode, result.Summary))
-
+			summaryLines = append(summaryLines, fmt.Sprintf("[%d] EXITED %d: %s", i+1, result.Metrics.ExitCode, result.Summary))
 			if input.StopOnError {
-				break
+				return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
 			}
 		}
 	}
 
-	// Build final summary
+	return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
+}
+
+// finalizeBatch builds the ToolResult returned by Execute. Extracted so the
+// stop_on_error early-exit branches in the per-command switch above can return
+// a fully-formed result without duplicating the summary/meta wiring.
+func finalizeBatch(commands []string, summaryLines []string, successCount, errorCount int, errorOccurred bool) ToolResult {
 	summary := fmt.Sprintf("Executed %d commands: %d succeeded, %d failed\n\n%s",
 		successCount+errorCount, successCount, errorCount, strings.Join(summaryLines, "\n"))
 
 	meta := map[string]string{
-		"command_count": fmt.Sprintf("%d", len(input.Commands)),
+		"command_count": fmt.Sprintf("%d", len(commands)),
 		"success_count": fmt.Sprintf("%d", successCount),
 		"error_count":   fmt.Sprintf("%d", errorCount),
-		"stop_on_error": fmt.Sprintf("%v", input.StopOnError),
 	}
 
 	return ToolResult{
 		Content: summary,
 		IsError: errorOccurred,
 		Meta:    meta,
-	}, nil
+	}
 }
 
 // trimPreviewRunes truncates s to at most maxRunes Unicode code points, appending

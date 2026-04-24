@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"daimon/internal/audit"
@@ -84,7 +85,24 @@ type Agent struct {
 	store           store.Store
 	outputStore     store.OutputStore // for auto-indexing tool outputs
 	auditor         audit.Auditor
+
+	// tools / skills are protected by toolsMu / skillsMu so the dashboard's
+	// hot-add flow (RegisterMCPServer / ReplaceSkills) can mutate them while
+	// the agent loop is running. Reads are RLock; mutations Lock. The
+	// processMessage hot path acquires RLock once at the top and again for
+	// each tool invocation — both are <100ns and not measurable next to LLM
+	// calls or tool execution.
+	toolsMu         sync.RWMutex
 	tools           map[string]tool.Tool
+	// mcpToolNames tracks which tool names came from each MCP server, so
+	// UnregisterMCPServer can remove just that server's tools without
+	// touching native tools or other MCPs.
+	mcpToolNames    map[string][]string
+	// mcpClients holds the live MCPCaller for each hot-added server so we
+	// can Close() it on Unregister or process exit. Boot-time servers are
+	// owned by the boot Manager (not tracked here) — only hot-adds.
+	mcpClients      map[string]interface{ Close() error }
+	skillsMu        sync.RWMutex
 	skills          []skill.SkillContent
 	skillIndex      skill.SkillIndex
 	sem             chan struct{}    // concurrency semaphore
@@ -233,6 +251,8 @@ func New(
 		outputStore:     outputStore,
 		auditor:         auditor,
 		tools:           tools,
+		mcpToolNames:    map[string][]string{},
+		mcpClients:      map[string]interface{ Close() error }{},
 		skills:          skills,
 		skillIndex:      skillIndex,
 		sem:             make(chan struct{}, maxConcurrent),

@@ -30,6 +30,27 @@ func ScopeFromContext(ctx context.Context) string {
 	return ""
 }
 
+// convIDKey is the unexported context key for conversation ID. Tools that
+// index outputs (batch_exec, the auto-index path in agent loop) read this
+// to attach the output to a conversation, so the compactor can later find
+// and delete the rows in bulk.
+type convIDKey struct{}
+
+// WithConvID returns a new context carrying the given conversation ID.
+// Set by the agent loop just before invoking a tool.
+func WithConvID(ctx context.Context, convID string) context.Context {
+	return context.WithValue(ctx, convIDKey{}, convID)
+}
+
+// ConvIDFromContext extracts the conversation ID from ctx.
+// Returns "" when no conversation ID was set (e.g. cron jobs).
+func ConvIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(convIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // MemoryToolDeps holds the dependencies for the memory tool set.
 // Using callback functions avoids import cycles between internal/tool and internal/agent.
 type MemoryToolDeps struct {
