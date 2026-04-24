@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // RecordCost inserts a cost record for a single LLM call.
@@ -126,6 +128,123 @@ func (s *SQLiteStore) buildCostWhere(filter CostFilter) (string, []any) {
 		return "", args
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+// GetDailyCostHistory returns aggregated cost/token/usage data per calendar
+// day (UTC) for the last `days` days inclusive. Days with no records are
+// zero-filled so chart consumers get a continuous time axis. The last entry
+// is always today (UTC).
+//
+// Daily aggregation runs in two queries — one for token/cost/message counts,
+// one for distinct-conversation counts — joined in Go. SQLite doesn't have
+// a clean way to express "COUNT(*) and COUNT(DISTINCT session_id) per day"
+// in a single grouped query without a subselect that complicates indexing.
+func (s *SQLiteStore) GetDailyCostHistory(ctx context.Context, days int) ([]DailyCost, error) {
+	if days <= 0 {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	start := now.AddDate(0, 0, -(days - 1))
+	startDate := start.Format("2006-01-02")
+
+	type dayAgg struct {
+		inputTokens  int64
+		outputTokens int64
+		totalCostUSD float64
+		messages     int
+	}
+
+	tokenRows, err := s.db.QueryContext(ctx, `
+		SELECT
+			substr(created_at, 1, 10) AS day,
+			COALESCE(SUM(input_tokens), 0),
+			COALESCE(SUM(output_tokens), 0),
+			COALESCE(SUM(total_cost_usd), 0),
+			COUNT(*)
+		FROM cost_records
+		WHERE substr(created_at, 1, 10) >= ?
+		GROUP BY substr(created_at, 1, 10)
+	`, startDate)
+	if err != nil {
+		return nil, fmt.Errorf("querying daily cost history: %w", err)
+	}
+	defer tokenRows.Close()
+
+	byDay := make(map[string]dayAgg)
+	for tokenRows.Next() {
+		var day string
+		var a dayAgg
+		if err := tokenRows.Scan(&day, &a.inputTokens, &a.outputTokens, &a.totalCostUSD, &a.messages); err != nil {
+			return nil, fmt.Errorf("scanning daily cost row: %w", err)
+		}
+		byDay[day] = a
+	}
+	if err := tokenRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating daily cost rows: %w", err)
+	}
+
+	convoRows, err := s.db.QueryContext(ctx, `
+		SELECT
+			substr(created_at, 1, 10) AS day,
+			COUNT(DISTINCT session_id)
+		FROM cost_records
+		WHERE substr(created_at, 1, 10) >= ?
+		  AND session_id IS NOT NULL AND session_id != ''
+		GROUP BY substr(created_at, 1, 10)
+	`, startDate)
+	if err != nil {
+		return nil, fmt.Errorf("querying daily conversation count: %w", err)
+	}
+	defer convoRows.Close()
+
+	convoByDay := make(map[string]int)
+	for convoRows.Next() {
+		var day string
+		var n int
+		if err := convoRows.Scan(&day, &n); err != nil {
+			return nil, fmt.Errorf("scanning daily conv row: %w", err)
+		}
+		convoByDay[day] = n
+	}
+	if err := convoRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating daily conv rows: %w", err)
+	}
+
+	result := make([]DailyCost, 0, days)
+	for i := range days {
+		day := start.AddDate(0, 0, i).Format("2006-01-02")
+		a := byDay[day]
+		result = append(result, DailyCost{
+			Date:          day,
+			InputTokens:   a.inputTokens,
+			OutputTokens:  a.outputTokens,
+			TotalCostUSD:  a.totalCostUSD,
+			Messages:      a.messages,
+			Conversations: convoByDay[day],
+		})
+	}
+	return result, nil
+}
+
+// GetLastCallTokens returns the input_tokens and model of the most recent
+// cost_records row. Used by the sidebar to show last-turn context window
+// utilisation (a single-call number, distinct from today's running total).
+// Returns (0, "", nil) when the table is empty — an empty agent is not
+// an error condition for this caller.
+func (s *SQLiteStore) GetLastCallTokens(ctx context.Context) (int64, string, error) {
+	var input int64
+	var model string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT input_tokens, model FROM cost_records ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&input, &model)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return 0, "", nil
+		}
+		return 0, "", fmt.Errorf("querying last call tokens: %w", err)
+	}
+	return input, model, nil
 }
 
 // Compile-time interface assertion.

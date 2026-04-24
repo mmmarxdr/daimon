@@ -100,11 +100,20 @@ func (s *SQLiteStore) SaveConversation(ctx context.Context, conv Conversation) e
 		return fmt.Errorf("marshalling metadata: %w", err)
 	}
 
+	// Compaction fields piggy-back on the same upsert; nil/empty values are
+	// preserved so a future compactor run can populate them without an
+	// explicit migration of older rows.
+	var compactedAt any
+	if conv.CompactedAt != nil {
+		compactedAt = conv.CompactedAt.UTC()
+	}
+
 	_, err = s.db.ExecContext(ctx,
-		`INSERT OR REPLACE INTO conversations (id, channel_id, messages, metadata, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO conversations
+			(id, channel_id, messages, metadata, created_at, updated_at, compacted_at, compacted_summary)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		conv.ID, conv.ChannelID, string(messages), string(metadata),
-		conv.CreatedAt, conv.UpdatedAt,
+		conv.CreatedAt, conv.UpdatedAt, compactedAt, conv.CompactedSummary,
 	)
 	if err != nil {
 		return fmt.Errorf("saving conversation %s: %w", conv.ID, err)
@@ -123,21 +132,30 @@ func (s *SQLiteStore) SaveConversation(ctx context.Context, conv Conversation) e
 // not found or if the conv is soft-deleted (deleted_at IS NOT NULL).
 func (s *SQLiteStore) LoadConversation(ctx context.Context, id string) (*Conversation, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, channel_id, messages, metadata, created_at, updated_at
+		`SELECT id, channel_id, messages, metadata, created_at, updated_at, compacted_at, compacted_summary
 		 FROM conversations WHERE id = ? AND deleted_at IS NULL`, id)
 
 	var conv Conversation
 	var messagesJSON, metadataJSON string
+	var compactedAt sql.NullTime
+	var compactedSummary sql.NullString
 
 	err := row.Scan(
 		&conv.ID, &conv.ChannelID, &messagesJSON, &metadataJSON,
-		&conv.CreatedAt, &conv.UpdatedAt,
+		&conv.CreatedAt, &conv.UpdatedAt, &compactedAt, &compactedSummary,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("loading conversation %s: %w", id, ErrNotFound)
 		}
 		return nil, fmt.Errorf("loading conversation %s: %w", id, err)
+	}
+	if compactedAt.Valid {
+		t := compactedAt.Time
+		conv.CompactedAt = &t
+	}
+	if compactedSummary.Valid {
+		conv.CompactedSummary = compactedSummary.String
 	}
 
 	if err := json.Unmarshal([]byte(messagesJSON), &conv.Messages); err != nil {
@@ -864,15 +882,19 @@ func (s *SQLiteStore) IndexOutput(ctx context.Context, output ToolOutput) error 
 	if output.ToolName == "" {
 		return ErrOutputMissingToolName
 	}
+	// Empty content is a valid state — successful side-effect commands
+	// (mkdir, touch, etc.) and silent failures both produce no output.
+	// We index a tiny placeholder so FTS still has a row to find by ID.
 	if output.Content == "" {
-		return ErrOutputEmptyContent
+		output.Content = "(no output)"
 	}
 	// Store timestamp as Unix epoch for reliable storage/retrieval
 	timestampUnix := output.Timestamp.Unix()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO tool_outputs (id, tool_name, command, content, truncated, exit_code, timestamp)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO tool_outputs (id, conversation_id, tool_name, command, content, truncated, exit_code, timestamp)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		output.ID,
+		output.ConversationID,
 		output.ToolName,
 		output.Command,
 		output.Content,
@@ -886,13 +908,78 @@ func (s *SQLiteStore) IndexOutput(ctx context.Context, output ToolOutput) error 
 	return nil
 }
 
+// ListCompactableConversations returns conversation IDs eligible for
+// summarisation by the ConversationCompactor: not soft-deleted, not yet
+// compacted, and idle (no updates) since `idleBefore`. Ordered oldest
+// first so long-stale conversations are processed before recent ones.
+func (s *SQLiteStore) ListCompactableConversations(ctx context.Context, idleBefore time.Time, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id FROM conversations
+		WHERE deleted_at IS NULL
+		  AND compacted_at IS NULL
+		  AND updated_at < ?
+		ORDER BY updated_at ASC
+		LIMIT ?`,
+		idleBefore.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing compactable conversations: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning compactable conv id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating compactable conv ids: %w", err)
+	}
+	return ids, nil
+}
+
+// DeleteToolOutputsForConversation removes every tool_output row tied to
+// the given conversation. Used by the compactor after the conversation's
+// raw outputs have been summarised into CompactedSummary. Returns the
+// number of rows removed.
+func (s *SQLiteStore) DeleteToolOutputsForConversation(ctx context.Context, convID string) (int, error) {
+	if convID == "" {
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM tool_outputs WHERE conversation_id = ?`, convID)
+	if err != nil {
+		return 0, fmt.Errorf("deleting tool_outputs for %s: %w", convID, err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// DeleteToolOutputsBefore removes tool_output rows older than the given
+// timestamp regardless of conversation binding. Catches legacy rows that
+// were indexed before conversation_id was added (conversation_id = '').
+// Returns the number of rows removed.
+func (s *SQLiteStore) DeleteToolOutputsBefore(ctx context.Context, cutoff time.Time) (int, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM tool_outputs WHERE timestamp < ?`, cutoff.Unix())
+	if err != nil {
+		return 0, fmt.Errorf("deleting tool_outputs before %s: %w", cutoff, err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // SearchOutputs searches indexed tool outputs using FTS5.
 // Returns matching outputs sorted by relevance (BM25), limited to limit results.
 func (s *SQLiteStore) SearchOutputs(ctx context.Context, query string, limit int) ([]ToolOutput, error) {
 	var rows *sql.Rows
 	var err error
 
-	const cols = `id, tool_name, command, content, truncated, exit_code, timestamp`
+	const cols = `id, conversation_id, tool_name, command, content, truncated, exit_code, timestamp`
 
 	if query == "" || query == "*" {
 		// Return all outputs ordered by timestamp descending
@@ -945,6 +1032,7 @@ func (s *SQLiteStore) SearchOutputs(ctx context.Context, query string, limit int
 		var timestampUnix int64
 		if err := rows.Scan(
 			&output.ID,
+			&output.ConversationID,
 			&output.ToolName,
 			&output.Command,
 			&output.Content,

@@ -22,10 +22,15 @@ type ConversationPruner struct {
 }
 
 // ConvPruneStore is the narrow store interface the pruner needs. Implemented
-// by SQLiteStore via DeleteConversationsOlderThan. Keeping the interface
-// tiny makes the pruner trivially testable with a fake.
+// by SQLiteStore. Keeping the interface tiny makes the pruner trivially
+// testable with a fake.
 type ConvPruneStore interface {
 	DeleteConversationsOlderThan(ctx context.Context, cutoff time.Time) (int, error)
+	// DeleteToolOutputsBefore removes orphan tool_output rows older than
+	// cutoff (rows whose conversation_id is unknown or whose conversation
+	// was already compacted-and-evicted, but the FTS row lingered). Returns
+	// the number of rows removed.
+	DeleteToolOutputsBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
 
 // PrunerConfig is the already-clamped runtime config for the pruner. Callers
@@ -84,14 +89,33 @@ func (p *ConversationPruner) loop(ctx context.Context) {
 
 // Tick runs one prune pass. Exposed so tests can drive with a FakeClock
 // without waiting on real time.
+//
+// Two cleanups happen per tick, both bounded by the same retention window:
+//  1. Hard-delete soft-deleted conversations older than the cutoff.
+//  2. Drop orphan tool_outputs older than the cutoff. Catches rows from
+//     before conversation_id was tracked (legacy, conversation_id='') and
+//     rows whose owning conversation was hard-deleted in step 1 but whose
+//     FTS rows lingered.
 func (p *ConversationPruner) Tick(ctx context.Context) {
 	start := p.clock.Now()
 	cutoff := start.Add(-p.cfg.Retention)
-	n, err := p.store.DeleteConversationsOlderThan(ctx, cutoff)
-	dur := time.Since(start).Milliseconds()
+
+	convDeleted, err := p.store.DeleteConversationsOlderThan(ctx, cutoff)
 	if err != nil {
-		slog.Error("pruner_run_error", "error", err, "duration_ms", dur)
+		slog.Error("pruner_run_error", "stage", "conversations", "error", err,
+			"duration_ms", time.Since(start).Milliseconds())
 		return
 	}
-	slog.Info("pruner_run", "deleted_count", n, "duration_ms", dur)
+
+	outputsDeleted, err := p.store.DeleteToolOutputsBefore(ctx, cutoff)
+	if err != nil {
+		slog.Error("pruner_run_error", "stage", "tool_outputs", "error", err,
+			"duration_ms", time.Since(start).Milliseconds())
+		return
+	}
+
+	slog.Info("pruner_run",
+		"deleted_conversations", convDeleted,
+		"deleted_tool_outputs", outputsDeleted,
+		"duration_ms", time.Since(start).Milliseconds())
 }

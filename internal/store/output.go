@@ -10,7 +10,6 @@ import (
 var (
 	ErrOutputMissingID       = errors.New("ToolOutput.ID is required")
 	ErrOutputMissingToolName = errors.New("ToolOutput.ToolName is required")
-	ErrOutputEmptyContent    = errors.New("ToolOutput.Content is required")
 )
 
 // ToolOutput represents the output of a tool execution for indexing and search.
@@ -22,6 +21,11 @@ type ToolOutput struct {
 	Truncated bool      `json:"truncated"`
 	ExitCode  int       `json:"exit_code"`
 	Timestamp time.Time `json:"timestamp"`
+
+	// ConversationID scopes the output to a single conversation so the
+	// compactor can find and delete it once the conversation is summarised.
+	// Empty string for outputs not bound to a conversation (e.g. cron jobs).
+	ConversationID string `json:"conversation_id,omitempty"`
 }
 
 // OutputStore is an interface for indexing and searching tool outputs.

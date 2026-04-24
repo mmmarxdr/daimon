@@ -28,6 +28,17 @@ type Conversation struct {
 	Metadata  map[string]string      `json:"metadata,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
 	UpdatedAt time.Time              `json:"updated_at"`
+
+	// CompactedAt is non-nil when the conversation has been compacted by the
+	// background ConversationCompactor: tool_outputs were summarised into
+	// CompactedSummary and the raw rows deleted. New activity in this conv
+	// will accumulate fresh outputs that will eventually be re-compacted.
+	CompactedAt *time.Time `json:"compacted_at,omitempty"`
+
+	// CompactedSummary holds the LLM-generated summary of the conversation's
+	// tool work and key findings. Injected into the system prompt as
+	// "## Previous session summary" when the conversation is resumed.
+	CompactedSummary string `json:"compacted_summary,omitempty"`
 }
 
 // MemoryEntry represents a single persisted memory item.
@@ -211,11 +222,35 @@ type CostSummary struct {
 	ByModel           []CostModelCost
 }
 
+// DailyCost is one calendar day worth of aggregated LLM-call cost data.
+// Used by the metrics endpoint to drive the dashboard charts.
+// Conversations is the number of distinct sessions that exchanged at least
+// one LLM call that day; Messages is the raw count of LLM calls (a turn that
+// fans out to N tool-iterations contributes N).
+type DailyCost struct {
+	Date          string  // "2026-04-12"
+	InputTokens   int64
+	OutputTokens  int64
+	TotalCostUSD  float64
+	Conversations int
+	Messages      int
+}
+
 // CostStore is an optional extension for cost tracking.
 // Only SQLiteStore implements this; callers type-assert.
 type CostStore interface {
 	RecordCost(ctx context.Context, record CostRecord) error
 	GetCostSummary(ctx context.Context, filter CostFilter) (CostSummary, error)
+	// GetDailyCostHistory returns one DailyCost per calendar day (UTC) for
+	// the last `days` days inclusive of today. Missing days are zero-filled
+	// so charts have a continuous x-axis. The last entry in the returned
+	// slice is always today.
+	GetDailyCostHistory(ctx context.Context, days int) ([]DailyCost, error)
+	// GetLastCallTokens returns the input_tokens and model of the most
+	// recently recorded LLM call across all conversations. Returns
+	// (0, "", nil) when no records exist (not an error). Used by the
+	// sidebar's "last turn context" indicator.
+	GetLastCallTokens(ctx context.Context) (inputTokens int64, model string, err error)
 }
 
 // SecretsStore is an optional extension of Store for encrypted key-value secrets.

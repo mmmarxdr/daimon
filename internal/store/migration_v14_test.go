@@ -51,8 +51,8 @@ func TestMigration_V14_IdempotentOnRerun(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 14 {
-		t.Errorf("expected schema_version=14 after re-run, got %d", version)
+	if version != 15 {
+		t.Errorf("expected schema_version=15 after re-run, got %d", version)
 	}
 
 	// Guard: the column is still singular (no duplicate-add error silently

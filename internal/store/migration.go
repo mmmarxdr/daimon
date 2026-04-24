@@ -164,6 +164,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 			return fmt.Errorf("migration v14: %w", err)
 		}
 	}
+	if version < 15 {
+		if err := s.migrateV15(); err != nil {
+			return fmt.Errorf("migration v15: %w", err)
+		}
+	}
 
 	// One-shot orphan cleanup (idempotent; runs every startup). Document chunks
 	// can be left behind by databases created before foreign_keys was enabled
@@ -875,3 +880,123 @@ func (s *SQLiteStore) migrateV14() error {
 
 	return tx.Commit()
 }
+
+// migrateV15 adds the per-session compaction infrastructure:
+//
+//  1. tool_outputs gains a conversation_id column so the compactor can find
+//     and delete outputs scoped to a single conversation. FTS5 doesn't support
+//     ALTER, so we recreate the virtual table preserving existing rows with
+//     conversation_id=''.
+//  2. conversations gains compacted_at + compacted_summary columns so the
+//     pruner/compactor can mark a conversation as "summarised, raw outputs
+//     evicted" and the agent can re-hydrate the summary on resume.
+//
+// Idempotent: PRAGMA-checks before ALTER, and the FTS5 recreate uses an
+// intermediate name so re-running is safe.
+// Advances schema_version to 15.
+func (s *SQLiteStore) migrateV15() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// --- Part 1: extend conversations with compaction fields ---
+	convRows, err := tx.Query(`PRAGMA table_info(conversations)`)
+	if err != nil {
+		return fmt.Errorf("reading conversations columns: %w", err)
+	}
+	convCols := map[string]bool{}
+	for convRows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := convRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			convRows.Close()
+			return fmt.Errorf("scanning conversations columns: %w", err)
+		}
+		convCols[name] = true
+	}
+	convRows.Close()
+	if err := convRows.Err(); err != nil {
+		return fmt.Errorf("iterating conversations columns: %w", err)
+	}
+	if !convCols["compacted_at"] {
+		if _, err := tx.Exec(`ALTER TABLE conversations ADD COLUMN compacted_at TIMESTAMP NULL`); err != nil {
+			return fmt.Errorf("adding compacted_at to conversations: %w", err)
+		}
+	}
+	if !convCols["compacted_summary"] {
+		if _, err := tx.Exec(`ALTER TABLE conversations ADD COLUMN compacted_summary TEXT`); err != nil {
+			return fmt.Errorf("adding compacted_summary to conversations: %w", err)
+		}
+	}
+
+	// --- Part 2: rebuild tool_outputs with conversation_id ---
+	// FTS5 virtual tables cannot be ALTERed; we copy → drop → rename.
+	// Skip if conversation_id already present (idempotent re-run).
+	hasConvID := false
+	rows, err := tx.Query(`PRAGMA table_info(tool_outputs)`)
+	if err != nil {
+		return fmt.Errorf("reading tool_outputs columns: %w", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning tool_outputs columns: %w", err)
+		}
+		if name == "conversation_id" {
+			hasConvID = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating tool_outputs columns: %w", err)
+	}
+
+	if !hasConvID {
+		// Create new table with conversation_id, copy data over with empty string
+		// for legacy rows (NULL would break FTS5 search), then swap names.
+		if _, err := tx.Exec(`
+			CREATE VIRTUAL TABLE tool_outputs_v15 USING fts5(
+				id UNINDEXED,
+				conversation_id UNINDEXED,
+				tool_name,
+				command,
+				content,
+				truncated UNINDEXED,
+				exit_code UNINDEXED,
+				timestamp UNINDEXED,
+				tokenize="porter unicode61"
+			)
+		`); err != nil {
+			return fmt.Errorf("creating tool_outputs_v15: %w", err)
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO tool_outputs_v15
+				(id, conversation_id, tool_name, command, content, truncated, exit_code, timestamp)
+			SELECT id, '', tool_name, command, content, truncated, exit_code, timestamp
+			FROM tool_outputs
+		`); err != nil {
+			return fmt.Errorf("copying tool_outputs rows: %w", err)
+		}
+		if _, err := tx.Exec(`DROP TABLE tool_outputs`); err != nil {
+			return fmt.Errorf("dropping old tool_outputs: %w", err)
+		}
+		if _, err := tx.Exec(`ALTER TABLE tool_outputs_v15 RENAME TO tool_outputs`); err != nil {
+			return fmt.Errorf("renaming tool_outputs_v15: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 15"); err != nil {
+		return fmt.Errorf("updating schema version to 15: %w", err)
+	}
+
+	return tx.Commit()
+}
+

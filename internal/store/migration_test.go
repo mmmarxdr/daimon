@@ -34,8 +34,8 @@ func TestMigration_FreshDBHasSchemaVersion(t *testing.T) {
 		t.Fatalf("reading schema_version: %v", err)
 	}
 	// Fresh DB goes through all migrations → latest version is 10.
-	if version != 14 {
-		t.Errorf("expected schema_version=14 on fresh DB, got %d", version)
+	if version != 15 {
+		t.Errorf("expected schema_version=15 on fresh DB, got %d", version)
 	}
 }
 
@@ -54,8 +54,8 @@ func TestMigration_RerunIsNoOp(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 14 {
-		t.Errorf("expected schema_version=14 after re-run, got %d", version)
+	if version != 15 {
+		t.Errorf("expected schema_version=15 after re-run, got %d", version)
 	}
 	s.Close()
 }
@@ -165,8 +165,8 @@ CREATE TABLE IF NOT EXISTS cron_results (
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 14 {
-		t.Errorf("expected schema_version=14 after all migrations, got %d", version)
+	if version != 15 {
+		t.Errorf("expected schema_version=15 after all migrations, got %d", version)
 	}
 
 	// Verify the pre-existing row survived.
@@ -277,8 +277,8 @@ func TestMigration_V3_SchemaVersionIs3(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 14 {
-		t.Errorf("expected schema_version=14, got %d", version)
+	if version != 15 {
+		t.Errorf("expected schema_version=15, got %d", version)
 	}
 }
 

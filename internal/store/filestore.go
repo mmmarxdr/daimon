@@ -319,9 +319,7 @@ func (s *FileStore) IndexOutput(_ context.Context, output ToolOutput) error {
 	if output.ToolName == "" {
 		return ErrOutputMissingToolName
 	}
-	if output.Content == "" {
-		return ErrOutputEmptyContent
-	}
+	// Empty content is a valid state (silent commands). Mirror SQLiteStore.
 	return nil
 }
 

@@ -31,6 +31,13 @@ func (f *fakePruneStore) DeleteConversationsOlderThan(_ context.Context, cutoff 
 	return n, nil
 }
 
+func (f *fakePruneStore) DeleteToolOutputsBefore(_ context.Context, _ time.Time) (int, error) {
+	if f.err != nil {
+		return 0, f.err
+	}
+	return 0, nil
+}
+
 func (f *fakePruneStore) CutoffCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

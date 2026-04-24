@@ -213,20 +213,31 @@ func TestIndexOutput_EmptyToolName_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestIndexOutput_EmptyContent_ReturnsError(t *testing.T) {
+func TestIndexOutput_EmptyContent_SubstitutesPlaceholder(t *testing.T) {
+	// Empty content is a valid state — successful side-effect commands
+	// (mkdir, touch, etc.) produce no output. The store substitutes a tiny
+	// placeholder so the row is searchable instead of rejecting the call.
 	s, err := NewSQLiteStore(config.StoreConfig{Path: t.TempDir()})
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
 	defer s.Close()
 
-	err = s.IndexOutput(context.Background(), ToolOutput{
+	if err := s.IndexOutput(context.Background(), ToolOutput{
 		ID:       "some-id",
 		ToolName: "shell",
 		Content:  "",
-	})
-	if err != ErrOutputEmptyContent {
-		t.Errorf("expected ErrOutputEmptyContent, got %v", err)
+	}); err != nil {
+		t.Fatalf("IndexOutput with empty content: unexpected error %v", err)
+	}
+
+	// Verify it was actually persisted with the placeholder so retrieval works.
+	results, err := s.SearchOutputs(context.Background(), "no output", 10)
+	if err != nil {
+		t.Fatalf("SearchOutputs: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected to find indexed output, got 0 results")
 	}
 }
 
