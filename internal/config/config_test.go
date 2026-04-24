@@ -858,6 +858,26 @@ func TestApplyDefaults_AuditPathDefault(t *testing.T) {
 	}
 }
 
+func TestApplyDefaults_AuditEnabledAndTypeDefaults(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if !BoolVal(cfg.Audit.Enabled) {
+		t.Error("Audit.Enabled default = false, want true (logs should be on by default)")
+	}
+	if cfg.Audit.Type != "sqlite" {
+		t.Errorf("Audit.Type default = %q, want %q (sqlite is the only backend that supports streaming)", cfg.Audit.Type, "sqlite")
+	}
+}
+
+func TestApplyDefaults_AuditPreservesExplicitDisable(t *testing.T) {
+	disabled := false
+	cfg := &Config{Audit: AuditConfig{Enabled: &disabled}}
+	cfg.ApplyDefaults()
+	if BoolVal(cfg.Audit.Enabled) {
+		t.Error("Audit.Enabled = true after explicit `enabled: false`; defaults should not override an explicit opt-out")
+	}
+}
+
 func TestApplyDefaults_PreservesExplicitPaths(t *testing.T) {
 	cfg := &Config{
 		Store: StoreConfig{Path: "/custom/store"},

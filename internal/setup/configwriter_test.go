@@ -285,6 +285,8 @@ func TestWriteConfig_AllowedUsersEmptyList(t *testing.T) {
 }
 
 // contains is a simple substring check helper.
+func boolPtr(b bool) *bool { return &b }
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
@@ -304,7 +306,7 @@ func minimalConfig() *config.Config {
 			Path: "~/.daimon/data",
 		},
 		Audit: config.AuditConfig{
-			Enabled: true,
+			Enabled: boolPtr(true),
 			Type:    "sqlite",
 			Path:    "~/.daimon/audit",
 		},

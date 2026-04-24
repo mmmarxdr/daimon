@@ -240,7 +240,7 @@ func TestConfigSet_BoolCoercion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if cfg.Audit.Enabled != false {
+	if config.BoolVal(cfg.Audit.Enabled) != false {
 		t.Error("expected audit.enabled to be false after set")
 	}
 }

@@ -547,9 +547,14 @@ type LimitsConfig struct {
 	TotalTimeout time.Duration `yaml:"total_timeout" json:"total_timeout"`
 }
 
+// AuditConfig controls the audit log subsystem.
+//
+// Enabled uses *bool (pointer) so that an explicitly set `enabled: false`
+// is distinguishable from the omitted/unset case (nil → default true).
+// Use BoolVal(cfg.Audit.Enabled) to read the effective value.
 type AuditConfig struct {
-	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Type    string `yaml:"type"    json:"type"` // "file" (default) | "sqlite"
+	Enabled *bool  `yaml:"enabled" json:"enabled,omitempty"`
+	Type    string `yaml:"type"    json:"type"` // "sqlite" (default) | "file"
 	Path    string `yaml:"path"    json:"path"`
 }
 
@@ -724,8 +729,14 @@ func (c *Config) ApplyDefaults() {
 	if c.Store.Path == "" {
 		c.Store.Path = "~/.daimon/data"
 	}
+	// Audit defaults.
+	// Enabled is *bool: nil means omitted → default true; non-nil means explicitly set.
+	if c.Audit.Enabled == nil {
+		t := true
+		c.Audit.Enabled = &t
+	}
 	if c.Audit.Type == "" {
-		c.Audit.Type = "file"
+		c.Audit.Type = "sqlite"
 	}
 	if c.Audit.Path == "" {
 		c.Audit.Path = "~/.daimon/audit"

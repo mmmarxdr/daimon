@@ -839,8 +839,8 @@ func TestBuildConfig_StoreTypeIsFileForAllChannels(t *testing.T) {
 			}
 
 			// Also check audit.type
-			if cfg.Audit.Type != "file" {
-				t.Errorf("buildConfig() with channel=%q produced audit.type=%q, want \"file\"", tc.channel, cfg.Audit.Type)
+			if cfg.Audit.Type != "sqlite" {
+				t.Errorf("buildConfig() with channel=%q produced audit.type=%q, want \"sqlite\"", tc.channel, cfg.Audit.Type)
 			}
 		})
 	}

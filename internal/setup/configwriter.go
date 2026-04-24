@@ -231,7 +231,7 @@ func buildAuditNode(cfg *config.Config) *yaml.Node {
 	}
 	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	n.Content = append(n.Content,
-		strNode("enabled"), boolNode(cfg.Audit.Enabled),
+		strNode("enabled"), boolNode(config.BoolVal(cfg.Audit.Enabled)),
 		strNode("type"), strNode(cfg.Audit.Type),
 		strNode("path"), strNode(auditPath),
 	)

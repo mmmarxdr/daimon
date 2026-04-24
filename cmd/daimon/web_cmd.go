@@ -91,7 +91,7 @@ func runWebCommand(args []string, cfgPath string) error {
 
 	// ---- Auditor ----
 	var aud audit.Auditor = audit.NoopAuditor{}
-	if cfg.Audit.Enabled {
+	if config.BoolVal(cfg.Audit.Enabled) {
 		switch cfg.Audit.Type {
 		case "sqlite":
 			sa, err := audit.NewSQLiteAuditor(cfg.Audit.Path)

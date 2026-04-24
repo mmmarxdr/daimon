@@ -86,10 +86,18 @@ func (s *Server) handleLogsWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	streamer, ok := s.deps.Auditor.(audit.LogStreamer)
 	if !ok {
+		var msg string
+		switch s.deps.Auditor.(type) {
+		case audit.NoopAuditor:
+			msg = "Audit log is disabled. Set audit.enabled: true in your config (defaults to sqlite, which supports streaming)."
+		default:
+			msg = "Streaming requires the sqlite audit backend. Set audit.type: sqlite in your config to enable live logs."
+		}
 		_ = conn.WriteJSON(wsLogEntry{
-			Time:  time.Now().UTC().Format(time.RFC3339),
-			Level: "INFO",
-			Msg:   "Log streaming not available (audit backend does not support RecentEvents)",
+			Time:      time.Now().UTC().Format(time.RFC3339),
+			Level:     "WARN",
+			Msg:       msg,
+			EventType: "stream_unavailable",
 		})
 		for {
 			if _, _, err := conn.NextReader(); err != nil {

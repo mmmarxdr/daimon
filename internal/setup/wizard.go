@@ -764,8 +764,9 @@ func (m WizardModel) buildConfig() *config.Config {
 	if cfg.Store.Path == "" {
 		cfg.Store.Path = "~/.daimon/data"
 	}
-	cfg.Audit.Enabled = true
-	cfg.Audit.Type = "file"
+	auditEnabled := true
+	cfg.Audit.Enabled = &auditEnabled
+	cfg.Audit.Type = "sqlite"
 	cfg.Audit.Path = "~/.daimon/audit"
 	return cfg
 }
