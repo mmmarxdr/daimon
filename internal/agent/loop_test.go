@@ -599,15 +599,18 @@ func TestProcessMessage_ProviderError(t *testing.T) {
 	// Should not panic
 	ag.processMessage(context.Background(), channel.IncomingMessage{ChannelID: "test", Content: content.TextBlock("hello")})
 
+	// formatProviderError surfaces the underlying provider error wrapped in
+	// parentheses; for an unmatched error string ("api down") we fall through
+	// to the generic "(provider error: ...)" branch.
 	found := false
 	for _, msg := range ch.sent {
-		if strings.Contains(msg.Text, "AI provider returned an error") {
+		if strings.Contains(msg.Text, "provider error") && strings.Contains(msg.Text, "api down") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected generic provider error message sent to channel; got: %v", ch.sent)
+		t.Errorf("expected provider error message including raw error; got: %v", ch.sent)
 	}
 }
 

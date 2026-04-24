@@ -32,6 +32,42 @@ func isCronMessage(channelID string) bool {
 	return len(channelID) > 5 && channelID[:5] == "cron:"
 }
 
+// formatProviderError produces a user-facing message for a failed LLM call.
+// Common upstream conditions (rate limit, auth, context window) get specific
+// guidance instead of the generic "try again" so the user knows whether to
+// retry, switch model, or fix config.
+func formatProviderError(err error) string {
+	if err == nil {
+		return "The AI provider returned an empty error. Please try again."
+	}
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate-limit"):
+		return "(rate-limited by the provider — pick another model in Settings, " +
+			"wait a minute and retry, or add your own provider key in OpenRouter " +
+			"integrations to lift the shared free-tier cap.)"
+	case strings.Contains(lower, "401") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "invalid api key"):
+		return "(provider rejected the API key — check Settings → Provider and re-validate.)"
+	case strings.Contains(lower, "402") || strings.Contains(lower, "payment") || strings.Contains(lower, "insufficient credit"):
+		return "(provider says: out of credits / payment required — top up the account or switch provider.)"
+	case strings.Contains(lower, "404") || strings.Contains(lower, "model not found"):
+		return "(the configured model doesn't exist on this provider — pick a different model in Settings.)"
+	case strings.Contains(lower, "context length") || strings.Contains(lower, "maximum context") || strings.Contains(lower, "too many tokens"):
+		return "(the conversation is too long for this model's context window — start a new conversation or pick a longer-context model.)"
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded"):
+		return "(the provider call timed out — retry, or pick a faster model.)"
+	default:
+		// Surface the raw provider error truncated for sanity. Useful for
+		// uncommon conditions where guessing would hide real info.
+		const max = 280
+		if len(msg) > max {
+			msg = msg[:max] + "…"
+		}
+		return "(provider error: " + msg + ")"
+	}
+}
+
 func userScope(channelID, senderID string) string {
 	if senderID == "" {
 		return channelID
@@ -251,7 +287,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 
-	systemPrompt := a.buildSystemPrompt(memories, ragResults)
+	systemPrompt := a.buildSystemPrompt(memories, ragResults, conv.CompactedSummary)
 	toolDefs := a.buildToolDefs()
 	conv.Messages = a.contextMgr.Manage(ctx, systemPrompt, toolDefs, conv.Messages)
 
@@ -387,6 +423,19 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						"iteration":       i,
 						"conversation_id": conv.ID,
 					})
+					// Always send turn_end after turn_timeout_reached so the UI
+					// can clear isWaiting / turnStatus.active. Without this the
+					// chat sits forever showing "Processing iteration N…" even
+					// though the agent already returned server-side.
+					_ = telemetry.EmitTelemetry(ctx, msg.ChannelID, map[string]any{
+						"type":                "turn_end",
+						"elapsed_ms":          time.Since(turnStart).Milliseconds(),
+						"total_input_tokens":  totalInputTokens,
+						"total_output_tokens": totalOutputTokens,
+						"iterations":          i,
+						"conversation_id":     conv.ID,
+						"stop_reason":         "turn_timeout",
+					})
 				} else {
 					_ = a.channel.Send(ctx, channel.OutgoingMessage{
 						ChannelID: msg.ChannelID,
@@ -399,9 +448,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				return
 			}
 			slog.Error("provider chat failed", "error", err, "channel_id", msg.ChannelID)
+			// Surface a useful message to the user instead of a generic "try
+			// again". Rate limits in particular are common with shared
+			// OpenRouter free-tier and the user needs to know to switch model
+			// or BYOK — not just retry blindly.
 			errMsg := channel.OutgoingMessage{
 				ChannelID: msg.ChannelID,
-				Text:      "The AI provider returned an error. Please try again in a moment.",
+				Text:      formatProviderError(err),
 			}
 			if isCronMessage(msg.ChannelID) {
 				errMsg.Metadata = map[string]string{"cron_error": "true"}
@@ -415,6 +468,25 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			Model: a.provider.Model(), InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			StopReason: resp.StopReason, Iteration: i,
 		})
+		// Persist cost to store.cost_records for the metrics endpoint and the
+		// `daimon costs` CLI. Independent from audit — metrics must work
+		// regardless of audit settings (audit is opt-in, metrics is core UX).
+		if cs, ok := a.store.(store.CostStore); ok {
+			modelName := a.provider.Model()
+			inCost, outCost := audit.EstimateCostSplit(modelName, int64(resp.Usage.InputTokens), int64(resp.Usage.OutputTokens))
+			_ = cs.RecordCost(ctx, store.CostRecord{
+				ID:            uuid.New().String(),
+				SessionID:     conv.ID,
+				ChannelID:     msg.ChannelID,
+				Model:         modelName,
+				InputTokens:   resp.Usage.InputTokens,
+				OutputTokens:  resp.Usage.OutputTokens,
+				InputCostUSD:  inCost,
+				OutputCostUSD: outCost,
+				TotalCostUSD:  inCost + outCost,
+				Timestamp:     llmStart,
+			})
+		}
 		totalInputTokens += resp.Usage.InputTokens
 		totalOutputTokens += resp.Usage.OutputTokens
 		if hasTelemetry {
@@ -544,7 +616,9 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				}
 			}
 
+			a.toolsMu.RLock()
 			t, ok := a.tools[tc.Name]
+			a.toolsMu.RUnlock()
 
 			var result tool.ToolResult
 			toolStart := time.Now()
@@ -577,6 +651,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						}
 						toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
 						toolCtx = tool.WithScope(toolCtx, scope)
+						toolCtx = tool.WithConvID(toolCtx, conv.ID)
 						result, err = executeWithRecover(toolCtx, t, tc.Input)
 						tCancel()
 						if err != nil {
@@ -627,13 +702,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				// succeed with no stdout (e.g. `touch foo`).
 				if result.Content != "" {
 					output := store.ToolOutput{
-						ID:        tc.ID,
-						ToolName:  tc.Name,
-						Command:   cmd,
-						Content:   result.Content,
-						Truncated: truncated,
-						ExitCode:  exitCode,
-						Timestamp: time.Now().UTC(),
+						ID:             tc.ID,
+						ConversationID: conv.ID,
+						ToolName:       tc.Name,
+						Command:        cmd,
+						Content:        result.Content,
+						Truncated:      truncated,
+						ExitCode:       exitCode,
+						Timestamp:      time.Now().UTC(),
 					}
 					if a.indexWorker != nil {
 						a.indexWorker.Enqueue(output)
