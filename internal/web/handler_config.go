@@ -21,10 +21,42 @@ import (
 // http) can be replaced without touching tools.web_fetch or tools.mcp, which
 // the UI does not expose.
 type patchBody struct {
-	Providers map[string]config.ProviderCredentials `json:"providers,omitempty"`
-	Models    *config.ModelsConfig                  `json:"models,omitempty"`
-	Tools     *patchTools                           `json:"tools,omitempty"`
-	RAG       *patchRAG                             `json:"rag,omitempty"`
+	Providers     map[string]config.ProviderCredentials `json:"providers,omitempty"`
+	Models        *config.ModelsConfig                  `json:"models,omitempty"`
+	Tools         *patchTools                           `json:"tools,omitempty"`
+	RAG           *patchRAG                             `json:"rag,omitempty"`
+	Conversations *patchConversations                   `json:"conversations,omitempty"`
+	AI            *patchAI                              `json:"ai,omitempty"`
+}
+
+// patchConversations accepts the UI-editable subtree of ConversationsConfig.
+// Every new field added to the settings UI MUST also be allow-listed here or
+// the JSON decoder silently drops it (same bug class as rag-hyde T16).
+type patchConversations struct {
+	Prune *patchPruneConfig `json:"prune,omitempty"`
+}
+
+// patchPruneConfig mirrors config.PruneConfig with a pointer for Enabled so
+// "user explicitly sent false" is distinguishable from "absent key".
+type patchPruneConfig struct {
+	Enabled       *bool `json:"enabled,omitempty"`
+	RetentionDays int   `json:"retention_days,omitempty"`
+	IntervalHours int   `json:"interval_hours,omitempty"`
+}
+
+// patchAI accepts the UI-editable subtree of AIConfig.
+type patchAI struct {
+	TitleGeneration *patchTitleGenConfig `json:"title_generation,omitempty"`
+}
+
+// patchTitleGenConfig mirrors config.TitleGenYAMLConfig. Enabled uses *bool
+// for the same reason as patchRAGHyde.Enabled.
+type patchTitleGenConfig struct {
+	Enabled       *bool  `json:"enabled,omitempty"`
+	Model         string `json:"model,omitempty"`
+	WorkerCount   int    `json:"worker_count,omitempty"`
+	QueueSize     int    `json:"queue_size,omitempty"`
+	CallTimeoutMS int    `json:"call_timeout_ms,omitempty"`
 }
 
 // patchTools mirrors config.ToolsConfig but with pointer fields so absent
@@ -261,6 +293,44 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		merged.RAG.Metrics.Enabled = p.Enabled
 		if p.BufferSize != 0 {
 			merged.RAG.Metrics.BufferSize = p.BufferSize
+		}
+	}
+
+	// Merge body.Conversations.Prune field-by-field. Enabled uses a *bool so
+	// that "user explicitly sent false" is respected; the other numeric
+	// fields use zero-as-absent (ApplyDefaults re-clamps after).
+	if patch.Conversations != nil && patch.Conversations.Prune != nil {
+		p := *patch.Conversations.Prune
+		if p.Enabled != nil {
+			merged.Conversations.Prune.Enabled = *p.Enabled
+		}
+		if p.RetentionDays != 0 {
+			merged.Conversations.Prune.RetentionDays = p.RetentionDays
+		}
+		if p.IntervalHours != 0 {
+			merged.Conversations.Prune.IntervalHours = p.IntervalHours
+		}
+	}
+
+	// Merge body.AI.TitleGeneration field-by-field. Enabled *bool per above;
+	// Model is a string where "" means "absent" (not "explicitly clear") —
+	// clearing the model override is not a UI concern in v1.
+	if patch.AI != nil && patch.AI.TitleGeneration != nil {
+		p := *patch.AI.TitleGeneration
+		if p.Enabled != nil {
+			merged.AI.TitleGeneration.Enabled = *p.Enabled
+		}
+		if p.Model != "" {
+			merged.AI.TitleGeneration.Model = p.Model
+		}
+		if p.WorkerCount != 0 {
+			merged.AI.TitleGeneration.WorkerCount = p.WorkerCount
+		}
+		if p.QueueSize != 0 {
+			merged.AI.TitleGeneration.QueueSize = p.QueueSize
+		}
+		if p.CallTimeoutMS != 0 {
+			merged.AI.TitleGeneration.CallTimeoutMS = p.CallTimeoutMS
 		}
 	}
 

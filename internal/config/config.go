@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -123,6 +124,43 @@ type Config struct {
 	SkillsDir         string   `yaml:"skills_dir"          json:"skills_dir"`
 	SkillsRegistryURL string   `yaml:"skills_registry_url" json:"skills_registry_url"`
 	RAG               RAGConfig `yaml:"rag"                json:"rag"`
+
+	// Conversations scopes conversation-lifecycle concerns (soft-delete pruner,
+	// future retention policies). Title generation lives under AI because it
+	// consumes an LLM call per conv and is opt-out even when the pruner is on.
+	Conversations ConversationsConfig `yaml:"conversations" json:"conversations"`
+	AI            AIConfig            `yaml:"ai"            json:"ai"`
+}
+
+// ConversationsConfig groups conversation-lifecycle knobs.
+type ConversationsConfig struct {
+	Prune PruneConfig `yaml:"prune" json:"prune"`
+}
+
+// PruneConfig configures the soft-delete pruner goroutine. Values are
+// clamped into valid ranges by ApplyDefaults; see clampPruneConfig.
+type PruneConfig struct {
+	Enabled       bool `yaml:"enabled"        json:"enabled"`
+	RetentionDays int  `yaml:"retention_days" json:"retention_days"` // clamped 1..3650, default 30
+	IntervalHours int  `yaml:"interval_hours" json:"interval_hours"` // clamped 1..168, default 6
+}
+
+// AIConfig groups LLM-assisted feature knobs that don't belong under a
+// specific subsystem (memory, RAG). Today just title generation.
+type AIConfig struct {
+	TitleGeneration TitleGenYAMLConfig `yaml:"title_generation" json:"title_generation"`
+}
+
+// TitleGenYAMLConfig configures the async LLM title worker. Empty Model
+// means "use the provider's default" — the title worker reuses the main
+// chat provider when no explicit model is set. Per-provider cheap-tier
+// override is deferred as a follow-up.
+type TitleGenYAMLConfig struct {
+	Enabled       bool   `yaml:"enabled"         json:"enabled"`
+	Model         string `yaml:"model,omitempty" json:"model,omitempty"`
+	WorkerCount   int    `yaml:"worker_count"    json:"worker_count"`   // clamped 1..8, default 2
+	QueueSize     int    `yaml:"queue_size"      json:"queue_size"`     // clamped 4..256, default 32
+	CallTimeoutMS int    `yaml:"call_timeout_ms" json:"call_timeout_ms"` // clamped 1000..120000, default 30000
 }
 
 // FilterConfig controls post-execution tool output compression.
@@ -827,6 +865,9 @@ func (c *Config) ApplyDefaults() {
 	// Smart memory defaults.
 	c.setMemoryDefaults()
 
+	// Conversations (soft-delete pruner) + AI (title generation) defaults.
+	c.setConversationsAndAIDefaults()
+
 	// Notifications defaults.
 	if c.Notifications.MaxPerMinute == 0 {
 		c.Notifications.MaxPerMinute = 30
@@ -915,6 +956,98 @@ func (c *Config) setMemoryDefaults() {
 	}
 	if c.Agent.Memory.Consolidation.KeepNewest == 0 {
 		c.Agent.Memory.Consolidation.KeepNewest = 3
+	}
+}
+
+// setConversationsAndAIDefaults applies defaults + clamps for the soft-delete
+// pruner (Conversations.Prune) and the title-generation worker
+// (AI.TitleGeneration). Out-of-range values are clamped to the nearest valid
+// bound; a slog.Warn is emitted for each clamp so operators see the override.
+func (c *Config) setConversationsAndAIDefaults() {
+	// --- Conversations.Prune ---
+	// Enabled: YAML zero-value is false but product default is true. Use a
+	// narrow "both false → set true" heuristic: if the entire struct is
+	// zero-valued we treat that as "user left it alone" and default-on. If
+	// the user explicitly set enabled: false AND any other field, Enabled
+	// stays false. This matches the RAG.Metrics defaulting pattern already
+	// in this file (see setRAGDefaults earlier for precedent).
+	if c.Conversations.Prune.RetentionDays == 0 &&
+		c.Conversations.Prune.IntervalHours == 0 &&
+		!c.Conversations.Prune.Enabled {
+		c.Conversations.Prune.Enabled = true
+	}
+	if c.Conversations.Prune.RetentionDays == 0 {
+		c.Conversations.Prune.RetentionDays = 30
+	}
+	if c.Conversations.Prune.IntervalHours == 0 {
+		c.Conversations.Prune.IntervalHours = 6
+	}
+	// Clamps.
+	if c.Conversations.Prune.RetentionDays < 1 {
+		slog.Warn("config: conversations.prune.retention_days below 1 — clamped",
+			"given", c.Conversations.Prune.RetentionDays, "clamped_to", 1)
+		c.Conversations.Prune.RetentionDays = 1
+	}
+	if c.Conversations.Prune.RetentionDays > 3650 {
+		slog.Warn("config: conversations.prune.retention_days above 3650 — clamped",
+			"given", c.Conversations.Prune.RetentionDays, "clamped_to", 3650)
+		c.Conversations.Prune.RetentionDays = 3650
+	}
+	if c.Conversations.Prune.IntervalHours < 1 {
+		slog.Warn("config: conversations.prune.interval_hours below 1 — clamped",
+			"given", c.Conversations.Prune.IntervalHours, "clamped_to", 1)
+		c.Conversations.Prune.IntervalHours = 1
+	}
+	if c.Conversations.Prune.IntervalHours > 168 {
+		slog.Warn("config: conversations.prune.interval_hours above 168 — clamped",
+			"given", c.Conversations.Prune.IntervalHours, "clamped_to", 168)
+		c.Conversations.Prune.IntervalHours = 168
+	}
+
+	// --- AI.TitleGeneration ---
+	tg := &c.AI.TitleGeneration
+	if tg.WorkerCount == 0 && tg.QueueSize == 0 && tg.CallTimeoutMS == 0 && !tg.Enabled {
+		tg.Enabled = true
+	}
+	if tg.WorkerCount == 0 {
+		tg.WorkerCount = 2
+	}
+	if tg.QueueSize == 0 {
+		tg.QueueSize = 32
+	}
+	if tg.CallTimeoutMS == 0 {
+		tg.CallTimeoutMS = 30000
+	}
+	// Clamps.
+	if tg.WorkerCount < 1 {
+		slog.Warn("config: ai.title_generation.worker_count below 1 — clamped",
+			"given", tg.WorkerCount, "clamped_to", 1)
+		tg.WorkerCount = 1
+	}
+	if tg.WorkerCount > 8 {
+		slog.Warn("config: ai.title_generation.worker_count above 8 — clamped",
+			"given", tg.WorkerCount, "clamped_to", 8)
+		tg.WorkerCount = 8
+	}
+	if tg.QueueSize < 4 {
+		slog.Warn("config: ai.title_generation.queue_size below 4 — clamped",
+			"given", tg.QueueSize, "clamped_to", 4)
+		tg.QueueSize = 4
+	}
+	if tg.QueueSize > 256 {
+		slog.Warn("config: ai.title_generation.queue_size above 256 — clamped",
+			"given", tg.QueueSize, "clamped_to", 256)
+		tg.QueueSize = 256
+	}
+	if tg.CallTimeoutMS < 1000 {
+		slog.Warn("config: ai.title_generation.call_timeout_ms below 1000 — clamped",
+			"given", tg.CallTimeoutMS, "clamped_to", 1000)
+		tg.CallTimeoutMS = 1000
+	}
+	if tg.CallTimeoutMS > 120000 {
+		slog.Warn("config: ai.title_generation.call_timeout_ms above 120000 — clamped",
+			"given", tg.CallTimeoutMS, "clamped_to", 120000)
+		tg.CallTimeoutMS = 120000
 	}
 }
 

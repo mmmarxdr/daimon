@@ -2013,3 +2013,124 @@ func TestApplyDefaults_RAGHyDE_DisabledByDefault(t *testing.T) {
 		t.Error("RAG.Hyde.Enabled must be false by default (opt-in)")
 	}
 }
+
+// --- conversations-liminal-resume — Group A1 tests ---
+
+func TestApplyDefaults_ConversationsPrune_Defaults(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+
+	if !cfg.Conversations.Prune.Enabled {
+		t.Error("Conversations.Prune.Enabled must default to true on a blank config")
+	}
+	if cfg.Conversations.Prune.RetentionDays != 30 {
+		t.Errorf("RetentionDays default: got %d, want 30", cfg.Conversations.Prune.RetentionDays)
+	}
+	if cfg.Conversations.Prune.IntervalHours != 6 {
+		t.Errorf("IntervalHours default: got %d, want 6", cfg.Conversations.Prune.IntervalHours)
+	}
+}
+
+func TestApplyDefaults_TitleGeneration_Defaults(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+
+	tg := cfg.AI.TitleGeneration
+	if !tg.Enabled {
+		t.Error("AI.TitleGeneration.Enabled must default to true")
+	}
+	if tg.WorkerCount != 2 {
+		t.Errorf("WorkerCount default: got %d, want 2", tg.WorkerCount)
+	}
+	if tg.QueueSize != 32 {
+		t.Errorf("QueueSize default: got %d, want 32", tg.QueueSize)
+	}
+	if tg.CallTimeoutMS != 30000 {
+		t.Errorf("CallTimeoutMS default: got %d, want 30000", tg.CallTimeoutMS)
+	}
+}
+
+func TestApplyDefaults_PruneClamps(t *testing.T) {
+	cases := []struct {
+		name             string
+		inRetentionDays  int
+		inIntervalHours  int
+		wantRetention    int
+		wantInterval     int
+	}{
+		{"too low", -5, 0, 1, 6},
+		{"retention too high", 5000, 6, 3650, 6},
+		{"interval too high", 30, 999, 30, 168},
+		{"exact lower bound", 1, 1, 1, 1},
+		{"exact upper bound", 3650, 168, 3650, 168},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.Conversations.Prune.Enabled = true
+			cfg.Conversations.Prune.RetentionDays = tc.inRetentionDays
+			cfg.Conversations.Prune.IntervalHours = tc.inIntervalHours
+			cfg.ApplyDefaults()
+			if cfg.Conversations.Prune.RetentionDays != tc.wantRetention {
+				t.Errorf("RetentionDays: got %d, want %d", cfg.Conversations.Prune.RetentionDays, tc.wantRetention)
+			}
+			if cfg.Conversations.Prune.IntervalHours != tc.wantInterval {
+				t.Errorf("IntervalHours: got %d, want %d", cfg.Conversations.Prune.IntervalHours, tc.wantInterval)
+			}
+		})
+	}
+}
+
+func TestApplyDefaults_TitleGenClamps(t *testing.T) {
+	cases := []struct {
+		name                string
+		inWorkers, inQueue  int
+		inTimeoutMS         int
+		wantWorkers         int
+		wantQueue           int
+		wantTimeoutMS       int
+	}{
+		{"workers too low", 0, 0, 0, 2, 32, 30000},                  // zero → default
+		{"workers negative → clamped low", -3, 32, 30000, 1, 32, 30000},
+		{"workers too high", 20, 32, 30000, 8, 32, 30000},
+		{"queue too low", 2, 2, 30000, 2, 4, 30000},
+		{"queue too high", 2, 999, 30000, 2, 256, 30000},
+		{"timeout too low", 2, 32, 500, 2, 32, 1000},
+		{"timeout too high", 2, 32, 999999, 2, 32, 120000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{}
+			cfg.AI.TitleGeneration.Enabled = true
+			cfg.AI.TitleGeneration.WorkerCount = tc.inWorkers
+			cfg.AI.TitleGeneration.QueueSize = tc.inQueue
+			cfg.AI.TitleGeneration.CallTimeoutMS = tc.inTimeoutMS
+			cfg.ApplyDefaults()
+			tg := cfg.AI.TitleGeneration
+			if tg.WorkerCount != tc.wantWorkers {
+				t.Errorf("WorkerCount: got %d, want %d", tg.WorkerCount, tc.wantWorkers)
+			}
+			if tg.QueueSize != tc.wantQueue {
+				t.Errorf("QueueSize: got %d, want %d", tg.QueueSize, tc.wantQueue)
+			}
+			if tg.CallTimeoutMS != tc.wantTimeoutMS {
+				t.Errorf("CallTimeoutMS: got %d, want %d", tg.CallTimeoutMS, tc.wantTimeoutMS)
+			}
+		})
+	}
+}
+
+func TestApplyDefaults_PruneExplicitlyDisabled_Preserved(t *testing.T) {
+	// If the user explicitly sets enabled=false with a non-zero field, the
+	// "all zeros → default on" heuristic must NOT flip it back on.
+	cfg := &Config{}
+	cfg.Conversations.Prune.Enabled = false
+	cfg.Conversations.Prune.RetentionDays = 7 // non-zero signals explicit config
+	cfg.ApplyDefaults()
+	if cfg.Conversations.Prune.Enabled {
+		t.Error("explicit enabled=false with set RetentionDays must be preserved")
+	}
+	if cfg.Conversations.Prune.RetentionDays != 7 {
+		t.Errorf("RetentionDays: got %d, want 7", cfg.Conversations.Prune.RetentionDays)
+	}
+}

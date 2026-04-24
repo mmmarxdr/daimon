@@ -159,6 +159,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 			return fmt.Errorf("migration v13: %w", err)
 		}
 	}
+	if version < 14 {
+		if err := s.migrateV14(); err != nil {
+			return fmt.Errorf("migration v14: %w", err)
+		}
+	}
 
 	// One-shot orphan cleanup (idempotent; runs every startup). Document chunks
 	// can be left behind by databases created before foreign_keys was enabled
@@ -806,6 +811,66 @@ func (s *SQLiteStore) migrateV13() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 13"); err != nil {
 		return fmt.Errorf("updating schema version to 13: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV14 adds the deleted_at column to the conversations table and a
+// partial index on it, enabling soft delete with pruner-based retention.
+// New databases get the column via the v14 migration running against the
+// base schema (which does NOT include deleted_at — the column is added
+// exclusively here so existing DBs and fresh DBs follow the same path).
+//
+// Idempotent: checks PRAGMA table_info before ALTER so re-running is safe.
+// Advances schema_version to 14.
+func (s *SQLiteStore) migrateV14() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	rows, err := tx.Query(`PRAGMA table_info(conversations)`)
+	if err != nil {
+		return fmt.Errorf("reading table_info for conversations: %w", err)
+	}
+	hasCol := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning table_info row: %w", err)
+		}
+		if name == "deleted_at" {
+			hasCol = true
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating table_info rows: %w", err)
+	}
+
+	if !hasCol {
+		if _, err := tx.Exec(`ALTER TABLE conversations ADD COLUMN deleted_at TIMESTAMP NULL`); err != nil {
+			return fmt.Errorf("adding deleted_at column to conversations: %w", err)
+		}
+	}
+
+	// Partial index: only non-null rows, keeps the index compact because most
+	// rows are live (deleted_at IS NULL). The pruner scans this to find
+	// expired soft-deletes; live reads filter by `deleted_at IS NULL` which
+	// the query planner can satisfy from the main table.
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_conversations_deleted_at
+		ON conversations(deleted_at) WHERE deleted_at IS NOT NULL`); err != nil {
+		return fmt.Errorf("creating idx_conversations_deleted_at: %w", err)
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 14"); err != nil {
+		return fmt.Errorf("updating schema version to 14: %w", err)
 	}
 
 	return tx.Commit()

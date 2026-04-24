@@ -16,6 +16,15 @@ type IncomingMessage struct {
 	Metadata  map[string]string // channel-specific data
 	Timestamp time.Time
 
+	// ConversationID, when non-empty, overrides the (ChannelID, SenderID) →
+	// convID derivation in the agent loop. It lets a client resume a prior
+	// conversation across sessions by passing the exact convID via the
+	// channel handshake (e.g., the `?conversation_id=` query param on the
+	// web WS upgrade). Empty means "fall back to userScope" — pre-existing
+	// behavior, used by every non-web channel and by web clients that are
+	// not resuming.
+	ConversationID string
+
 	// IsContinuation signals that this "message" is a resume request for a
 	// turn that previously hit the iteration limit. When true, the agent
 	// MUST NOT append a user message to the conversation and instead

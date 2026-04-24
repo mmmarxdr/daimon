@@ -494,3 +494,71 @@ func TestHandlePutConfig_RAGEmbeddingPreservesAPIKeyWhenAbsent(t *testing.T) {
 		t.Errorf("model should update: got %q", got)
 	}
 }
+
+// --- conversations-liminal-resume — Group A1 regression guards ---
+
+func TestHandlePutConfig_ConversationsPrunePersists(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Web.AuthToken = "secret-token"
+
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+	s := newConfigTestServer(cfg, cfgPath)
+
+	body := []byte(`{"conversations":{"prune":{"enabled":false,"retention_days":14,"interval_hours":12}}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader("secret-token"))
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	p := s.deps.Config.Conversations.Prune
+	if p.Enabled {
+		t.Errorf("Prune.Enabled: want false (explicit), got %v", p.Enabled)
+	}
+	if p.RetentionDays != 14 {
+		t.Errorf("Prune.RetentionDays: want 14, got %d", p.RetentionDays)
+	}
+	if p.IntervalHours != 12 {
+		t.Errorf("Prune.IntervalHours: want 12, got %d", p.IntervalHours)
+	}
+}
+
+func TestHandlePutConfig_AITitleGenerationPersists(t *testing.T) {
+	cfg := minimalConfig()
+	cfg.Web.AuthToken = "secret-token"
+
+	dir := t.TempDir()
+	cfgPath := dir + "/config.yaml"
+	s := newConfigTestServer(cfg, cfgPath)
+
+	body := []byte(`{"ai":{"title_generation":{"enabled":true,"model":"haiku","worker_count":4,"queue_size":64,"call_timeout_ms":15000}}}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", authHeader("secret-token"))
+	rec := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	tg := s.deps.Config.AI.TitleGeneration
+	if !tg.Enabled {
+		t.Errorf("TitleGen.Enabled: want true, got %v", tg.Enabled)
+	}
+	if tg.Model != "haiku" {
+		t.Errorf("TitleGen.Model: want haiku, got %q", tg.Model)
+	}
+	if tg.WorkerCount != 4 {
+		t.Errorf("TitleGen.WorkerCount: want 4, got %d", tg.WorkerCount)
+	}
+	if tg.QueueSize != 64 {
+		t.Errorf("TitleGen.QueueSize: want 64, got %d", tg.QueueSize)
+	}
+	if tg.CallTimeoutMS != 15000 {
+		t.Errorf("TitleGen.CallTimeoutMS: want 15000, got %d", tg.CallTimeoutMS)
+	}
+}
