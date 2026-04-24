@@ -67,7 +67,12 @@ func (s *MCPService) List(_ context.Context) ([]ServerStatus, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
-	if !cfg.Tools.MCP.Enabled || len(cfg.Tools.MCP.Servers) == 0 {
+	// NOTE: We deliberately do NOT gate the listing on `tools.mcp.enabled`.
+	// The flag controls whether the agent wires these servers as tools at
+	// boot — not whether the dashboard can see them. Hiding configured
+	// servers when the toggle is off makes "I added one but it disappeared"
+	// look like a broken add path. Show them, mark Enabled state separately.
+	if len(cfg.Tools.MCP.Servers) == 0 {
 		return []ServerStatus{}, nil
 	}
 
@@ -117,6 +122,13 @@ func (s *MCPService) Add(_ context.Context, cfg config.MCPServerConfig) error {
 		if srv.Name == cfg.Name {
 			return fmt.Errorf("server %q: %w", cfg.Name, ErrDuplicateName)
 		}
+	}
+
+	// First-server convenience: auto-enable the MCP subsystem so users
+	// don't have to flip a separate toggle in Settings before their
+	// freshly-added server actually loads on next agent boot.
+	if !fullCfg.Tools.MCP.Enabled {
+		fullCfg.Tools.MCP.Enabled = true
 	}
 
 	fullCfg.Tools.MCP.Servers = append(fullCfg.Tools.MCP.Servers, cfg)

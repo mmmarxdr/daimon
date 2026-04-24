@@ -18,6 +18,7 @@ import (
 	"daimon/internal/provider"
 	"daimon/internal/rag"
 	"daimon/internal/rag/metrics"
+	"daimon/internal/skill"
 	"daimon/internal/store"
 	"daimon/internal/tool"
 	"daimon/internal/web/modelcache"
@@ -42,6 +43,19 @@ type providerRegistry interface {
 	RegisterTransient(name string, p provider.Provider)
 }
 
+// AgentReloader is the slice of *agent.Agent the web layer needs to push
+// hot-add events (new MCP server, new skill) into the running agent
+// without requiring a daimon restart. The interface is defined here so
+// the web package does not pull in agent.go's heavy import graph; the
+// concrete *agent.Agent satisfies it via duck typing.
+//
+// Nil-safe: handlers always check `if s.deps.Agent != nil` before calling.
+type AgentReloader interface {
+	RegisterMCPServer(serverName string, tools map[string]tool.Tool, caller interface{ Close() error })
+	UnregisterMCPServer(serverName string) error
+	ReplaceSkills(skills []skill.SkillContent, idx skill.SkillIndex)
+}
+
 // ServerDeps holds the dependencies for the web server.
 type ServerDeps struct {
 	Store           store.Store
@@ -49,6 +63,7 @@ type ServerDeps struct {
 	Config          *config.Config
 	ConfigPath      string               // resolved path to config.yaml (for MCP/skill operations)
 	MCPService      MCPManager
+	Agent           AgentReloader        // optional; enables hot-reload of MCP/skills from the dashboard
 	ProviderRegistry providerRegistry      // nil until Phase 6 wiring is complete
 	ModelCache       *modelcache.Cache     // nil until Phase 5 wiring is complete; handler creates a default if nil
 	Tools            map[string]tool.Tool  // registered tool instances

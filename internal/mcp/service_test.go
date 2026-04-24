@@ -69,7 +69,11 @@ func TestMCPService_List_Empty(t *testing.T) {
 	}
 }
 
-func TestMCPService_List_MCPDisabled(t *testing.T) {
+func TestMCPService_List_MCPDisabled_StillReturnsConfiguredServers(t *testing.T) {
+	// List must show what's configured regardless of the enabled flag —
+	// hiding entries when MCP is disabled creates the illusion that adding
+	// a server failed silently (the dashboard add-flow was hitting this).
+	// The flag controls wiring at boot, not display.
 	dir := t.TempDir()
 	path := writeTestConfig(t, dir, []config.MCPServerConfig{stdioServer("s1")}, false)
 	svc := NewMCPService(path)
@@ -77,8 +81,11 @@ func TestMCPService_List_MCPDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(statuses) != 0 {
-		t.Fatalf("expected empty slice for disabled MCP, got %d entries", len(statuses))
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 status (display ignores enabled flag), got %d", len(statuses))
+	}
+	if statuses[0].Config.Name != "s1" {
+		t.Errorf("expected name=s1, got %q", statuses[0].Config.Name)
 	}
 }
 

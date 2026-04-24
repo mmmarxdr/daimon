@@ -201,3 +201,59 @@ func BuildMCPToolsWithConnector(
 
 	return toolMap, manager, nil
 }
+
+// ConnectSingleServer connects to one MCP server and returns its tool
+// adapters plus the underlying client (so the caller can Close() it later).
+//
+// Used by the dashboard's hot-add flow: after a user adds an MCP from the
+// catalog, we want to register its tools with the running agent immediately
+// instead of waiting for the next daimon restart. Errors here are real —
+// unlike BuildMCPTools which is best-effort across many servers, this is
+// caller-driven so the failure must surface.
+func ConnectSingleServer(ctx context.Context, cfg config.MCPServerConfig) (map[string]tool.Tool, MCPCaller, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("validate %q: %w", cfg.Name, err)
+	}
+
+	connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	var caller listableClient
+	var err error
+	switch cfg.Transport {
+	case "stdio":
+		caller, err = connectStdioListable(connectCtx, cfg)
+	case "http":
+		caller, err = connectHTTPListable(connectCtx, cfg)
+	default:
+		return nil, nil, fmt.Errorf("unknown transport %q for %q", cfg.Transport, cfg.Name)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect %q: %w", cfg.Name, err)
+	}
+
+	listResult, err := caller.ListTools(connectCtx, mcp.ListToolsRequest{})
+	if err != nil {
+		_ = caller.Close()
+		return nil, nil, fmt.Errorf("list tools from %q: %w", cfg.Name, err)
+	}
+
+	toolMap := make(map[string]tool.Tool, len(listResult.Tools))
+	for _, t := range listResult.Tools {
+		remoteName := t.Name
+		toolName := t.Name
+		if cfg.PrefixTools {
+			toolName = cfg.Name + "_" + t.Name
+		}
+		toolMap[toolName] = &MCPToolAdapter{
+			caller:     caller,
+			remoteName: remoteName,
+			toolDef: mcp.Tool{
+				Name:        toolName,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			},
+		}
+	}
+	return toolMap, caller, nil
+}

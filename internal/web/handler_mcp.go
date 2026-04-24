@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -72,9 +73,24 @@ func (s *Server) handleAddMCPServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Hot-add into the running agent so the new tools are usable on the
+	// next turn without a daimon restart. Failures here log a warning but
+	// do not undo the persistent Add — user can still restart to pick it up.
+	if s.deps.Agent != nil {
+		hotAddCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		tools, caller, hotErr := mcp.ConnectSingleServer(hotAddCtx, cfg)
+		cancel()
+		if hotErr != nil {
+			slog.Warn("hot-add: connect failed (server saved, requires restart to use)",
+				"server", cfg.Name, "error", hotErr)
+		} else {
+			s.deps.Agent.RegisterMCPServer(cfg.Name, tools, caller)
+		}
+	}
+
 	// Auto-install bundled skill for known MCP recipes.
 	if s.deps.ConfigPath != "" {
-		installRecipeSkill(cfg.Name, s.deps.Config, s.deps.ConfigPath)
+		installRecipeSkill(cfg.Name, s.deps.Config, s.deps.ConfigPath, s.deps.Agent)
 	}
 
 	writeJSON(w, http.StatusCreated, cfg)
@@ -99,6 +115,16 @@ func (s *Server) handleRemoveMCPServer(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Hot-unregister from the running agent. A NotFound here is expected
+	// for boot-time servers (we don't track those in the hot-add registry)
+	// — it just means the tools stay live until restart, harmless.
+	if s.deps.Agent != nil {
+		if err := s.deps.Agent.UnregisterMCPServer(name); err != nil {
+			slog.Debug("hot-remove: not in hot-add registry (server was added at boot)",
+				"server", name)
+		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)
