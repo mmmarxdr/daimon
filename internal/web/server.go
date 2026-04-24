@@ -81,6 +81,11 @@ type Server struct {
 	// on 64-bit platforms (pointer swap is atomic). If multiple writers are
 	// added in the future, promote to sync.RWMutex.
 	configMu sync.Mutex
+
+	// Conversation soft-delete pruner — nil when the store does not
+	// implement ConvPruneStore OR when disabled in config. Start/Shutdown
+	// drive its lifecycle.
+	convPruner *store.ConversationPruner
 }
 
 // NewServer creates a new Server with all routes registered.
@@ -180,6 +185,22 @@ func newWSUpgrader(allowedOrigins []string) websocket.Upgrader {
 // Start begins listening in a background goroutine.
 // If TLS cert and key are configured, it starts with TLS.
 func (s *Server) Start() error {
+	// Wire the conversation pruner when the store supports it AND config
+	// enables it. The narrow ConvPruneStore interface means FileStore and
+	// other non-SQLite backends simply skip this — no pruner goroutine
+	// runs, which is the correct behavior for stores that don't support
+	// soft delete.
+	if pruneStore, ok := s.deps.Store.(store.ConvPruneStore); ok {
+		pc := s.deps.Config.Conversations.Prune
+		s.convPruner = store.NewConversationPruner(pruneStore, store.SystemClock{},
+			store.PrunerConfig{
+				Enabled:   pc.Enabled,
+				Retention: time.Duration(pc.RetentionDays) * 24 * time.Hour,
+				Interval:  time.Duration(pc.IntervalHours) * time.Hour,
+			})
+		s.convPruner.Start(context.Background())
+	}
+
 	go func() {
 		var err error
 		if s.deps.Config.Web.TLSCert != "" && s.deps.Config.Web.TLSKey != "" {
@@ -198,6 +219,9 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.rateLimiter != nil {
 		s.rateLimiter.Stop()
+	}
+	if s.convPruner != nil {
+		s.convPruner.Stop()
 	}
 	return s.srv.Shutdown(ctx)
 }
@@ -239,6 +263,9 @@ func (s *Server) routes() {
 	s.mux.Handle("PUT /api/config", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handlePutConfig)))
 	s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
 	s.mux.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
+	s.mux.HandleFunc("GET /api/conversations/{id}/messages", s.handleGetConversationMessages)
+	s.mux.Handle("PATCH /api/conversations/{id}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handlePatchConversation)))
+	s.mux.Handle("POST /api/conversations/{id}/restore", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleRestoreConversation)))
 	s.mux.Handle("DELETE /api/conversations/{id}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteConversation)))
 	s.mux.HandleFunc("GET /api/memory", s.handleListMemory)
 	s.mux.Handle("POST /api/memory", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handlePostMemory)))

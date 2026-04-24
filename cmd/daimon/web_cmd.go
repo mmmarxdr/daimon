@@ -318,7 +318,16 @@ func runWebCommand(args []string, cfgPath string) error {
 		cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, aud,
 		toolsRegistry, autoloadSkills, skillIndex,
 		cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream),
-	).WithBus(notifyBus).WithCronCommands(cronScheduler, cronSt)
+	).WithBus(notifyBus).WithCronCommands(cronScheduler, cronSt).WithAIConfig(cfg.AI)
+	if cfg.AI.TitleGeneration.Enabled {
+		titler := agent.NewTitleGenerator(st, prov, cfg.AI.TitleGeneration)
+		ag.WithTitler(titler)
+		defer func() {
+			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer scancel()
+			_ = titler.Stop(sctx)
+		}()
+	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
 	if ragWiring.Worker != nil {

@@ -506,7 +506,17 @@ func main() {
 
 	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream)).
 		WithBus(notifyBus).
-		WithCronCommands(cronScheduler, cronSt)
+		WithCronCommands(cronScheduler, cronSt).
+		WithAIConfig(cfg.AI)
+	if cfg.AI.TitleGeneration.Enabled {
+		titler := agent.NewTitleGenerator(st, prov, cfg.AI.TitleGeneration)
+		ag.WithTitler(titler)
+		defer func() {
+			sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer scancel()
+			_ = titler.Stop(sctx)
+		}()
+	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
 	if ragWiring.Worker != nil {
@@ -533,7 +543,17 @@ func main() {
 		// Rebuild the agent with the updated mux (WebChannel included).
 		ag = agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream)).
 			WithBus(notifyBus).
-			WithCronCommands(cronScheduler, cronSt)
+			WithCronCommands(cronScheduler, cronSt).
+			WithAIConfig(cfg.AI)
+		if cfg.AI.TitleGeneration.Enabled {
+			titler := agent.NewTitleGenerator(st, prov, cfg.AI.TitleGeneration)
+			ag.WithTitler(titler)
+			defer func() {
+				sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer scancel()
+				_ = titler.Stop(sctx)
+			}()
+		}
 		wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
 		// Re-wire RAG into the rebuilt agent (web path). Reuse the DocumentStore
 		// + embed function built by wireRAG — do NOT construct a second store.

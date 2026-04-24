@@ -183,6 +183,21 @@ func (w *WebChannel) HandleWebSocket(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Identity handoff for Resume: if the client sent
+	// `?conversation_id=<id>`, every IncomingMessage emitted from this
+	// connection carries that convID. Downstream, agent.processMessage
+	// uses it verbatim and bypasses the userScope derivation — letting the
+	// client pick up a prior conversation across sessions. Absent or
+	// empty → pre-existing behavior (userScope fallback).
+	//
+	// The cap is defensive against pathological query strings. 200 chars
+	// comfortably fits any realistic convID ("conv_" + channel + ":" + sender).
+	resumedConvID := strings.TrimSpace(r.URL.Query().Get("conversation_id"))
+	if len(resumedConvID) > 200 {
+		slog.Warn("ws: conversation_id too long, ignoring", "len", len(resumedConvID))
+		resumedConvID = ""
+	}
+
 	conn, err := w.upgrader.Upgrade(rw, r, nil)
 	if err != nil {
 		slog.Error("websocket upgrade failed", "error", err)
@@ -260,6 +275,7 @@ func (w *WebChannel) HandleWebSocket(rw http.ResponseWriter, r *http.Request) {
 				ID:             uuid.New().String()[:8],
 				ChannelID:      connID,
 				SenderID:       incoming.SenderID,
+				ConversationID: resumedConvID,
 				Timestamp:      time.Now(),
 				IsContinuation: true,
 				Unlimited:      incoming.Unlimited,
@@ -332,11 +348,12 @@ func (w *WebChannel) HandleWebSocket(rw http.ResponseWriter, r *http.Request) {
 		}
 
 		msg := IncomingMessage{
-			ID:        uuid.New().String()[:8],
-			ChannelID: connID,
-			SenderID:  incoming.SenderID,
-			Content:   blocks,
-			Timestamp: time.Now(),
+			ID:             uuid.New().String()[:8],
+			ChannelID:      connID,
+			SenderID:       incoming.SenderID,
+			ConversationID: resumedConvID,
+			Content:        blocks,
+			Timestamp:      time.Now(),
 		}
 
 		select {
