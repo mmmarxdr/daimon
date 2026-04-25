@@ -298,6 +298,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/metrics", s.handleGetMetrics)
 	s.mux.HandleFunc("GET /api/metrics/history", s.handleGetMetricsHistory)
 	s.mux.HandleFunc("GET /api/metrics/rag", s.handleGetRAGMetrics)
+	s.mux.HandleFunc("GET /api/system-metrics", s.handleGetSystemMetrics)
 	s.mux.HandleFunc("GET /api/mcp/servers", s.handleListMCPServers)
 	s.mux.Handle("POST /api/mcp/servers", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleAddMCPServer)))
 	s.mux.Handle("DELETE /api/mcp/servers/{name}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleRemoveMCPServer)))
