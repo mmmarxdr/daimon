@@ -84,10 +84,11 @@ func (s *Server) handleLogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		return conn.SetReadDeadline(time.Now().Add(90 * time.Second))
 	})
 
-	streamer, ok := s.deps.Auditor.(audit.LogStreamer)
+	auditor := s.currentAuditor()
+	streamer, ok := auditor.(audit.LogStreamer)
 	if !ok {
 		var msg string
-		switch s.deps.Auditor.(type) {
+		switch auditor.(type) {
 		case audit.NoopAuditor:
 			msg = "Audit log is disabled. Set audit.enabled: true in your config (defaults to sqlite, which supports streaming)."
 		default:

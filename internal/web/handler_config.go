@@ -27,6 +27,17 @@ type patchBody struct {
 	RAG           *patchRAG                             `json:"rag,omitempty"`
 	Conversations *patchConversations                   `json:"conversations,omitempty"`
 	AI            *patchAI                              `json:"ai,omitempty"`
+	Audit         *patchAudit                           `json:"audit,omitempty"`
+}
+
+// patchAudit accepts the UI-editable subtree of AuditConfig. Enabled is *bool
+// so an explicit `false` survives merging (matches the AuditConfig.Enabled
+// shape introduced in 2c4a84e). Type and Path use empty-string sentinel for
+// "absent" — partial PUTs preserve sibling fields.
+type patchAudit struct {
+	Enabled *bool  `json:"enabled,omitempty"`
+	Type    string `json:"type,omitempty"`
+	Path    string `json:"path,omitempty"`
 }
 
 // patchConversations accepts the UI-editable subtree of ConversationsConfig.
@@ -334,6 +345,27 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Merge body.Audit field-by-field. Enabled uses *bool so absent key
+	// preserves the stored value; Type and Path use "" as the absent sentinel.
+	// auditChanged tracks whether any audit field was patched so the in-flight
+	// audit backend can be hot-swapped after the merge — see rebuildAuditor.
+	auditChanged := false
+	if patch.Audit != nil {
+		p := *patch.Audit
+		if p.Enabled != nil {
+			merged.Audit.Enabled = p.Enabled
+			auditChanged = true
+		}
+		if p.Type != "" {
+			merged.Audit.Type = p.Type
+			auditChanged = true
+		}
+		if p.Path != "" {
+			merged.Audit.Path = p.Path
+			auditChanged = true
+		}
+	}
+
 	// Validate active provider has credentials.
 	if err := validateActiveCredentials(merged); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -350,6 +382,14 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Swap in-memory config.
 	*s.deps.Config = merged
+
+	// Hot-swap the audit backend so changes take effect without a daemon
+	// restart. Done outside the configMu critical section but after the
+	// in-memory config is updated, so any concurrent /ws/logs handshake
+	// reads the new auditor.
+	if auditChanged {
+		s.rebuildAuditor(s.deps.Config)
+	}
 
 	// Respond with the masked GET body (same shape as GET /api/config).
 	// Re-use the same masking logic to avoid drift.

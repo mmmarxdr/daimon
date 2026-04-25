@@ -97,6 +97,13 @@ type Server struct {
 	// added in the future, promote to sync.RWMutex.
 	configMu sync.Mutex
 
+	// auditorMu guards hot-swaps of s.deps.Auditor. Reads (RLock) happen on
+	// each /ws/logs connection so they must be fast; the only writer is
+	// rebuildAuditor invoked from PUT /api/config when the audit subtree
+	// changes. Existing connections keep the auditor reference they grabbed
+	// at handshake — they are not interrupted by a swap.
+	auditorMu sync.RWMutex
+
 	// Conversation soft-delete pruner — nil when the store does not
 	// implement ConvPruneStore OR when disabled in config. Start/Shutdown
 	// drive its lifecycle.
