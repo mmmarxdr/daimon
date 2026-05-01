@@ -8,7 +8,7 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ## [v0.10.1] — Frontend catch-up + audit/config race fixes
 
-**Release date**: 2026-04-30
+**Release date**: 2026-05-01
 
 A patch release with two motivations:
 
