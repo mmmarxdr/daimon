@@ -6,6 +6,82 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ---
 
+## [v0.11.0] — Chat dock v2: chat-from-dock, drag, resize
+
+**Release date**: 2026-05-01
+
+The floating chat dock stops being a passive preview and becomes a real
+work surface. Users can keep typing while moving between Memory, Logs,
+Settings, etc. without losing the in-flight turn or going back to the
+fullscreen view. Backend is unchanged in this release — all features
+ship via the embedded frontend bundle (daimon-frontend v0.11.0).
+
+### New
+
+- **Chat from inside the dock.** The dock now has its own textarea and
+  send button. Type, hit Enter (Shift+Enter for newline), and the message
+  flows on the same WebSocket and conversation as the fullscreen view —
+  there is exactly one ChatPage instance, the dock and fullscreen are two
+  views of the same component. Send is disabled while a turn is in
+  flight or the WS is disconnected.
+- **Drag the dock.** Grab the header and move the dock anywhere; on
+  release it snaps to the nearest viewport corner (tl/tr/bl/br). Position
+  persists across reloads and tabs.
+- **Resize from the corner grip.** A diagonal grip lives at the corner
+  opposite the anchor; drag it to grow or shrink the dock within
+  320×240–720×720 bounds. Dimensions persist.
+- **Sidebar context-usage percent.** The footer ctx row now shows
+  `ctx XX%   [bar]   X.Xk` — the percent makes the bar legible without
+  having to know the model's context window by heart.
+- **Dock as a real chat surface.** Messages render with full multi-line
+  wrap (`whitespace-pre-wrap`), no truncation. The list scrolls with new
+  tokens when you're near the bottom and stays put if you scrolled up to
+  read history. Selecting text inside the dock no longer triggers
+  expand-to-fullscreen on mouseup.
+- **Thinking indicator.** When `isWaiting` is true and the agent has not
+  yet emitted a streaming assistant message (LLM first-token latency,
+  inter-iteration tool-use windows), a `daimon …` row pulses so the dock
+  doesn't look frozen during the pre-stream phase.
+
+### Fixed
+
+- **Chat-dock route remount.** v0.10.1's chat-dock relied on ChatPage
+  staying mounted across `/chat` ⇄ dock transitions, but a conditional
+  Outlet in AppLayout shrank the children list every time the route
+  flipped, and React's positional reconciler unmounted ChatPage. Symptom:
+  sending a message after returning from the dock landed in a fresh
+  server-side conversation with empty history. AppLayout now renders
+  Outlet unconditionally (the /chat route is `element={null}`, so it
+  remains a no-op visually); ChatPage truly stays mounted.
+- **Chat-dock z-index covered by Toast.** Toast was at `z-50` and the
+  dock at `zIndex:40` in the same corner — the first toast hid the dock.
+  Toast bumped to `z-[60]`, dock raised to `zIndex:50`.
+- **Streaming-token re-render storm.** The dock used to re-render the
+  message list on every WebSocket token because `messages.slice(-3)` ran
+  inside ChatDockView, defeating `React.memo`. The slice is now lifted
+  to ChatPage's `useMemo([messages])` and ChatDockView is wrapped in
+  `React.memo` — the dock skips re-renders when its visible tail hasn't
+  changed.
+- **Nested-button a11y.** The card used to be a `role="button"` div with
+  a real `<button>` (close X) nested inside — invalid HTML, screen
+  readers announced "button, button". Replaced with a single transparent
+  `<button>` covering the card as the primary expand target plus a
+  sibling close button positioned absolutely above via z-index.
+
+### Performance discipline (drag/resize)
+
+The drag/resize handlers do **zero** React state updates per
+`pointermove`. The dock element's `style.transform` (drag) or
+`style.{width,height}` (resize) is mutated directly via a ref;
+`will-change` is set during the gesture and cleared on release; pointer
+listeners live on `document` so a drag past the dock's bounds doesn't
+lose the gesture; `user-select: none` is applied to `<body>` for the
+gesture's lifetime so text selection doesn't fight the drag. React
+re-renders **once** on `pointerup` when geometry is committed to
+localStorage and the `useSyncExternalStore` subscriber fires.
+
+---
+
 ## [v0.10.1] — Frontend catch-up + audit/config race fixes
 
 **Release date**: 2026-05-01
