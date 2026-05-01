@@ -6,6 +6,38 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ---
 
+## [v0.11.1] — New-chat escape hatch
+
+**Release date**: 2026-05-01
+
+Patch release closing a UX gap surfaced minutes after v0.11.0 shipped:
+v0.11.0's mount-once `ChatPage` left users stuck in whichever
+conversation they happened to be on. Clicking the sidebar's "Chat" link
+from inside an active thread just kept appending — there was no way to
+start fresh. Backend is unchanged in this release; everything ships
+through the embedded frontend bundle (daimon-frontend v0.11.1).
+
+### New
+
+- **`+ new chat`** button at the top of the sidebar, styled to match
+  the existing `summon…` action (italic serif label, line border,
+  `bg-elev` fill, `+` glyph in accent color). On click: ChatPage
+  remounts via a key bump → state resets, WebSocket reconnects without
+  a `conversation_id`, backend assigns a fresh server-side conversation,
+  and the URL is replaced with `/chat` (dropping any
+  `?conversation_id` / `?prompt`).
+
+### Notes on the architecture
+
+This is an **intentional** remount triggered by a key change, distinct
+from the **accidental** remount that v0.11.0 fixed (PR #5: conditional
+Outlet shrinking the children list on `/chat ⇄ dock` route flips). Both
+coexist cleanly — accidental remounts are still prevented by the
+unconditional Outlet; intentional ones are now possible via the
+`chatSessionKey` counter in AppLayout.
+
+---
+
 ## [v0.11.0] — Chat dock v2: chat-from-dock, drag, resize
 
 **Release date**: 2026-05-01
