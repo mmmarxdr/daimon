@@ -50,9 +50,8 @@ dev.sh
 # Personal config with real API keys — use configs/default.yaml.example as template
 configs/default.yaml
 
-# Generated exploration/TDD docs from sub-agents
+# Generated TDD docs from sub-agents
 TDD_EVIDENCE_*.md
-exploration.md
 
 # Embedded frontend (copied from daimon-frontend)
 internal/web/static/assets/
