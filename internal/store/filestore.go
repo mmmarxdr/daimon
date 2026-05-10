@@ -339,3 +339,25 @@ func (s *FileStore) SearchOutputs(_ context.Context, _ string, _ int) ([]ToolOut
 //
 // Compile-time assertion.
 var _ OutputStore = (*FileStore)(nil)
+
+// ─── Subagent Store methods (FileStore stubs) ──────────────────────────────
+
+// ListChildConversations returns nil, nil for FileStore. FileStore has no
+// parent_conv_id linkage — used only in unit tests with SQLiteStore.
+func (s *FileStore) ListChildConversations(_ context.Context, _ string) ([]Conversation, error) {
+	return []Conversation{}, nil
+}
+
+// SetConversationStatus loads the conversation, sets Status, and saves it.
+// Idempotent; returns ErrNotFound if the conversation does not exist.
+func (s *FileStore) SetConversationStatus(ctx context.Context, convID, status string) error {
+	if !validConversationStatuses[status] {
+		return fmt.Errorf("store: invalid conversation status %q", status)
+	}
+	conv, err := s.LoadConversation(ctx, convID)
+	if err != nil {
+		return err
+	}
+	conv.Status = status
+	return s.SaveConversation(ctx, *conv)
+}

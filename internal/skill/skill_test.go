@@ -38,7 +38,7 @@ func TestParseSkillFile_ValidFrontmatterAndTools(t *testing.T) {
 	content := `---
 name: my-skill
 description: "Test skill"
-version: 1.0.0
+version: 1
 author: test
 ---
 
@@ -324,7 +324,7 @@ End.
 // ---------------------------------------------------------------------------
 
 func TestLoadSkills_EmptyPaths(t *testing.T) {
-	contents, tools, warns := LoadSkills(nil, config.ShellToolConfig{}, config.LimitsConfig{})
+	contents, tools, _, warns := LoadSkills(nil, config.ShellToolConfig{}, config.LimitsConfig{})
 	if contents != nil {
 		t.Errorf("expected nil contents, got %v", contents)
 	}
@@ -336,7 +336,7 @@ func TestLoadSkills_EmptyPaths(t *testing.T) {
 	}
 
 	// Also test empty slice
-	contents, tools, _ = LoadSkills([]string{}, config.ShellToolConfig{}, config.LimitsConfig{})
+	contents, tools, _, _ = LoadSkills([]string{}, config.ShellToolConfig{}, config.LimitsConfig{})
 	if contents != nil {
 		t.Errorf("expected nil contents for empty slice, got %v", contents)
 	}
@@ -347,7 +347,7 @@ func TestLoadSkills_EmptyPaths(t *testing.T) {
 
 func TestLoadSkills_MissingFile(t *testing.T) {
 	paths := []string{"/nonexistent/skill.md"}
-	contents, tools, warns := LoadSkills(paths, config.ShellToolConfig{}, config.LimitsConfig{})
+	contents, tools, _, warns := LoadSkills(paths, config.ShellToolConfig{}, config.LimitsConfig{})
 
 	if len(warns) == 0 {
 		t.Fatal("expected at least one warning for missing file")
@@ -372,7 +372,7 @@ func TestLoadSkills_FileTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	contents, tools, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{})
+	contents, tools, _, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{})
 
 	if len(warns) == 0 {
 		t.Fatal("expected warning for oversized file")
@@ -411,7 +411,7 @@ command: "echo from_b"
 	pathA := writeTemp(t, contentA)
 	pathB := writeTemp(t, contentB)
 
-	_, tools, warns := LoadSkills([]string{pathA, pathB}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
+	_, tools, _, warns := LoadSkills([]string{pathA, pathB}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
 
 	// Should have exactly 1 tool (from A)
 	if len(tools) != 1 {
@@ -455,7 +455,7 @@ env:
 ` + "```" + `
 `
 	path := writeTemp(t, content)
-	_, tools, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
+	_, tools, _, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
 
 	// No expansion warnings expected
 	for _, w := range warns {
@@ -490,7 +490,7 @@ env:
 ` + "```" + `
 `
 	path := writeTemp(t, content)
-	_, tools, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
+	_, tools, _, warns := LoadSkills([]string{path}, config.ShellToolConfig{}, config.LimitsConfig{ToolTimeout: 30 * time.Second})
 
 	// Should have a warning about the unset variable
 	foundWarn := false
@@ -524,7 +524,7 @@ command: "pwd"
 `
 	path := writeTemp(t, content)
 	shellCfg := config.ShellToolConfig{WorkingDir: "/tmp"}
-	_, tools, _ := LoadSkills([]string{path}, shellCfg, config.LimitsConfig{ToolTimeout: 30 * time.Second})
+	_, tools, _, _ := LoadSkills([]string{path}, shellCfg, config.LimitsConfig{ToolTimeout: 30 * time.Second})
 
 	t2, ok := tools["wd_tool"]
 	if !ok {
@@ -551,7 +551,7 @@ command: "echo test"
 `
 	path := writeTemp(t, content)
 	limits := config.LimitsConfig{ToolTimeout: 45 * time.Second}
-	_, tools, _ := LoadSkills([]string{path}, config.ShellToolConfig{}, limits)
+	_, tools, _, _ := LoadSkills([]string{path}, config.ShellToolConfig{}, limits)
 
 	t2, ok := tools["timeout_tool"]
 	if !ok {
@@ -574,7 +574,7 @@ Valid prose.
 `
 	validPath := writeTemp(t, validContent)
 
-	contents, _, warns := LoadSkills(
+	contents, _, _, warns := LoadSkills(
 		[]string{"/nonexistent/skill.md", validPath},
 		config.ShellToolConfig{},
 		config.LimitsConfig{},

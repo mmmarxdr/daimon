@@ -39,6 +39,16 @@ type Conversation struct {
 	// tool work and key findings. Injected into the system prompt as
 	// "## Previous session summary" when the conversation is resumed.
 	CompactedSummary string `json:"compacted_summary,omitempty"`
+
+	// ParentConvID, when non-empty, identifies the principal conversation that
+	// spawned this sub-conversation. NULL / empty for root (principal) convs.
+	// Added in migration v16.
+	ParentConvID string `json:"parent_conv_id,omitempty"`
+
+	// Status tracks the conversation lifecycle. Valid values: "active",
+	// "running", "completed", "failed", "cancelled". Defaults to "active".
+	// Added in migration v16.
+	Status string `json:"status,omitempty"`
 }
 
 // MemoryEntry represents a single persisted memory item.
@@ -86,6 +96,17 @@ type Store interface {
 	// existing memory entry identified by entry.ID within scopeID.
 	// FileStore implements this as a no-op (returns nil).
 	UpdateMemory(ctx context.Context, scopeID string, entry MemoryEntry) error
+
+	// ListChildConversations returns every conversation whose parent_conv_id
+	// equals parentConvID, ordered by created_at ASC. Returns an empty slice
+	// (not an error) when none exist.
+	ListChildConversations(ctx context.Context, parentConvID string) ([]Conversation, error)
+
+	// SetConversationStatus updates conversations.status for the given convID.
+	// Valid values: "active", "running", "completed", "failed", "cancelled".
+	// Returns ErrNotFound if the convID does not exist.
+	// Returns an error if status is not one of the valid values.
+	SetConversationStatus(ctx context.Context, convID, status string) error
 
 	Close() error
 }
@@ -193,6 +214,20 @@ type CostRecord struct {
 	OutputCostUSD float64
 	TotalCostUSD  float64
 	Timestamp     time.Time
+
+	// Fields added in migration v17 for subagent cost attribution.
+
+	// ConvID links this cost record to a specific conversation (distinct from
+	// SessionID which is a legacy alias). Added in migration v17.
+	ConvID string `json:"conv_id,omitempty"`
+
+	// ParentConvID is set when this cost record belongs to a subagent
+	// conversation; it points to the principal conversation. Added in v17.
+	ParentConvID string `json:"parent_conv_id,omitempty"`
+
+	// AttributionKind describes how this cost is attributed. "self" means the
+	// cost was incurred directly by this conversation's LLM calls. Added in v17.
+	AttributionKind string `json:"attribution_kind,omitempty"`
 }
 
 // CostFilter allows filtering cost records by dimension.
@@ -220,6 +255,10 @@ type CostSummary struct {
 	TotalCostUSD      float64
 	RecordCount       int
 	ByModel           []CostModelCost
+
+	// ConversationCount is the number of distinct conversations included in
+	// this summary (populated by CostSummaryForTree).
+	ConversationCount int
 }
 
 // DailyCost is one calendar day worth of aggregated LLM-call cost data.
@@ -251,6 +290,10 @@ type CostStore interface {
 	// (0, "", nil) when no records exist (not an error). Used by the
 	// sidebar's "last turn context" indicator.
 	GetLastCallTokens(ctx context.Context) (inputTokens int64, model string, err error)
+	// CostSummaryForTree returns aggregated cost for rootConvID and all of
+	// its descendant conversations (via parent_conv_id). ConversationCount
+	// reflects the number of distinct conversations in the tree.
+	CostSummaryForTree(ctx context.Context, rootConvID string) (CostSummary, error)
 }
 
 // SecretsStore is an optional extension of Store for encrypted key-value secrets.

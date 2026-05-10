@@ -108,12 +108,21 @@ func (s *SQLiteStore) SaveConversation(ctx context.Context, conv Conversation) e
 		compactedAt = conv.CompactedAt.UTC()
 	}
 
+	// Default status to "active" when unset (preserves backward compat for
+	// existing callers that do not set Status on Conversation).
+	status := conv.Status
+	if status == "" {
+		status = "active"
+	}
+
 	_, err = s.db.ExecContext(ctx,
 		`INSERT OR REPLACE INTO conversations
-			(id, channel_id, messages, metadata, created_at, updated_at, compacted_at, compacted_summary)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, channel_id, messages, metadata, created_at, updated_at,
+			 compacted_at, compacted_summary, parent_conv_id, status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		conv.ID, conv.ChannelID, string(messages), string(metadata),
 		conv.CreatedAt, conv.UpdatedAt, compactedAt, conv.CompactedSummary,
+		nullableString(conv.ParentConvID), status,
 	)
 	if err != nil {
 		return fmt.Errorf("saving conversation %s: %w", conv.ID, err)
@@ -132,17 +141,21 @@ func (s *SQLiteStore) SaveConversation(ctx context.Context, conv Conversation) e
 // not found or if the conv is soft-deleted (deleted_at IS NOT NULL).
 func (s *SQLiteStore) LoadConversation(ctx context.Context, id string) (*Conversation, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, channel_id, messages, metadata, created_at, updated_at, compacted_at, compacted_summary
+		`SELECT id, channel_id, messages, metadata, created_at, updated_at,
+		        compacted_at, compacted_summary, parent_conv_id, status
 		 FROM conversations WHERE id = ? AND deleted_at IS NULL`, id)
 
 	var conv Conversation
 	var messagesJSON, metadataJSON string
 	var compactedAt sql.NullTime
 	var compactedSummary sql.NullString
+	var parentConvID sql.NullString
+	var status sql.NullString
 
 	err := row.Scan(
 		&conv.ID, &conv.ChannelID, &messagesJSON, &metadataJSON,
 		&conv.CreatedAt, &conv.UpdatedAt, &compactedAt, &compactedSummary,
+		&parentConvID, &status,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -156,6 +169,12 @@ func (s *SQLiteStore) LoadConversation(ctx context.Context, id string) (*Convers
 	}
 	if compactedSummary.Valid {
 		conv.CompactedSummary = compactedSummary.String
+	}
+	if parentConvID.Valid {
+		conv.ParentConvID = parentConvID.String
+	}
+	if status.Valid {
+		conv.Status = status.String
 	}
 
 	if err := json.Unmarshal([]byte(messagesJSON), &conv.Messages); err != nil {
@@ -920,6 +939,7 @@ func (s *SQLiteStore) ListCompactableConversations(ctx context.Context, idleBefo
 		SELECT id FROM conversations
 		WHERE deleted_at IS NULL
 		  AND compacted_at IS NULL
+		  AND status != 'running'
 		  AND updated_at < ?
 		ORDER BY updated_at ASC
 		LIMIT ?`,
@@ -1418,4 +1438,154 @@ func (s *SQLiteStore) ListSecretKeys(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("iterating secret key rows: %w", err)
 	}
 	return keys, nil
+}
+
+// ─── Subagent store methods ───────────────────────────────────────────────────
+
+// validConversationStatuses is the set of allowed values for conversations.status.
+var validConversationStatuses = map[string]bool{
+	"active":    true,
+	"running":   true,
+	"completed": true,
+	"failed":    true,
+	"cancelled": true,
+}
+
+// nullableString converts an empty string to a nil database value (SQL NULL).
+// Non-empty strings are passed through unchanged.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// ListChildConversations returns every conversation whose parent_conv_id equals
+// parentConvID, ordered by created_at ASC. Returns an empty non-nil slice when
+// no children exist. Satisfies OUTPUT-STORE-REQ-7.
+func (s *SQLiteStore) ListChildConversations(ctx context.Context, parentConvID string) ([]Conversation, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, channel_id, messages, metadata, created_at, updated_at,
+		        compacted_at, compacted_summary, parent_conv_id, status
+		 FROM conversations
+		 WHERE parent_conv_id = ? AND deleted_at IS NULL
+		 ORDER BY created_at ASC`,
+		parentConvID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing child conversations for %s: %w", parentConvID, err)
+	}
+	defer rows.Close()
+
+	convs := []Conversation{}
+	for rows.Next() {
+		var conv Conversation
+		var messagesJSON, metadataJSON string
+		var compactedAt sql.NullTime
+		var compactedSummary sql.NullString
+		var parent sql.NullString
+		var status sql.NullString
+
+		if err := rows.Scan(
+			&conv.ID, &conv.ChannelID, &messagesJSON, &metadataJSON,
+			&conv.CreatedAt, &conv.UpdatedAt, &compactedAt, &compactedSummary,
+			&parent, &status,
+		); err != nil {
+			return nil, fmt.Errorf("scanning child conversation row: %w", err)
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			conv.CompactedAt = &t
+		}
+		if compactedSummary.Valid {
+			conv.CompactedSummary = compactedSummary.String
+		}
+		if parent.Valid {
+			conv.ParentConvID = parent.String
+		}
+		if status.Valid {
+			conv.Status = status.String
+		}
+		if err := json.Unmarshal([]byte(messagesJSON), &conv.Messages); err != nil {
+			return nil, fmt.Errorf("unmarshalling messages: %w", err)
+		}
+		if metadataJSON != "" && metadataJSON != "null" {
+			if err := json.Unmarshal([]byte(metadataJSON), &conv.Metadata); err != nil {
+				return nil, fmt.Errorf("unmarshalling metadata: %w", err)
+			}
+		}
+		convs = append(convs, conv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating child conversation rows: %w", err)
+	}
+	return convs, nil
+}
+
+// SetConversationStatus updates conversations.status for the given convID.
+// Returns ErrNotFound if the convID does not exist or is soft-deleted.
+// Returns an error if status is not one of the valid values. Satisfies OUTPUT-STORE-REQ-9.
+func (s *SQLiteStore) SetConversationStatus(ctx context.Context, convID, status string) error {
+	if !validConversationStatuses[status] {
+		return fmt.Errorf("store: invalid conversation status %q: must be one of active, running, completed, failed, cancelled", status)
+	}
+
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE conversations SET status=?, updated_at=? WHERE id=? AND deleted_at IS NULL`,
+		status, nowUTC(), convID,
+	)
+	if err != nil {
+		return fmt.Errorf("setting conversation status %s→%s: %w", convID, status, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("setting conversation status %s: %w", convID, ErrNotFound)
+	}
+	return nil
+}
+
+// CostSummaryForTree returns aggregated cost for rootConvID and all of its
+// descendant conversations (via parent_conv_id). In V1 the tree depth is 1
+// (principal + direct subagents). Uses a recursive CTE so V2 depth>1 is free.
+// Satisfies OUTPUT-STORE-REQ-8.
+func (s *SQLiteStore) CostSummaryForTree(ctx context.Context, rootConvID string) (CostSummary, error) {
+	var summary CostSummary
+
+	// Recursive CTE: collect all conversation IDs in the subtree.
+	err := s.db.QueryRowContext(ctx, `
+		WITH RECURSIVE tree(id) AS (
+		    SELECT id FROM conversations WHERE id = ?
+		    UNION ALL
+		    SELECT c.id FROM conversations c
+		    JOIN tree t ON c.parent_conv_id = t.id
+		)
+		SELECT
+		    COALESCE(SUM(cr.input_tokens), 0),
+		    COALESCE(SUM(cr.output_tokens), 0),
+		    COALESCE(SUM(cr.total_cost_usd), 0.0),
+		    COUNT(*),
+		    (SELECT COUNT(*) FROM tree) AS conv_count
+		FROM cost_records cr
+		WHERE cr.conv_id IN (SELECT id FROM tree)
+	`, rootConvID,
+	).Scan(
+		&summary.TotalInputTokens,
+		&summary.TotalOutputTokens,
+		&summary.TotalCostUSD,
+		&summary.RecordCount,
+		&summary.ConversationCount,
+	)
+	if err != nil {
+		return summary, fmt.Errorf("cost summary for tree %s: %w", rootConvID, err)
+	}
+	return summary, nil
+}
+
+// nowUTC returns the current time as a UTC RFC3339 string, matching the format
+// stored by other UPDATE statements in the store.
+func nowUTC() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }

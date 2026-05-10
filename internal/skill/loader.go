@@ -10,21 +10,26 @@ import (
 )
 
 // LoadSkills loads skill files from the given paths.
-// Returns loaded prose contents, a map of tool.Tool implementations keyed by
-// tool name, and a slice of non-fatal warnings (missing file, bad block, size limit).
+// Returns:
+//   - loaded prose contents (SkillContent slice)
+//   - a map of tool.Tool implementations keyed by tool name
+//   - a slice of ExecutableSkillDef for skills with executable:true
+//   - a slice of non-fatal warnings/errors
+//
 // LoadSkills NEVER returns a fatal error; all failures are represented as warnings.
 // The caller is responsible for logging returned warnings.
 func LoadSkills(
 	paths []string,
 	shellCfg config.ShellToolConfig,
 	limits config.LimitsConfig,
-) ([]SkillContent, map[string]tool.Tool, []error) {
+) ([]SkillContent, map[string]tool.Tool, []ExecutableSkillDef, []error) {
 	if len(paths) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	tools := make(map[string]tool.Tool)
 	var contents []SkillContent
+	var execDefs []ExecutableSkillDef
 	var warns []error
 	var totalProseBytes int
 	var warnedProseBudget bool
@@ -45,6 +50,10 @@ func LoadSkills(
 
 		// Parse — use internal helper to avoid double I/O
 		content, toolDefs, parseErrs := parseSkillContent(path, string(data))
+
+		// Separate hard executable errors (budget missing/invalid) from soft
+		// warnings. For executable skills with errors, skip the ExecutableSkillDef
+		// but still collect the SkillContent (prose can still be useful).
 		warns = append(warns, parseErrs...)
 
 		// Track total prose bytes
@@ -54,8 +63,28 @@ func LoadSkills(
 			warnedProseBudget = true
 		}
 
-		// Collect prose content
+		// Collect prose content.
 		contents = append(contents, content)
+
+		// Build ExecutableSkillDef for executable skills that parsed cleanly.
+		if content.Executable && len(parseErrs) == 0 {
+			def := ExecutableSkillDef{
+				Name:           content.Name,
+				Description:    content.Description,
+				Version:        content.Version,
+				Model:          content.Model,
+				ProviderName:   content.ProviderName,
+				ProviderConfig: content.ProviderConfig,
+				SystemAddendum: content.SystemAddendum,
+				ToolsAllowlist: content.ToolsAllowlist,
+				Budget: BudgetConfig{
+					MaxCostUSD: content.Budget.MaxCostUSD,
+					MaxTurns:   content.Budget.MaxTurns,
+					Timeout:    time.Duration(content.Budget.TimeoutMin) * time.Minute,
+				},
+			}
+			execDefs = append(execDefs, def)
+		}
 
 		// Build tool.Tool for each ToolDef, with env expansion
 		for _, def := range toolDefs {
@@ -95,5 +124,5 @@ func LoadSkills(
 		}
 	}
 
-	return contents, tools, warns
+	return contents, tools, execDefs, warns
 }

@@ -91,6 +91,11 @@ func shouldGenerateTitle(conv *store.Conversation) bool {
 	if conv == nil {
 		return false
 	}
+	// Skip title generation for child (subagent) conversations — they are
+	// ephemeral and the parent conversation already has its own title job.
+	if conv.ParentConvID != "" {
+		return false
+	}
 	if len(conv.Messages) < minMessagesForTitle {
 		return false
 	}

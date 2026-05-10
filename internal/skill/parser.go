@@ -24,11 +24,41 @@ const (
 
 // frontmatter holds the parsed YAML frontmatter fields.
 type frontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Version     string `yaml:"version"`
-	Author      string `yaml:"author"`
-	Autoload    bool   `yaml:"autoload"`
+	Name           string         `yaml:"name"`
+	Description    string         `yaml:"description"`
+	Version        int            `yaml:"version"` // default 1 when absent
+	Author         string         `yaml:"author"`
+	Autoload       bool           `yaml:"autoload"`
+	Executable     bool           `yaml:"executable"`
+	Model          string         `yaml:"model"`
+	Provider       string         `yaml:"provider"`
+	ProviderConfig map[string]any `yaml:"provider_config"`
+	SystemAddendum string         `yaml:"system_prompt_addendum"`
+	ToolsAllowlist []string       `yaml:"tools_allowlist"`
+	Budget         yaml.Node      `yaml:"budget"` // hand-decoded: supports scalar "defaults" or mapping
+}
+
+// decodeBudget interprets the raw YAML node for the `budget` field.
+// It supports:
+//   - an absent node (IsZero) → zero BudgetFrontmatter; caller decides if error
+//   - scalar "defaults" → BudgetFrontmatter{Defaults:true}
+//   - any other scalar → load error (CONFIG-REQ-7)
+//   - mapping → decode struct fields
+func decodeBudget(node yaml.Node) (BudgetFrontmatter, error) {
+	if node.IsZero() {
+		return BudgetFrontmatter{}, nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		if node.Value == "defaults" {
+			return BudgetFrontmatter{Defaults: true}, nil
+		}
+		return BudgetFrontmatter{}, fmt.Errorf("budget: invalid value %q; expected a mapping or the literal 'defaults'", node.Value)
+	}
+	var b BudgetFrontmatter
+	if err := node.Decode(&b); err != nil {
+		return b, fmt.Errorf("budget: %w", err)
+	}
+	return b, nil
 }
 
 // openFence reports whether a line opens a yaml tool block.
@@ -201,11 +231,61 @@ func parseSkillContent(path string, content string) (SkillContent, []ToolDef, []
 
 	_ = hasFrontmatter // used implicitly via fm
 
+	// Decode the budget field (handles "defaults" shortcut and mapping).
+	var budget BudgetFrontmatter
+	if !fm.Budget.IsZero() {
+		var budgetErr error
+		budget, budgetErr = decodeBudget(fm.Budget)
+		if budgetErr != nil {
+			errs = append(errs, fmt.Errorf("skill %q: %w", path, budgetErr))
+		}
+	}
+
+	// Apply defaults expansion when `budget: defaults` was used.
+	if budget.Defaults {
+		budget.MaxCostUSD = 0.50
+		budget.MaxTurns = 20
+		budget.TimeoutMin = 10
+	}
+
+	// Version defaults to 1 when not set.
+	version := fm.Version
+	if version == 0 {
+		version = 1
+	}
+
+	// Validate executable constraints.
+	if fm.Executable {
+		// Missing budget block is a hard error.
+		if fm.Budget.IsZero() {
+			errs = append(errs, fmt.Errorf("skill %q: executable skills must declare a budget block (or 'budget: defaults')", path))
+		}
+	}
+
+	// tools_allowlist: if explicitly empty (YAML list present but empty),
+	// preserve as non-nil empty slice so the caller can distinguish
+	// "not set" (nil) from "explicitly empty" ([]string{}).
+	var toolsAllowlist []string
+	if fm.ToolsAllowlist != nil {
+		toolsAllowlist = fm.ToolsAllowlist
+	}
+
+	// SystemAddendum: frontmatter field wins over prose when both present.
+	systemAddendum := fm.SystemAddendum
+
 	skillContent := SkillContent{
-		Name:        name,
-		Description: fm.Description,
-		Prose:       prose,
-		Autoload:    fm.Autoload,
+		Name:           name,
+		Description:    fm.Description,
+		Prose:          prose,
+		Autoload:       fm.Autoload,
+		Version:        version,
+		Executable:     fm.Executable,
+		Model:          fm.Model,
+		ProviderName:   fm.Provider,
+		ProviderConfig: fm.ProviderConfig,
+		SystemAddendum: systemAddendum,
+		ToolsAllowlist: toolsAllowlist,
+		Budget:         budget,
 	}
 
 	return skillContent, tools, errs

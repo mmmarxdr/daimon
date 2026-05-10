@@ -72,6 +72,12 @@ func (s *consolidatorMockStore) UpdateMemory(_ context.Context, _ string, entry 
 	return nil
 }
 func (s *consolidatorMockStore) Close() error { return nil }
+func (s *consolidatorMockStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+func (s *consolidatorMockStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+	return nil
+}
 
 func (s *consolidatorMockStore) appendCount() int {
 	s.mu.Lock()

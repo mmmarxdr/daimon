@@ -35,6 +35,10 @@ func (f *fakeCostWebStore) GetLastCallTokens(_ context.Context) (int64, string, 
 	return 0, "", nil
 }
 
+func (f *fakeCostWebStore) CostSummaryForTree(_ context.Context, _ string) (store.CostSummary, error) {
+	return store.CostSummary{}, nil
+}
+
 func TestHandleGetMetrics_withCostStore(t *testing.T) {
 	today := time.Now().UTC().Format("2006-01-02")
 	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")

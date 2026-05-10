@@ -93,6 +93,12 @@ func (s *enrichMockStore) UpdateMemory(_ context.Context, scopeID string, entry 
 	return nil
 }
 func (s *enrichMockStore) Close() error { return nil }
+func (s *enrichMockStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+func (s *enrichMockStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+	return nil
+}
 
 func (s *enrichMockStore) getUpdateCalls() []store.MemoryEntry {
 	s.mu.Lock()

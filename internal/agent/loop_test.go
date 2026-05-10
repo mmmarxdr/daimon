@@ -180,6 +180,16 @@ func (m *mockStore) updateCallCount() int {
 }
 func (m *mockStore) Close() error { return nil }
 
+// ListChildConversations satisfies store.Store; returns empty slice.
+func (m *mockStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+
+// SetConversationStatus satisfies store.Store; no-op.
+func (m *mockStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helper to build a default agent config.
 // ---------------------------------------------------------------------------
