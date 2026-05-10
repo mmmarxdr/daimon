@@ -328,8 +328,8 @@ func TestSubagentManager_BudgetMonitor_CostCap(t *testing.T) {
 	if !found {
 		t.Fatal("EventSubagentFailed not emitted within timeout")
 	}
-	if ev.Meta["reason"] != "budget_cost_exceeded" {
-		t.Errorf("reason = %q, want %q", ev.Meta["reason"], "budget_cost_exceeded")
+	if ev.Meta["reason"] != "budget_exceeded" {
+		t.Errorf("reason = %q, want %q", ev.Meta["reason"], "budget_exceeded")
 	}
 	if ev.Meta["subagent_id"] != handle.ID {
 		t.Errorf("subagent_id = %q, want %q", ev.Meta["subagent_id"], handle.ID)
@@ -375,8 +375,8 @@ func TestSubagentManager_BudgetMonitor_TurnsCap(t *testing.T) {
 	if !found {
 		t.Fatal("EventSubagentFailed not emitted within timeout")
 	}
-	if ev.Meta["reason"] != "budget_turns_exceeded" {
-		t.Errorf("reason = %q, want %q", ev.Meta["reason"], "budget_turns_exceeded")
+	if ev.Meta["reason"] != "budget_exceeded" {
+		t.Errorf("reason = %q, want %q", ev.Meta["reason"], "budget_exceeded")
 	}
 }
 

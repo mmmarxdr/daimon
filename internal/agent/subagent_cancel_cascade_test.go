@@ -103,12 +103,13 @@ func TestSubagentCancelCascade_ParentCtxCancelled(t *testing.T) {
 		t.Errorf("expected %d EventSubagentFailed events, got %d", numSubs, len(failEvents))
 	}
 
-	// Each event must carry reason "cancelled" or "timeout" (both are valid
-	// for context cancellation from the parent).
+	// Each event must carry reason "cancelled" (parent ctx cancel) or
+	// "budget_exceeded" (timeout_min cap per spec REQ-5). The old "timeout"
+	// value is retired — all budget-cap breaches now use "budget_exceeded".
 	for _, ev := range failEvents {
 		reason := ev.Meta["reason"]
-		if reason != "cancelled" && reason != "timeout" {
-			t.Errorf("EventSubagentFailed reason = %q, want 'cancelled' or 'timeout'", reason)
+		if reason != "cancelled" && reason != "budget_exceeded" {
+			t.Errorf("EventSubagentFailed reason = %q, want 'cancelled' or 'budget_exceeded'", reason)
 		}
 	}
 }

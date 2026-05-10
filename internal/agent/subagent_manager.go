@@ -354,7 +354,7 @@ func (m *SubagentManager) budgetMonitor(rec *subRecord) {
 			if currentStatus == "running" {
 				reason := "cancelled"
 				if errors.Is(rec.ctx.Err(), context.DeadlineExceeded) {
-					reason = "timeout"
+					reason = "budget_exceeded" // timeout_min cap — spec REQ-5 mandates "budget_exceeded" for all budget types
 				}
 				m.finalize(rec, "failed", reason)
 			}
@@ -391,12 +391,12 @@ func (m *SubagentManager) budgetMonitor(rec *subRecord) {
 			}
 
 			if hardCost {
-				m.finalize(rec, "failed", "budget_cost_exceeded")
+				m.finalize(rec, "failed", "budget_exceeded")
 				rec.cancel()
 				return
 			}
 			if hardTurns {
-				m.finalize(rec, "failed", "budget_turns_exceeded")
+				m.finalize(rec, "failed", "budget_exceeded")
 				rec.cancel()
 				return
 			}
