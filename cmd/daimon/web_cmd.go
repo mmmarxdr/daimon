@@ -119,7 +119,9 @@ func runWebCommand(args []string, cfgPath string) error {
 	if len(cfg.Skills) > 0 {
 		var skillTools map[string]tool.Tool
 		var skillWarns []error
-		skillContents, skillTools, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
+		var execSkillDefs []skill.ExecutableSkillDef
+		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
+		_ = execSkillDefs // Phase 2: wire into agent.New()
 		for _, w := range skillWarns {
 			slog.Warn("skills: load warning", "error", w)
 		}

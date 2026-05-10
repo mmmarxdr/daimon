@@ -118,7 +118,7 @@ func loadSkillsForReload(cfgPath string, fallbackCfg *config.Config) ([]skill.Sk
 		freshCfg = fallbackCfg
 	}
 
-	contents, _, warns := skill.LoadSkills(freshCfg.Skills, freshCfg.Tools.Shell, freshCfg.Limits)
+	contents, _, _, warns := skill.LoadSkills(freshCfg.Skills, freshCfg.Tools.Shell, freshCfg.Limits)
 	for _, w := range warns {
 		slog.Warn("hot_reload: skill load warning", "error", w)
 	}
