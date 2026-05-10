@@ -18,6 +18,15 @@ import (
 	"daimon/internal/tool"
 )
 
+// ensureToolMap returns m unchanged if non-nil, else an empty map.
+// Prevents nil-map panics when New() is called with tools=nil in tests.
+func ensureToolMap(m map[string]tool.Tool) map[string]tool.Tool {
+	if m != nil {
+		return m
+	}
+	return make(map[string]tool.Tool)
+}
+
 // startPruningLoop launches the memory pruning goroutine. It is a no-op when
 // the store is not a *SQLiteStore (pruning is SQLite-only).
 //
@@ -85,6 +94,9 @@ type Agent struct {
 	store           store.Store
 	outputStore     store.OutputStore // for auto-indexing tool outputs
 	auditorFn       func() audit.Auditor
+
+	// subMgr manages spawned child agents (nil when no executable skills loaded).
+	subMgr          *SubagentManager
 
 	// tools / skills are protected by toolsMu / skillsMu so the dashboard's
 	// hot-add flow (RegisterMCPServer / ReplaceSkills) can mutate them while
@@ -250,7 +262,7 @@ func New(
 		store:           st,
 		outputStore:     outputStore,
 		auditorFn:       func() audit.Auditor { return auditor },
-		tools:           tools,
+		tools:           ensureToolMap(tools),
 		mcpToolNames:    map[string][]string{},
 		mcpClients:      map[string]interface{ Close() error }{},
 		skills:          skills,
@@ -385,6 +397,57 @@ func (a *Agent) WithAIConfig(cfg config.AIConfig) *Agent {
 	a.aiCfg = cfg
 	return a
 }
+
+// WithExecutableSkills wires spawnable subagent definitions into the agent.
+// For each def a SubagentSpawnTool is registered in a.tools under def.Name.
+// The agent's SubagentManager is created on the first call. Call before Run().
+//
+// Two-phase tool validation (design §2.5.4): unknown names in def.ToolsAllowlist
+// are dropped with a slog.Warn — the loader cannot cross-check at parse time
+// because MCP tools are not yet materialized then.
+func (a *Agent) WithExecutableSkills(defs []skill.ExecutableSkillDef) *Agent {
+	if len(defs) == 0 {
+		return a
+	}
+	if a.subMgr == nil {
+		a.subMgr = NewSubagentManager(a.bus, a.store)
+		a.subMgr.installBusSubscription()
+	}
+
+	a.toolsMu.Lock()
+	defer a.toolsMu.Unlock()
+	for _, def := range defs {
+		// Two-phase allowlist validation: drop unknown tool names with a warning.
+		def.ToolsAllowlist = filterKnownTools(def.ToolsAllowlist, a.tools)
+		spawn := &SubagentSpawnTool{def: def, manager: a.subMgr}
+		if _, exists := a.tools[def.Name]; exists {
+			slog.Warn("subagent tool name collides with existing tool; subagent wins", "name", def.Name)
+		}
+		a.tools[def.Name] = spawn
+	}
+	return a
+}
+
+// filterKnownTools returns the allowlist with unknown tool names removed.
+// Unknown names are logged as warnings (non-fatal per design §2.5.4).
+func filterKnownTools(allowlist []string, tools map[string]tool.Tool) []string {
+	if len(allowlist) == 0 {
+		return allowlist
+	}
+	filtered := make([]string, 0, len(allowlist))
+	for _, name := range allowlist {
+		if _, ok := tools[name]; ok {
+			filtered = append(filtered, name)
+		} else {
+			slog.Warn("subagent tools_allowlist: unknown tool name dropped", "name", name)
+		}
+	}
+	return filtered
+}
+
+// SubagentManager returns the agent's SubagentManager. May be nil when no
+// executable skills are loaded. Used by the web handler for the active-subs endpoint.
+func (a *Agent) SubagentManager() *SubagentManager { return a.subMgr }
 
 // Enricher returns the agent's async enrichment worker. May be nil.
 func (a *Agent) Enricher() *Enricher { return a.enricher }
