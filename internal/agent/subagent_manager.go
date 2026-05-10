@@ -478,21 +478,36 @@ func (m *SubagentManager) finalize(rec *subRecord, status, reason string) {
 	})
 }
 
-// injectSoftWarning is the default soft-warning implementation (Phase 2 stub).
-// Phase 4 will deliver an IncomingMessage to the child's inbox. In Phase 2
-// we log the warning; Phase 4 task 4.2 implements the actual injection.
+// injectSoftWarning delivers a synthetic user message into the child's inbox
+// warning it to wrap up, as it has consumed 80% of its cost budget.
+// The budgetMonitor guarantees this is called at most once per record (via
+// the softWarned flag), so this function never needs to re-check the flag.
+//
+// Message text follows the format specified by SUBAGENTS-REQ-5:
+//   ⚠ Budget warning: you have used 80% of your cost cap
+//   (current: 0.XXXX, max: Y.YYYY). Wrap up and produce a final summary.
 func (m *SubagentManager) injectSoftWarning(rec *subRecord) {
 	rec.mu.Lock()
 	cost := rec.cost
-	cap := rec.budget.MaxCostUSD
+	capUSD := rec.budget.MaxCostUSD
+	skillName := rec.skillName
+	id := rec.id
 	rec.mu.Unlock()
-	slog.Warn("subagent approaching budget limit",
-		"id", rec.id,
-		"skill", rec.skillName,
-		"cost_usd", fmt.Sprintf("%.4f", cost),
-		"max_cost_usd", fmt.Sprintf("%.4f", cap),
-		"percent", fmt.Sprintf("%.0f%%", cost/cap*100),
+
+	text := fmt.Sprintf(
+		"⚠ Budget warning: you have used 80%% of your cost cap "+
+			"(current: %.4f, max: %.4f). "+
+			"Wrap up your work and produce a final summary.",
+		cost, capUSD,
 	)
+
+	if err := rec.subChannel.Deliver(text); err != nil {
+		slog.Warn("subagent: failed to inject soft warning",
+			"id", id,
+			"skill", skillName,
+			"error", err,
+		)
+	}
 }
 
 // Cancel cancels a single subagent by ID. Idempotent.

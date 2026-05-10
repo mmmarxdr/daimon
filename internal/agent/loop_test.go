@@ -119,6 +119,7 @@ type mockStore struct {
 	memories     []store.MemoryEntry
 	appendedMems []store.MemoryEntry
 	updateCount  int
+	status       string // last value passed to SetConversationStatus
 }
 
 func (m *mockStore) SaveConversation(ctx context.Context, conv store.Conversation) error {
@@ -185,8 +186,12 @@ func (m *mockStore) ListChildConversations(_ context.Context, _ string) ([]store
 	return []store.Conversation{}, nil
 }
 
-// SetConversationStatus satisfies store.Store; no-op.
-func (m *mockStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+// SetConversationStatus satisfies store.Store; records the latest status
+// for tests that need to assert it (e.g., subagent budget enforcement).
+func (m *mockStore) SetConversationStatus(_ context.Context, _ string, status string) error {
+	m.mu.Lock()
+	m.status = status
+	m.mu.Unlock()
 	return nil
 }
 
