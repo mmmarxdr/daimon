@@ -169,6 +169,26 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 			return fmt.Errorf("migration v15: %w", err)
 		}
 	}
+	if version < 16 {
+		if err := s.migrateV16(); err != nil {
+			return fmt.Errorf("migration v16: %w", err)
+		}
+	}
+	if version < 17 {
+		if err := s.migrateV17(); err != nil {
+			return fmt.Errorf("migration v17: %w", err)
+		}
+	}
+
+	// Boot-time orphan sweep: cancel any conversation that was left in
+	// 'running' state (e.g. by a crash) and has not been updated in 24h.
+	// Idempotent — safe to run on every startup. Requires v16 (status column).
+	if _, err := s.db.Exec(
+		`UPDATE conversations SET status='cancelled'
+		 WHERE status='running' AND updated_at < datetime('now', '-24 hours')`,
+	); err != nil {
+		return fmt.Errorf("orphan sweep: %w", err)
+	}
 
 	// One-shot orphan cleanup (idempotent; runs every startup). Document chunks
 	// can be left behind by databases created before foreign_keys was enabled
@@ -995,6 +1015,105 @@ func (s *SQLiteStore) migrateV15() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 15"); err != nil {
 		return fmt.Errorf("updating schema version to 15: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV16 adds parent linkage and lifecycle status to the conversations table.
+//
+// New columns:
+//   - parent_conv_id TEXT        — NULL for root (principal) conversations
+//   - status TEXT NOT NULL DEFAULT 'active' — lifecycle state
+//
+// New indexes:
+//   - idx_conv_parent (partial, WHERE parent_conv_id IS NOT NULL)
+//   - idx_conv_status_updated (status, updated_at) for compactor + orphan-sweep efficiency
+//
+// Advances schema_version to 16.
+func (s *SQLiteStore) migrateV16() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`ALTER TABLE conversations ADD COLUMN parent_conv_id TEXT`); err != nil {
+		return fmt.Errorf("adding parent_conv_id to conversations: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE conversations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`); err != nil {
+		return fmt.Errorf("adding status to conversations: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_conv_parent
+		    ON conversations(parent_conv_id)
+		    WHERE parent_conv_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("creating idx_conv_parent: %w", err)
+	}
+	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_conv_status_updated
+		    ON conversations(status, updated_at)`); err != nil {
+		return fmt.Errorf("creating idx_conv_status_updated: %w", err)
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 16"); err != nil {
+		return fmt.Errorf("updating schema version to 16: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV17 adds attribution columns to cost_records so that costs can be
+// linked to individual subagent conversations and rolled up to the tree root.
+//
+// New columns:
+//   - conv_id TEXT               — backfilled from session_id; NULL until backfill
+//   - parent_conv_id TEXT        — NULL for root conversation costs
+//   - attribution_kind TEXT NOT NULL DEFAULT 'self' — "self" in V1
+//
+// Backfill: existing rows get conv_id = session_id (by convention session_id
+// stores the conversation UUID).
+//
+// New indexes:
+//   - idx_cost_conv (conv_id)
+//   - idx_cost_parent_conv (parent_conv_id WHERE NOT NULL)
+//
+// Advances schema_version to 17.
+func (s *SQLiteStore) migrateV17() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`ALTER TABLE cost_records ADD COLUMN conv_id TEXT`); err != nil {
+		return fmt.Errorf("adding conv_id to cost_records: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE cost_records ADD COLUMN parent_conv_id TEXT`); err != nil {
+		return fmt.Errorf("adding parent_conv_id to cost_records: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE cost_records ADD COLUMN attribution_kind TEXT NOT NULL DEFAULT 'self'`); err != nil {
+		return fmt.Errorf("adding attribution_kind to cost_records: %w", err)
+	}
+
+	// Backfill conv_id from session_id for all existing rows.
+	if _, err := tx.Exec(`UPDATE cost_records SET conv_id = session_id WHERE conv_id IS NULL`); err != nil {
+		return fmt.Errorf("backfilling conv_id: %w", err)
+	}
+
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_cost_conv ON cost_records(conv_id)`); err != nil {
+		return fmt.Errorf("creating idx_cost_conv: %w", err)
+	}
+	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_cost_parent_conv
+		    ON cost_records(parent_conv_id)
+		    WHERE parent_conv_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("creating idx_cost_parent_conv: %w", err)
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 17"); err != nil {
+		return fmt.Errorf("updating schema version to 17: %w", err)
 	}
 
 	return tx.Commit()

@@ -10,13 +10,24 @@ import (
 
 // RecordCost inserts a cost record for a single LLM call.
 func (s *SQLiteStore) RecordCost(ctx context.Context, record CostRecord) error {
+	// Default attribution_kind to "self" when not specified.
+	attrKind := record.AttributionKind
+	if attrKind == "" {
+		attrKind = "self"
+	}
+	// conv_id defaults to session_id when unset (backward compat).
+	convID := record.ConvID
+	if convID == "" {
+		convID = record.SessionID
+	}
+
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO cost_records
 			(id, session_id, channel_id, model,
 			 input_tokens, output_tokens,
 			 input_cost_usd, output_cost_usd, total_cost_usd,
-			 created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 created_at, conv_id, parent_conv_id, attribution_kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.SessionID,
 		record.ChannelID,
@@ -27,6 +38,9 @@ func (s *SQLiteStore) RecordCost(ctx context.Context, record CostRecord) error {
 		record.OutputCostUSD,
 		record.TotalCostUSD,
 		record.Timestamp.UTC(),
+		convID,
+		nullableString(record.ParentConvID),
+		attrKind,
 	)
 	if err != nil {
 		return fmt.Errorf("recording cost %s: %w", record.ID, err)

@@ -153,6 +153,16 @@ func (f *fakeWebStore) UpdateConversationTitle(_ context.Context, id, title stri
 	return store.ErrNotFound
 }
 
+// ListChildConversations satisfies store.Store; returns empty slice.
+func (f *fakeWebStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+
+// SetConversationStatus satisfies store.Store; no-op stub.
+func (f *fakeWebStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+	return nil
+}
+
 // noWebStore — a store.Store that does NOT implement WebStore.
 type noWebStore struct{}
 
@@ -170,6 +180,10 @@ func (noWebStore) SearchMemory(_ context.Context, _ string, _ string, _ int) ([]
 }
 func (noWebStore) UpdateMemory(_ context.Context, _ string, _ store.MemoryEntry) error { return nil }
 func (noWebStore) Close() error                                                        { return nil }
+func (noWebStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+func (noWebStore) SetConversationStatus(_ context.Context, _ string, _ string) error { return nil }
 
 func newTestServerWithStore(t *testing.T, st store.Store) *Server {
 	t.Helper()

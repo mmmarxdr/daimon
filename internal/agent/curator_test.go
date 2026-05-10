@@ -95,6 +95,12 @@ func (s *curatorMockStore) UpdateMemory(_ context.Context, _ string, entry store
 	return nil
 }
 func (s *curatorMockStore) Close() error { return nil }
+func (s *curatorMockStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return []store.Conversation{}, nil
+}
+func (s *curatorMockStore) SetConversationStatus(_ context.Context, _ string, _ string) error {
+	return nil
+}
 
 func (s *curatorMockStore) appendCount() int {
 	s.mu.Lock()
