@@ -21,7 +21,7 @@ CREATE INDEX idx_conv_parent ON conversations(parent_conv_id)
 
 Existing rows backfill: `parent_conv_id` defaults to `NULL`; `status` defaults to `'active'` (handled by `DEFAULT` clause — no explicit UPDATE needed).
 
-Valid `status` values in V1: `'active'`, `'running'`, `'completed'`, `'failed'`.
+Valid `status` values in V1: `'active'`, `'running'`, `'completed'`, `'failed'`, `'cancelled'`. (`'cancelled'` is set by the boot-time orphan sweep and by explicit subagent cancellation.)
 
 #### Scenario: migration v16 applies cleanly on existing DB
 
@@ -136,7 +136,7 @@ The `Store` interface SHALL expose:
 SetConversationStatus(ctx context.Context, convID string, status string) error
 ```
 
-Valid `status` values: `"active"`, `"running"`, `"completed"`, `"failed"`. An invalid status value MUST return an error. A `convID` that does not exist MUST return an error.
+Valid `status` values: `"active"`, `"running"`, `"completed"`, `"failed"`, `"cancelled"`. An invalid status value MUST return an error. A `convID` that does not exist MUST return an error.
 
 #### Scenario: status updated to running on spawn
 
