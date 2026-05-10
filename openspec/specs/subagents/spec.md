@@ -320,20 +320,31 @@ The system SHALL pass the parent's already-materialized MCP tool set (a filtered
 
 ### REQ-15 — REST endpoint returns live subagent status
 
-The system SHALL expose `GET /api/subagents/active` that returns a JSON array of currently live subagents, each with at minimum: `id`, `skill_name`, `status`, `accumulated_cost_usd`, `turn_count`, `parent_conv_id`, `batch_id`.
+The system SHALL expose `GET /api/subagents/active` that returns a JSON object `{"active": [...]}`. Each entry in `active` MUST include: `subagent_id`, `batch_id`, `skill_name`, `parent_conv_id`, `status`, `cost_usd`, `turn_count`, `started_at` (RFC3339 timestamp).
+
+When the runtime has no `SubagentManager` configured (no executable skills loaded), the endpoint MUST return `{"active": []}` with HTTP 200 — NOT 404 or 500.
+
+WebSocket companion endpoint `GET /api/ws/subagents` SHALL stream lifecycle events as JSON frames with shape `{"event": "<event-name>", "payload": {...}}`. The `event` field uses the full event name (e.g., `"agent.subagent.spawned"`). Each WS connection MUST have a per-connection cap-8 outbound channel; on overflow, oldest frames MUST be dropped with a `slog.Warn` so a slow consumer does not block the bus or other subscribers.
 
 #### Scenario: active subagents returned
 
 - GIVEN two subagents (`researcher`, `summarizer`) are currently running
 - WHEN `GET /api/subagents/active` is called
-- THEN the response is a JSON array with two entries
-- AND each entry includes `id`, `skill_name`, `status: "running"`, `accumulated_cost_usd`, `turn_count`
+- THEN the response is `{"active": [<entry1>, <entry2>]}`
+- AND each entry includes `subagent_id`, `batch_id`, `skill_name`, `parent_conv_id`, `status: "running"`, `cost_usd`, `turn_count`, `started_at`
 
 #### Scenario: no active subagents returns empty array
 
 - GIVEN no subagents are currently running
 - WHEN `GET /api/subagents/active` is called
-- THEN the response is `[]`
+- THEN the response is `{"active": []}`
+
+#### Scenario: WS stream delivers lifecycle events in order
+
+- GIVEN a WebSocket client is connected to `/api/ws/subagents`
+- WHEN a subagent is spawned and then completes
+- THEN the client receives `{"event": "agent.subagent.spawned", "payload": {...}}` followed by `{"event": "agent.subagent.completed", "payload": {...}}` in that order
+- AND a slow consumer dropping frames does NOT block delivery to other subscribers
 
 ---
 

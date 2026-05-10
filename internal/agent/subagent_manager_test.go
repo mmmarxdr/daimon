@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"daimon/internal/channel"
+	"daimon/internal/content"
 	"daimon/internal/notify"
 	"daimon/internal/skill"
 	"daimon/internal/store"
@@ -572,4 +573,230 @@ func toolKeys(m map[string]tool.Tool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.1 — 80% soft warning injection (content correctness + once-only)
+// ---------------------------------------------------------------------------
+
+// captureInbox builds a started SubagentChannel and returns the inbox
+// channel so the test can read messages delivered into it.
+func captureInbox(t *testing.T, ch *channel.SubagentChannel) <-chan channel.IncomingMessage {
+	t.Helper()
+	inbox := make(chan channel.IncomingMessage, 10)
+	if err := ch.Start(context.Background(), inbox); err != nil {
+		t.Fatalf("channel.Start: %v", err)
+	}
+	return inbox
+}
+
+// TestInjectSoftWarning_MessageContent verifies that injectSoftWarning delivers
+// a synthetic user message containing the key budget-warning text fields into
+// the child's inbox. SUBAGENTS-REQ-5 (80% scenario).
+func TestInjectSoftWarning_MessageContent(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	m, _ := newTestManager(t, bus, st)
+
+	id := "test-warn-id"
+	subCh := channel.NewSubagentChannel(id)
+	inbox := captureInbox(t, subCh)
+
+	rec := &subRecord{
+		id:        id,
+		skillName: "researcher",
+		budget: skill.BudgetConfig{
+			MaxCostUSD: 1.0,
+			MaxTurns:   20,
+			Timeout:    5 * time.Minute,
+		},
+		cost:       0.82, // 82% of $1.00
+		turns:      5,
+		subChannel: subCh,
+		done:       make(chan struct{}),
+		events:     make(chan notify.Event, 8),
+		status:     "running",
+	}
+
+	// Replace softWarnFn with the real implementation.
+	m.softWarnFn = m.injectSoftWarning
+	m.injectSoftWarning(rec)
+
+	select {
+	case msg := <-inbox:
+		// Verify ChannelID matches the subagent channel.
+		if msg.ChannelID != subCh.ID() {
+			t.Errorf("ChannelID = %q, want %q", msg.ChannelID, subCh.ID())
+		}
+		// Verify SenderID is "principal" (synthetic user message).
+		if msg.SenderID != "principal" {
+			t.Errorf("SenderID = %q, want 'principal'", msg.SenderID)
+		}
+		// Verify message text contains key budget-warning fields.
+		var text string
+		for _, blk := range msg.Content {
+			if blk.Type == content.BlockText {
+				text = blk.Text
+				break
+			}
+		}
+		if text == "" {
+			t.Fatal("message has no text block")
+		}
+		if !containsAll(text, "Budget warning", "80%", "1.0000") {
+			t.Errorf("warning text missing expected content; got: %q", text)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("no message delivered to inbox within 500ms")
+	}
+}
+
+// TestInjectSoftWarning_OncePerCap verifies that the softWarned flag prevents
+// a second injection for the same cap. The budgetMonitor sets softWarned=true
+// before calling softWarnFn; a subsequent call to injectSoftWarning on a
+// record with softWarned=true must NOT deliver a message. SUBAGENTS-REQ-5.
+func TestInjectSoftWarning_OncePerCap(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	m, _ := newTestManager(t, bus, st)
+	m.installBusSubscription()
+
+	def := defaultDef("expensive")
+	def.Budget = skill.BudgetConfig{
+		MaxCostUSD: 1.0,
+		MaxTurns:   100,
+		Timeout:    10 * time.Second,
+	}
+
+	// Track how many times softWarnFn is called.
+	var warnCalls int
+	var warnMu sync.Mutex
+	originalWarnFn := m.injectSoftWarning
+	m.softWarnFn = func(rec *subRecord) {
+		warnMu.Lock()
+		warnCalls++
+		warnMu.Unlock()
+		originalWarnFn(rec)
+	}
+
+	ctx := context.Background()
+	handle, err := m.Spawn(ctx, def, "task", SpawnModeAsync, "conv_parent")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// First turn at 82% → triggers warning.
+	bus.Emit(notify.Event{
+		Type:      notify.EventTurnCompleted,
+		ChannelID: handle.rec.subChannel.ID(),
+		Timestamp: time.Now(),
+		Meta:      map[string]string{"cost_usd": "0.82"},
+	})
+	time.Sleep(150 * time.Millisecond)
+
+	// Second turn (below hard cap, above 80%) → should NOT fire warning again.
+	bus.Emit(notify.Event{
+		Type:      notify.EventTurnCompleted,
+		ChannelID: handle.rec.subChannel.ID(),
+		Timestamp: time.Now(),
+		Meta:      map[string]string{"cost_usd": "0.05"},
+	})
+	time.Sleep(150 * time.Millisecond)
+
+	warnMu.Lock()
+	calls := warnCalls
+	warnMu.Unlock()
+	if calls != 1 {
+		t.Errorf("softWarnFn called %d times, want exactly 1", calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4.3 — batch_id stored in conversations.metadata
+// ---------------------------------------------------------------------------
+
+// TestBatchID_StoredInConversationMetadata verifies that batch_id is stored in
+// conversations.metadata at spawn time. SUBAGENTS-REQ-8 + design EP-2.
+func TestBatchID_StoredInConversationMetadata(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	m, _ := newTestManager(t, bus, st)
+	m.installBusSubscription()
+
+	ctx := context.Background()
+	handle, err := m.Spawn(ctx, defaultDef("researcher"), "task", SpawnModeAsync, "conv_parent")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	st.mu.Lock()
+	saved := st.conv
+	st.mu.Unlock()
+
+	if saved == nil {
+		t.Fatal("expected a conversation to be saved")
+	}
+	if saved.Metadata == nil {
+		t.Fatal("conversation.Metadata is nil — batch_id not stored")
+	}
+	if saved.Metadata["batch_id"] == "" {
+		t.Error("batch_id not present in conversation.Metadata")
+	}
+	// V1: batch_id == subagent_id (1:1 mapping).
+	if saved.Metadata["batch_id"] != handle.BatchID {
+		t.Errorf("Metadata[batch_id] = %q, want %q", saved.Metadata["batch_id"], handle.BatchID)
+	}
+}
+
+// TestBatchID_SeparateSpawnsGetDifferentIDs verifies that sequential spawns
+// produce different batch_ids. SUBAGENTS-REQ-8.
+func TestBatchID_SeparateSpawnsGetDifferentIDs(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	m, _ := newTestManager(t, bus, st)
+	m.installBusSubscription()
+
+	ctx := context.Background()
+	h1, err := m.Spawn(ctx, defaultDef("researcher"), "task 1", SpawnModeAsync, "conv_parent")
+	if err != nil {
+		t.Fatalf("Spawn 1: %v", err)
+	}
+	h2, err := m.Spawn(ctx, defaultDef("summarizer"), "task 2", SpawnModeAsync, "conv_parent")
+	if err != nil {
+		t.Fatalf("Spawn 2: %v", err)
+	}
+
+	if h1.BatchID == h2.BatchID {
+		t.Errorf("two separate spawns got the same BatchID %q — expected different IDs", h1.BatchID)
+	}
+}
+
+// containsAll checks that all substrings are present in s.
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !containsSubstring(s, sub) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsSubstring(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

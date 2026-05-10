@@ -611,6 +611,21 @@ func filterKnownTools(allowlist []string, tools map[string]tool.Tool) []string {
 // executable skills are loaded. Used by the web handler for the active-subs endpoint.
 func (a *Agent) SubagentManager() *SubagentManager { return a.subMgr }
 
+// ActiveSubagents returns a snapshot of currently running subagents.
+// Returns nil when no SubagentManager is configured.
+// Satisfies web.SubagentProvider.
+func (a *Agent) ActiveSubagents() []SubagentStatus {
+	if a.subMgr == nil {
+		return nil
+	}
+	return a.subMgr.Active()
+}
+
+// SubagentBus returns the notify.Bus wired into this agent.
+// May be nil when no bus has been configured.
+// Satisfies web.SubagentProvider.
+func (a *Agent) SubagentBus() notify.Bus { return a.bus }
+
 // Enricher returns the agent's async enrichment worker. May be nil.
 func (a *Agent) Enricher() *Enricher { return a.enricher }
 
