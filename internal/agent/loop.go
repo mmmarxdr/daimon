@@ -480,16 +480,19 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			modelName := a.provider.Model()
 			inCost, outCost := audit.EstimateCostSplit(modelName, int64(resp.Usage.InputTokens), int64(resp.Usage.OutputTokens))
 			_ = cs.RecordCost(ctx, store.CostRecord{
-				ID:            uuid.New().String(),
-				SessionID:     conv.ID,
-				ChannelID:     msg.ChannelID,
-				Model:         modelName,
-				InputTokens:   resp.Usage.InputTokens,
-				OutputTokens:  resp.Usage.OutputTokens,
-				InputCostUSD:  inCost,
-				OutputCostUSD: outCost,
-				TotalCostUSD:  inCost + outCost,
-				Timestamp:     llmStart,
+				ID:              uuid.New().String(),
+				SessionID:       conv.ID,
+				ConvID:          conv.ID,          // REQ-13: explicit conv-level attribution
+				ParentConvID:    conv.ParentConvID, // REQ-13: non-empty for subagent turns; "" for principals
+				AttributionKind: "self",            // V1: always self; advisor_call reserved for V2
+				ChannelID:       msg.ChannelID,
+				Model:           modelName,
+				InputTokens:     resp.Usage.InputTokens,
+				OutputTokens:    resp.Usage.OutputTokens,
+				InputCostUSD:    inCost,
+				OutputCostUSD:   outCost,
+				TotalCostUSD:    inCost + outCost,
+				Timestamp:       llmStart,
 			})
 		}
 		totalInputTokens += resp.Usage.InputTokens

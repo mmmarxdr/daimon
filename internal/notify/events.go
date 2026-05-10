@@ -31,6 +31,12 @@ const (
 	// Events with Origin == OriginNotification are dropped by the bus worker.
 	EventNotificationSent   = "notification.sent"
 	EventNotificationFailed = "notification.failed"
+
+	// Subagent lifecycle events — emitted by SubagentManager per design §2.6.
+	// All three use OriginAgent and the Meta map for structured payload fields.
+	EventSubagentSpawned   = "agent.subagent.spawned"
+	EventSubagentCompleted = "agent.subagent.completed"
+	EventSubagentFailed    = "agent.subagent.failed"
 )
 
 // KnownEventTypes is the set of valid event types for rule validation.
@@ -43,4 +49,9 @@ var KnownEventTypes = map[string]bool{
 	EventTurnStarted:      true,
 	EventTurnCompleted:    true,
 	EventContextCompacted: true,
+
+	// Subagent lifecycle events.
+	EventSubagentSpawned:   true,
+	EventSubagentCompleted: true,
+	EventSubagentFailed:    true,
 }

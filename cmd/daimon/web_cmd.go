@@ -116,12 +116,12 @@ func runWebCommand(args []string, cfgPath string) error {
 	toolsRegistry := tool.BuildRegistrySimple(cfg.Tools)
 
 	var skillContents []skill.SkillContent
+	var execSkillDefs []skill.ExecutableSkillDef
 	if len(cfg.Skills) > 0 {
 		var skillTools map[string]tool.Tool
 		var skillWarns []error
-		var execSkillDefs []skill.ExecutableSkillDef
 		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
-		_ = execSkillDefs // Phase 2: wire into agent.New()
+		// execSkillDefs is wired into the agent via WithExecutableSkills after New().
 		for _, w := range skillWarns {
 			slog.Warn("skills: load warning", "error", w)
 		}
@@ -324,7 +324,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, aud,
 		toolsRegistry, autoloadSkills, skillIndex,
 		cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream),
-	).WithBus(notifyBus).WithCronCommands(cronScheduler, cronSt).WithAIConfig(cfg.AI)
+	).WithBus(notifyBus).WithExecutableSkills(execSkillDefs).WithCronCommands(cronScheduler, cronSt).WithAIConfig(cfg.AI)
 	if cfg.AI.TitleGeneration.Enabled {
 		titler := agent.NewTitleGenerator(st, prov, cfg.AI.TitleGeneration)
 		ag.WithTitler(titler)
