@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"daimon/internal/config"
 	"daimon/internal/content"
 )
 
@@ -147,4 +148,15 @@ type ModelInfo struct {
 // available models. Callers type-assert: ml, ok := prov.(ModelLister)
 type ModelLister interface {
 	ListModels(ctx context.Context) ([]ModelInfo, error)
+}
+
+// ConfigurableProvider is implemented by providers that can return their
+// resolved config. Used by makeChildAgentFn to inherit credentials when a
+// subagent's skill declares a different provider type than the parent.
+//
+// This is an OPT-IN interface (additive). Providers that do not implement it
+// degrade gracefully: child agents fall back to the parent's provider instance
+// instead of constructing a fresh one with inherited credentials.
+type ConfigurableProvider interface {
+	Config() config.ProviderConfig
 }
