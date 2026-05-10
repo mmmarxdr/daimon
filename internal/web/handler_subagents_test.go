@@ -38,6 +38,10 @@ func (f *fakeSubagentProvider) SubagentBus() notify.Bus {
 	return f.bus
 }
 
+func (f *fakeSubagentProvider) CancelSubagent(_ string) error {
+	return nil
+}
+
 func newSubagentTestServer(t *testing.T, provider SubagentProvider) *Server {
 	t.Helper()
 	s := &Server{
