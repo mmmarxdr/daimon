@@ -11,10 +11,12 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"daimon/internal/agent"
 	"daimon/internal/audit"
 	"daimon/internal/channel"
 	"daimon/internal/config"
 	"daimon/internal/mcp"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/rag"
 	"daimon/internal/rag/metrics"
@@ -56,6 +58,17 @@ type AgentReloader interface {
 	ReplaceSkills(skills []skill.SkillContent, idx skill.SkillIndex)
 }
 
+// SubagentProvider is a narrow interface the web layer uses to query live
+// subagent state and subscribe to the event bus for the WS feed.
+// The concrete *agent.Agent satisfies it; nil is a valid value when no
+// executable skills are loaded (handlers return empty results).
+type SubagentProvider interface {
+	// ActiveSubagents returns a snapshot of currently running subagents.
+	ActiveSubagents() []agent.SubagentStatus
+	// SubagentBus returns the notify.Bus used by the agent. May be nil.
+	SubagentBus() notify.Bus
+}
+
 // ServerDeps holds the dependencies for the web server.
 type ServerDeps struct {
 	Store           store.Store
@@ -81,6 +94,10 @@ type ServerDeps struct {
 	// RAGMetrics — nil when metrics collection is not configured.
 	// GET /api/metrics/rag returns 501 when nil.
 	RAGMetrics metrics.Recorder
+
+	// SubagentProvider exposes live subagent state and the event bus for the
+	// REST + WS visibility endpoints. Nil when no executable skills are loaded.
+	SubagentProvider SubagentProvider
 }
 
 // Server is the HTTP dashboard server.
@@ -327,6 +344,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/media", s.handleListMedia)
 	s.mux.HandleFunc("GET /api/media/{sha256}", s.handleGetMedia)
 	s.mux.Handle("DELETE /api/media/{sha256}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteMedia)))
+	// Subagent visibility endpoints.
+	s.mux.HandleFunc("GET /api/subagents/active", s.handleSubagentsActive)
+	s.mux.HandleFunc("/api/ws/subagents", s.handleSubagentsWebSocket)
 	// WebSocket endpoints.
 	s.mux.HandleFunc("/ws/metrics", s.handleMetricsWebSocket)
 	s.mux.HandleFunc("/ws/logs", s.handleLogsWebSocket)

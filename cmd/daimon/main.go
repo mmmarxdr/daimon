@@ -247,12 +247,12 @@ func main() {
 	// Skills are merged before MCP so that user-authored skill tools win on collision.
 	// Priority: built-in > skill > MCP.
 	var skillContents []skill.SkillContent
+	var execSkillDefs []skill.ExecutableSkillDef
 	if len(cfg.Skills) > 0 {
 		var skillTools map[string]tool.Tool
 		var skillWarns []error
-		var execSkillDefs []skill.ExecutableSkillDef
 		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
-		_ = execSkillDefs // Phase 2: wire into agent.New()
+		// execSkillDefs is wired into the agent via WithExecutableSkills after New().
 		for _, w := range skillWarns {
 			slog.Warn("skills: load warning", "error", w)
 		}
@@ -508,6 +508,7 @@ func main() {
 
 	ag := agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream)).
 		WithBus(notifyBus).
+		WithExecutableSkills(execSkillDefs).
 		WithCronCommands(cronScheduler, cronSt).
 		WithAIConfig(cfg.AI)
 	if cfg.AI.TitleGeneration.Enabled {
@@ -574,6 +575,7 @@ func main() {
 		// Rebuild the agent with the updated mux (WebChannel included).
 		ag = agent.New(cfg.Agent, cfg.Limits, cfg.Filter, mux, prov, st, auditor, toolsRegistry, autoloadSkills, skillIndex, cfg.Cron.MaxConcurrent, config.BoolVal(activeProv.Stream)).
 			WithBus(notifyBus).
+			WithExecutableSkills(execSkillDefs).
 			WithCronCommands(cronScheduler, cronSt).
 			WithAIConfig(cfg.AI)
 		if cfg.AI.TitleGeneration.Enabled {
