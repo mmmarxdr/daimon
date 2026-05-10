@@ -33,10 +33,12 @@ func newTestAgent(t *testing.T, execSkills []skill.ExecutableSkillDef) *Agent {
 
 	a := New(cfg, defaultLimits(), config.FilterConfig{}, ch, prov, st,
 		audit.NoopAuditor{}, tools, nil, skill.SkillIndex{}, 4, false)
+	// WithBus must come before WithExecutableSkills so that NewSubagentManager
+	// receives a non-nil bus (matches production order in cmd/daimon).
+	a.WithBus(bus)
 	if len(execSkills) > 0 {
 		a.WithExecutableSkills(execSkills)
 	}
-	a.WithBus(bus)
 	return a
 }
 

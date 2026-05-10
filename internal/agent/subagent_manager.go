@@ -106,6 +106,16 @@ func (h *SubagentHandle) Wait(ctx context.Context) (*SubagentResult, error) {
 // Cancel cancels this specific subagent. Idempotent.
 func (h *SubagentHandle) Cancel() { h.rec.cancel() }
 
+// Subscribe is reserved for V2 — see design §2.1. It returns a closed channel
+// so that callers who attempt to range over it exit immediately rather than
+// blocking forever. The real streaming-status path will be wired in a later
+// change once the V2 event model is defined.
+func (h *SubagentHandle) Subscribe(_ context.Context) (<-chan SubagentStatus, error) {
+	ch := make(chan SubagentStatus)
+	close(ch)
+	return ch, nil
+}
+
 // Status returns a read-only snapshot of the subagent's current state.
 func (h *SubagentHandle) Status() SubagentStatus {
 	h.rec.mu.Lock()
@@ -138,8 +148,10 @@ type SubagentManager struct {
 	// Overridable by tests to track calls without triggering channel delivery.
 	softWarnFn func(*subRecord)
 
-	// newChildAgent is the test seam: replaced in unit tests to avoid starting
-	// a real Agent. In production it is set by NewSubagentManager.
+	// newChildAgent is the production factory for child Agents and the test seam.
+	// In production it is wired by Agent.WithExecutableSkills via makeChildAgentFn.
+	// In tests it is replaced by newTestManager's fake closure to avoid starting
+	// real LLM-connected Agents.
 	newChildAgent func(
 		def skill.ExecutableSkillDef,
 		prompt string,

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -96,7 +97,14 @@ type Agent struct {
 	auditorFn       func() audit.Auditor
 
 	// subMgr manages spawned child agents (nil when no executable skills loaded).
-	subMgr          *SubagentManager
+	subMgr *SubagentManager
+
+	// preStartedInbox is set by the production SubagentManager.newChildAgent
+	// closure before launching Run in a goroutine. When set, Run reuses this
+	// inbox (and the channel.Start call becomes idempotent) instead of creating
+	// a fresh one — ensuring the inbox that SubagentChannel.Deliver wrote to is
+	// the same one the child's event loop reads from.
+	preStartedInbox chan channel.IncomingMessage
 
 	// tools / skills are protected by toolsMu / skillsMu so the dashboard's
 	// hot-add flow (RegisterMCPServer / ReplaceSkills) can mutate them while
@@ -313,12 +321,16 @@ func (a *Agent) WithMediaConfig(cfg config.MediaConfig) *Agent {
 }
 
 // WithBus sets the event bus on the agent, enabling agent.turn.started/completed events.
-// Also propagates the bus to contextMgr if present.
+// Also propagates the bus to contextMgr and subMgr (if already constructed) so
+// that callers who invoke WithBus after WithExecutableSkills still get a wired bus.
 // Returns a for fluent chaining.
 func (a *Agent) WithBus(bus notify.Bus) *Agent {
 	a.bus = bus
 	if a.contextMgr != nil {
 		a.contextMgr.bus = bus
+	}
+	if a.subMgr != nil {
+		a.subMgr.bus = bus
 	}
 	return a
 }
@@ -400,7 +412,9 @@ func (a *Agent) WithAIConfig(cfg config.AIConfig) *Agent {
 
 // WithExecutableSkills wires spawnable subagent definitions into the agent.
 // For each def a SubagentSpawnTool is registered in a.tools under def.Name.
-// The agent's SubagentManager is created on the first call. Call before Run().
+// The agent's SubagentManager is created on the first call and its production
+// newChildAgent closure is wired so that Spawn actually starts a child Agent.
+// Call before Run().
 //
 // Two-phase tool validation (design §2.5.4): unknown names in def.ToolsAllowlist
 // are dropped with a slog.Warn — the loader cannot cross-check at parse time
@@ -412,6 +426,14 @@ func (a *Agent) WithExecutableSkills(defs []skill.ExecutableSkillDef) *Agent {
 	if a.subMgr == nil {
 		a.subMgr = NewSubagentManager(a.bus, a.store)
 		a.subMgr.installBusSubscription()
+	}
+
+	// Wire the production newChildAgent closure. It captures a snapshot of the
+	// parent's tools under toolsMu so filterParentTools receives the live map.
+	// The closure is set once; subsequent WithExecutableSkills calls (if any)
+	// reuse the same manager and the closure remains valid.
+	if a.subMgr.newChildAgent == nil {
+		a.subMgr.newChildAgent = a.makeChildAgentFn()
 	}
 
 	a.toolsMu.Lock()
@@ -426,6 +448,146 @@ func (a *Agent) WithExecutableSkills(defs []skill.ExecutableSkillDef) *Agent {
 		a.tools[def.Name] = spawn
 	}
 	return a
+}
+
+// makeChildAgentFn returns the production newChildAgent closure for the
+// SubagentManager. The closure captures the parent agent (a) and:
+//  1. Snapshots the parent's tools under toolsMu.
+//  2. Builds a child provider (from def.ProviderName or falls back to the
+//     parent's provider when the skill does not specify one).
+//  3. Constructs a child Agent via agent.New with sem=1 and the sub-channel.
+//  4. Pre-starts the sub-channel inbox so Spawn.Deliver writes to the correct
+//     channel before the child goroutine has had a chance to call Start itself.
+//  5. Launches go childAgent.Run(subCtx) in a goroutine.
+//
+// Tests override newChildAgent directly on the SubagentManager and never call
+// makeChildAgentFn — this function is production-only.
+func (a *Agent) makeChildAgentFn() func(
+	def skill.ExecutableSkillDef,
+	prompt string,
+	subCtx context.Context,
+	subCh *channel.SubagentChannel,
+	parentTools map[string]tool.Tool,
+	st store.Store,
+) (*Agent, error) {
+	return func(
+		def skill.ExecutableSkillDef,
+		_ string,
+		subCtx context.Context,
+		subCh *channel.SubagentChannel,
+		_ map[string]tool.Tool, // ignored: closure re-snapshots under toolsMu
+		st store.Store,
+	) (*Agent, error) {
+		// Snapshot parent tools at spawn time (may include MCP tools registered
+		// after WithExecutableSkills was called).
+		a.toolsMu.RLock()
+		parentSnapshot := make(map[string]tool.Tool, len(a.tools))
+		for k, v := range a.tools {
+			parentSnapshot[k] = v
+		}
+		a.toolsMu.RUnlock()
+
+		childTools := filterParentTools(parentSnapshot, def.ToolsAllowlist)
+
+		// Build child provider: use the skill's declared provider when present;
+		// otherwise inherit the parent's provider (same credentials, same model
+		// unless overridden by def.Model).
+		childProv := a.provider
+		if def.ProviderName != "" {
+			cfg := providerConfigForSkill(def, a.provider)
+			p, err := provider.NewFromConfig(cfg)
+			if err != nil {
+				return nil, fmt.Errorf("subagent: create provider for skill %q: %w", def.Name, err)
+			}
+			childProv = p
+		}
+
+		childCfg := config.AgentConfig{
+			MaxIterations: def.Budget.MaxTurns,
+			Personality:   def.SystemAddendum,
+		}
+		childAgent := New(
+			childCfg,
+			a.limits,
+			a.filterCfg,
+			subCh,
+			childProv,
+			st,
+			a.auditorFn(),
+			childTools,
+			nil,
+			skill.SkillIndex{},
+			1,     // sem=1: child agents are single-turn in V1
+			false, // no streaming for subagents
+		)
+		// Wire the parent's bus so the child emits EventTurnCompleted;
+		// the budgetMonitor fan-out in the parent's SubagentManager listens
+		// for this event to track cost and detect natural completion.
+		if a.bus != nil {
+			childAgent.WithBus(a.bus)
+		}
+
+		// Pre-start the channel: create the inbox, hand it to subCh so that
+		// Spawn.Deliver (called right after this closure returns) writes to the
+		// same channel the Run loop will read from.
+		inbox := make(chan channel.IncomingMessage, 100)
+		childAgent.preStartedInbox = inbox
+		if err := subCh.Start(subCtx, inbox); err != nil {
+			return nil, fmt.Errorf("subagent: start channel: %w", err)
+		}
+
+		go func() {
+			_ = childAgent.Run(subCtx)
+		}()
+
+		return childAgent, nil
+	}
+}
+
+// providerConfigForSkill builds a config.ProviderConfig for a child agent
+// from an ExecutableSkillDef. It uses the skill's declared provider type and,
+// when the skill does not specify its own credentials, inherits them from the
+// parent provider (when it exposes a Config() accessor).
+func providerConfigForSkill(def skill.ExecutableSkillDef, parent provider.Provider) config.ProviderConfig {
+	cfg := config.ProviderConfig{
+		Type:  def.ProviderName,
+		Model: def.Model,
+	}
+
+	// Inherit from parent when the parent exposes its config.
+	type configurer interface{ Config() config.ProviderConfig }
+	if pc, ok := parent.(configurer); ok {
+		parentCfg := pc.Config()
+		if cfg.Model == "" {
+			cfg.Model = parentCfg.Model
+		}
+		if cfg.Type == parentCfg.Type {
+			// Same provider type: reuse credentials so the skill author doesn't
+			// have to repeat API keys in every skill file.
+			if cfg.APIKey == "" {
+				cfg.APIKey = parentCfg.APIKey
+			}
+			if cfg.BaseURL == "" {
+				cfg.BaseURL = parentCfg.BaseURL
+			}
+			if cfg.Timeout == 0 {
+				cfg.Timeout = parentCfg.Timeout
+			}
+			if cfg.MaxRetries == 0 {
+				cfg.MaxRetries = parentCfg.MaxRetries
+			}
+		}
+	}
+
+	// Explicit skill-level overrides win over parent values.
+	if apiKey, ok := def.ProviderConfig["api_key"].(string); ok && apiKey != "" {
+		cfg.APIKey = apiKey
+	}
+	if baseURL, ok := def.ProviderConfig["base_url"].(string); ok && baseURL != "" {
+		cfg.BaseURL = baseURL
+	}
+
+	return cfg
 }
 
 // filterKnownTools returns the allowlist with unknown tool names removed.
@@ -457,7 +619,17 @@ func (a *Agent) EmbeddingWorker() *EmbeddingWorker { return a.embeddingWorker }
 
 func (a *Agent) Run(ctx context.Context) error {
 	a.startedAt = time.Now()
-	inbox := make(chan channel.IncomingMessage, 100)
+
+	// Use a pre-created inbox when running as a child agent. The
+	// SubagentManager.newChildAgent closure creates the inbox, calls
+	// subCh.Start, and sets preStartedInbox before launching this goroutine.
+	// That guarantees SubagentChannel.Deliver writes to the same channel this
+	// loop reads from. For normal (principal) agents, preStartedInbox is nil
+	// and we create a fresh buffered channel as before.
+	inbox := a.preStartedInbox
+	if inbox == nil {
+		inbox = make(chan channel.IncomingMessage, 100)
+	}
 	a.inbox = inbox
 
 	if err := a.channel.Start(ctx, inbox); err != nil {
