@@ -8,6 +8,9 @@ model: mock-model
 budget:
   max_cost_usd: 10.0
   max_turns: 100
+  # timeout_min: 0 → context.WithTimeout(ctx, 0) yields an already-expired
+  # context, which is intentional for the timeout-race test. Do NOT use this
+  # fixture for anything other than testing the timeout cap.
   timeout_min: 0
 tools_allowlist: []
 ---
