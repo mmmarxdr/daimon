@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -475,4 +476,100 @@ func TestSubagentManager_SoftWarning_FiredOnceAt80Percent(t *testing.T) {
 	if callsAfter != 1 {
 		t.Errorf("injectSoftWarning called %d times after second turn, want still 1", callsAfter)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// REQ-14 — MCP share-and-filter: filterParentTools unit tests (W3)
+// ---------------------------------------------------------------------------
+
+// mockToolImpl is a minimal tool.Tool used to populate parent tool maps.
+type mockToolImpl struct{ n string }
+
+func (m *mockToolImpl) Name() string                                                  { return m.n }
+func (m *mockToolImpl) Description() string                                           { return "test tool" }
+func (m *mockToolImpl) Schema() json.RawMessage                                       { return json.RawMessage(`{}`) }
+func (m *mockToolImpl) Execute(_ context.Context, _ json.RawMessage) (tool.ToolResult, error) {
+	return tool.ToolResult{}, nil
+}
+
+func makeParentTools(names ...string) map[string]tool.Tool {
+	out := make(map[string]tool.Tool, len(names))
+	for _, n := range names {
+		out[n] = &mockToolImpl{n: n}
+	}
+	return out
+}
+
+// TestFilterParentTools_AllowlistFiltering verifies design §2.5.4:
+//   - empty allowlist → child inherits all parent tools
+//   - non-empty allowlist → child gets exactly the named tools
+//   - allowlist with unknown name → unknown entry silently dropped (no error)
+//   - nil parent map → child always gets empty map (no panic)
+func TestFilterParentTools_AllowlistFiltering(t *testing.T) {
+	parent3 := makeParentTools("tool_a", "tool_b", "tool_c")
+
+	cases := []struct {
+		name      string
+		parent    map[string]tool.Tool
+		allowlist []string
+		wantKeys  []string // sorted; nil = expect empty
+	}{
+		{
+			name:      "empty allowlist inherits all 3",
+			parent:    parent3,
+			allowlist: []string{},
+			wantKeys:  []string{"tool_a", "tool_b", "tool_c"},
+		},
+		{
+			name:      "allowlist of 2 from 3 parent tools",
+			parent:    parent3,
+			allowlist: []string{"tool_a", "tool_c"},
+			wantKeys:  []string{"tool_a", "tool_c"},
+		},
+		{
+			name:      "allowlist with unknown name — unknown dropped, known kept",
+			parent:    parent3,
+			allowlist: []string{"tool_b", "nonexistent_tool"},
+			wantKeys:  []string{"tool_b"},
+		},
+		{
+			name:      "nil parent map — always empty regardless of allowlist",
+			parent:    nil,
+			allowlist: []string{"tool_a"},
+			wantKeys:  nil,
+		},
+		{
+			name:      "nil parent with empty allowlist — empty",
+			parent:    nil,
+			allowlist: []string{},
+			wantKeys:  nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterParentTools(tc.parent, tc.allowlist)
+
+			wantLen := len(tc.wantKeys)
+			if len(got) != wantLen {
+				t.Errorf("len(filterParentTools) = %d, want %d; keys = %v",
+					len(got), wantLen, toolKeys(got))
+				return
+			}
+			for _, k := range tc.wantKeys {
+				if _, ok := got[k]; !ok {
+					t.Errorf("expected key %q in result; got keys = %v", k, toolKeys(got))
+				}
+			}
+		})
+	}
+}
+
+// toolKeys returns the sorted key list of a tool map for test error messages.
+func toolKeys(m map[string]tool.Tool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
