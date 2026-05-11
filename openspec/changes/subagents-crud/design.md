@@ -848,8 +848,10 @@ Curated check: at the top of PUT/DELETE handlers, after `GetUserSkill`, if `exis
 ```go
 // handleSubagentCancel cancels a running subagent identified by path param {id}.
 // Per spec REQ-17:
-//   - 200 + {"cancelled":true} when the cancel was issued
+//   - 204 No Content when the cancel was issued successfully
+//   - 200 + {"already_finished":true} when the subagent is already in a terminal state
 //   - 404 when no SubagentProvider is wired or the ID is unknown
+//   - 500 on internal error
 //   - 405 when the method is not POST (handled by the route mux)
 func (s *Server) handleSubagentCancel(w http.ResponseWriter, r *http.Request) {
     id := r.PathValue("id") // Go 1.22+ ServeMux path param
@@ -862,14 +864,17 @@ func (s *Server) handleSubagentCancel(w http.ResponseWriter, r *http.Request) {
         return
     }
     if err := s.deps.SubagentProvider.CancelSubagent(id); err != nil {
-        // SubagentManager.Cancel returns "subagent %q not found" for unknown
-        // IDs. There is no other failure mode in V1.
+        if errors.Is(err, errAlreadyFinished) {
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(http.StatusOK)
+            _ = json.NewEncoder(w).Encode(map[string]bool{"already_finished": true})
+            return
+        }
+        // SubagentManager.Cancel returns "subagent %q not found" for unknown IDs.
         http.Error(w, `{"error":"subagent not found"}`, http.StatusNotFound)
         return
     }
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusOK)
-    _ = json.NewEncoder(w).Encode(map[string]bool{"cancelled": true})
+    w.WriteHeader(http.StatusNoContent)
 }
 ```
 
