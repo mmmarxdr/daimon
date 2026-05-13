@@ -40,22 +40,42 @@ func defaultDef(name string) skill.ExecutableSkillDef {
 // fakeChildAgent simulates a child agent. It immediately delivers
 // the prompt back as a final assistant message so the manager
 // can observe a clean completion.
+//
+// When emitBus is non-nil, runFn also emits an EventTurnCompleted on it
+// after Send — mirroring what loop.go does in a real child agent. Tests
+// that drive turn_completed events themselves (e.g. budget caps) leave
+// emitBus nil so they retain full control over event ordering and meta.
 type fakeChildAgent struct {
 	mu        sync.Mutex
 	channel   *channel.SubagentChannel
 	runCalled bool
+	emitBus   notify.Bus
 }
 
 func (f *fakeChildAgent) runFn(_ context.Context) {
 	f.mu.Lock()
 	f.runCalled = true
 	ch := f.channel
+	emitBus := f.emitBus
 	f.mu.Unlock()
 
 	// Simulate a completed turn: Send a final assistant message.
 	_ = ch.Send(context.Background(), channel.OutgoingMessage{
 		Text: "done",
 	})
+
+	// Mirror loop.go's per-turn EventTurnCompleted emission when wired
+	// to a bus, so budgetMonitor sees FinalAssistant != "" and finalizes.
+	if emitBus != nil {
+		emitBus.Emit(notify.Event{
+			Type:      notify.EventTurnCompleted,
+			Origin:    notify.OriginAgent,
+			ChannelID: ch.ID(),
+			Timestamp: time.Now(),
+			Meta:      map[string]string{"cost_usd": "0.0001"},
+		})
+	}
+
 	_ = ch.Stop()
 }
 
