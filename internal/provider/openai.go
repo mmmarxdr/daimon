@@ -98,6 +98,7 @@ const (
 // OpenAIProvider calls the OpenAI Chat Completions API (or any compatible API
 // such as Ollama via a custom base_url).
 type OpenAIProvider struct {
+	config         config.ProviderConfig // stored for ConfigurableProvider.Config()
 	baseURL        string
 	apiKey         string
 	model          string
@@ -152,6 +153,7 @@ func NewOpenAIProvider(cfg config.ProviderConfig) (*OpenAIProvider, error) {
 	}
 
 	return &OpenAIProvider{
+		config:     cfg,
 		baseURL:    baseURL,
 		apiKey:     cfg.APIKey,
 		model:      model,
@@ -170,6 +172,10 @@ func (p *OpenAIProvider) Model() string            { return p.model }
 func (p *OpenAIProvider) SupportsTools() bool      { return true }
 func (p *OpenAIProvider) SupportsMultimodal() bool { return true }
 func (p *OpenAIProvider) SupportsAudio() bool      { return true }
+
+// Config returns the resolved ProviderConfig used to construct this provider.
+// Satisfies provider.ConfigurableProvider.
+func (p *OpenAIProvider) Config() config.ProviderConfig { return p.config }
 
 // HealthCheck verifies configuration and returns the model name.
 // No HTTP call is made — mirrors the AnthropicProvider pattern for startup-latency consistency.

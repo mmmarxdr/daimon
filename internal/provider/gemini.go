@@ -105,6 +105,10 @@ func (p *GeminiProvider) SupportsTools() bool      { return true }
 func (p *GeminiProvider) SupportsMultimodal() bool { return true }
 func (p *GeminiProvider) SupportsAudio() bool      { return true }
 
+// Config returns the resolved ProviderConfig used to construct this provider.
+// Satisfies provider.ConfigurableProvider.
+func (p *GeminiProvider) Config() config.ProviderConfig { return p.config }
+
 // --------------------------------------------------------------------------
 // Wire types — Gemini generateContent REST API
 // --------------------------------------------------------------------------

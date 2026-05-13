@@ -153,6 +153,10 @@ func (p *OpenRouterProvider) SupportsTools() bool      { return true }
 func (p *OpenRouterProvider) SupportsMultimodal() bool { return true }
 func (p *OpenRouterProvider) SupportsAudio() bool      { return true }
 
+// Config returns the resolved ProviderConfig used to construct this provider.
+// Satisfies provider.ConfigurableProvider.
+func (p *OpenRouterProvider) Config() config.ProviderConfig { return p.config }
+
 // HealthCheck checks that an API key is configured and returns the model name.
 // No HTTP call is made — mirrors AnthropicProvider pattern for startup-latency consistency.
 func (p *OpenRouterProvider) HealthCheck(_ context.Context) (string, error) {

@@ -117,10 +117,20 @@ func TestSubagentResult_MetadataContainsIDs(t *testing.T) {
 	t.Cleanup(func() { bus.Close() })
 	st := &mockStore{}
 
-	m, _ := newTestManager(t, bus, st)
+	m, fake := newTestManager(t, bus, st)
+	// Wire the fake to emit EventTurnCompleted after Send (what a real child's
+	// loop.go does). Without this, budgetMonitor never gets the event that
+	// triggers the FinalAssistant completion check and Wait hangs until the
+	// per-spawn ctx times out — a 5-minute test stall in CI (see CI failure
+	// on PR #9: TestSubagentResult_MetadataContainsIDs (4m46s)).
+	fake.emitBus = bus
 	m.installBusSubscription()
 
-	ctx := context.Background()
+	// Tight Wait deadline so any future regression here fails in seconds
+	// rather than burning the package-level 5-minute timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	handle, err := m.Spawn(ctx, defaultDef("researcher"), "do research", SpawnModeSync, "conv_parent")
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)

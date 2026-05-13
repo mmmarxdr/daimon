@@ -114,6 +114,10 @@ func (p *AnthropicProvider) SupportsTools() bool       { return true }
 func (p *AnthropicProvider) SupportsMultimodal() bool { return true }
 func (p *AnthropicProvider) SupportsAudio() bool      { return false }
 
+// Config returns the resolved ProviderConfig used to construct this provider.
+// Satisfies provider.ConfigurableProvider.
+func (p *AnthropicProvider) Config() config.ProviderConfig { return p.config }
+
 func (p *AnthropicProvider) HealthCheck(ctx context.Context) (string, error) {
 	if p.config.APIKey == "" {
 		return "", fmt.Errorf("anthropic: missing api_key")

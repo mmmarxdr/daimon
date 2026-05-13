@@ -67,6 +67,10 @@ type SubagentProvider interface {
 	ActiveSubagents() []agent.SubagentStatus
 	// SubagentBus returns the notify.Bus used by the agent. May be nil.
 	SubagentBus() notify.Bus
+	// CancelSubagent cancels a running subagent by ID. Returns nil on success,
+	// errAlreadyFinished when the subagent has already terminated, or an
+	// error with "not found" text when the ID is unknown. (REQ-17)
+	CancelSubagent(id string) error
 }
 
 // ServerDeps holds the dependencies for the web server.
@@ -346,6 +350,7 @@ func (s *Server) routes() {
 	s.mux.Handle("DELETE /api/media/{sha256}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteMedia)))
 	// Subagent visibility endpoints.
 	s.mux.HandleFunc("GET /api/subagents/active", s.handleSubagentsActive)
+	s.mux.Handle("POST /api/subagents/{id}/cancel", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleSubagentCancel)))
 	s.mux.HandleFunc("/api/ws/subagents", s.handleSubagentsWebSocket)
 	// WebSocket endpoints.
 	s.mux.HandleFunc("/ws/metrics", s.handleMetricsWebSocket)

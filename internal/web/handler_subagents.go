@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,12 @@ import (
 	"daimon/internal/agent"
 	"daimon/internal/notify"
 )
+
+// errAlreadyFinished is a sentinel returned by CancelSubagent implementations
+// when the target subagent has already reached a terminal state
+// (completed / failed / cancelled). The cancel handler maps this to HTTP 200
+// with {"already_finished": true} per REQ-17.
+var errAlreadyFinished = errors.New("subagent already finished")
 
 // subagentActiveItem is the JSON shape for a single entry in GET /api/subagents/active.
 // Field names follow the spec (SUBAGENTS-REQ-15) and the frontend panel contract.
@@ -143,6 +150,41 @@ func (s *Server) handleSubagentsWebSocket(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+}
+
+// handleSubagentCancel cancels a running subagent identified by path param {id}.
+// Per spec REQ-17:
+//   - 204 No Content when the cancel was issued successfully
+//   - 200 + {"already_finished": true} when the subagent is already in a terminal state
+//   - 404 when no SubagentProvider is wired or the ID is unknown
+//   - 400 when the id path parameter is missing
+func (s *Server) handleSubagentCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id") // Go 1.22+ ServeMux path param
+	if id == "" {
+		http.Error(w, `{"error":"missing id"}`, http.StatusBadRequest)
+		return
+	}
+	if s.deps.SubagentProvider == nil {
+		http.Error(w, `{"error":"subagent not found"}`, http.StatusNotFound)
+		return
+	}
+
+	err := s.deps.SubagentProvider.CancelSubagent(id)
+	if err == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if errors.Is(err, errAlreadyFinished) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"already_finished": true})
+		return
+	}
+
+	// SubagentManager.Cancel returns "subagent %q not found" for unknown IDs.
+	// All other failures are also mapped to 404 in V1 (only failure mode is unknown ID).
+	http.Error(w, `{"error":"subagent not found"}`, http.StatusNotFound)
 }
 
 // buildSubagentPayload converts a notify.Event into the WS payload map.

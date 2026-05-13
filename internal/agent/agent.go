@@ -555,8 +555,8 @@ func providerConfigForSkill(def skill.ExecutableSkillDef, parent provider.Provid
 	}
 
 	// Inherit from parent when the parent exposes its config.
-	type configurer interface{ Config() config.ProviderConfig }
-	if pc, ok := parent.(configurer); ok {
+	// Uses the canonical provider.ConfigurableProvider interface (REQ-20).
+	if pc, ok := parent.(provider.ConfigurableProvider); ok {
 		parentCfg := pc.Config()
 		if cfg.Model == "" {
 			cfg.Model = parentCfg.Model
@@ -625,6 +625,21 @@ func (a *Agent) ActiveSubagents() []SubagentStatus {
 // May be nil when no bus has been configured.
 // Satisfies web.SubagentProvider.
 func (a *Agent) SubagentBus() notify.Bus { return a.bus }
+
+// CancelSubagent cancels a single running subagent by ID. Idempotent — calling
+// twice on the same ID is safe (the second call is a no-op once the first
+// fired). Returns nil when the agent has no SubagentManager (no executable
+// skills loaded). Returns an error from SubagentManager.Cancel when the ID is
+// not registered.
+//
+// Satisfies web.SubagentProvider.CancelSubagent. (REQ-18)
+func (a *Agent) CancelSubagent(id string) error {
+	if a.subMgr == nil {
+		// No executable skills loaded → nothing to cancel.
+		return nil
+	}
+	return a.subMgr.Cancel(id)
+}
 
 // Enricher returns the agent's async enrichment worker. May be nil.
 func (a *Agent) Enricher() *Enricher { return a.enricher }
