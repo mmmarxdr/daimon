@@ -337,6 +337,35 @@ func (s *FileStore) SearchOutputs(_ context.Context, _ string, _ int) ([]ToolOut
 // main.go logs a startup warning when cfg.Media.Enabled=true and the store
 // does not satisfy MediaStore — see cmd/daimon/main.go store construction.
 //
+// ─── UserSkillStore stubs (FileStore) ─────────────────────────────────────────
+// FileStore has no SQL backend, so all UserSkillStore methods are no-ops that
+// satisfy the Store interface. Only SQLiteStore provides real implementations.
+
+// ListUserSkills returns an empty slice (FileStore has no user_skills table).
+func (s *FileStore) ListUserSkills(_ context.Context) ([]UserSkill, error) {
+	return []UserSkill{}, nil
+}
+
+// GetUserSkill always returns ErrNotFound (FileStore has no user_skills table).
+func (s *FileStore) GetUserSkill(_ context.Context, name string) (UserSkill, error) {
+	return UserSkill{}, fmt.Errorf("get user_skill %q: %w", name, ErrNotFound)
+}
+
+// CreateUserSkill returns the input unchanged (FileStore has no user_skills table).
+func (s *FileStore) CreateUserSkill(_ context.Context, skill UserSkill) (UserSkill, error) {
+	return skill, nil
+}
+
+// UpdateUserSkill returns ErrNotFound (FileStore has no user_skills table).
+func (s *FileStore) UpdateUserSkill(_ context.Context, skill UserSkill) (UserSkill, error) {
+	return UserSkill{}, fmt.Errorf("update user_skill %q: %w", skill.Name, ErrNotFound)
+}
+
+// DeleteUserSkill returns ErrNotFound (FileStore has no user_skills table).
+func (s *FileStore) DeleteUserSkill(_ context.Context, name string) error {
+	return fmt.Errorf("delete user_skill %q: %w", name, ErrNotFound)
+}
+
 // Compile-time assertion.
 var _ OutputStore = (*FileStore)(nil)
 

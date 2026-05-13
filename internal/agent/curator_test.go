@@ -102,6 +102,23 @@ func (s *curatorMockStore) SetConversationStatus(_ context.Context, _ string, _ 
 	return nil
 }
 
+// UserSkillStore stubs.
+func (s *curatorMockStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) {
+	return []store.UserSkill{}, nil
+}
+func (s *curatorMockStore) GetUserSkill(_ context.Context, name string) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("get user_skill %q: %w", name, store.ErrNotFound)
+}
+func (s *curatorMockStore) CreateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, nil
+}
+func (s *curatorMockStore) UpdateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("update user_skill %q: %w", skill.Name, store.ErrNotFound)
+}
+func (s *curatorMockStore) DeleteUserSkill(_ context.Context, name string) error {
+	return fmt.Errorf("delete user_skill %q: %w", name, store.ErrNotFound)
+}
+
 func (s *curatorMockStore) appendCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

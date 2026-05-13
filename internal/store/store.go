@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -10,6 +12,10 @@ import (
 
 // ErrNotFound is returned when a requested conversation does not exist.
 var ErrNotFound = errors.New("not found")
+
+// ErrNameConflict is returned by CreateUserSkill when the name already exists
+// in the user_skills table (UNIQUE constraint violation).
+var ErrNameConflict = errors.New("name conflict")
 
 // ErrEncryptionKeyNotConfigured is returned when a SecretsStore method is called
 // but no encryption key has been configured via store.encryption_key or DAIMON_SECRET_KEY.
@@ -107,6 +113,26 @@ type Store interface {
 	// Returns ErrNotFound if the convID does not exist.
 	// Returns an error if status is not one of the valid values.
 	SetConversationStatus(ctx context.Context, convID, status string) error
+
+	// ListUserSkills returns all user_skills rows ordered by name ASC.
+	// FileStore returns an empty slice (no-op). SQLiteStore queries user_skills.
+	ListUserSkills(ctx context.Context) ([]UserSkill, error)
+
+	// GetUserSkill returns the user_skill row with the given name.
+	// Returns ErrNotFound when no row matches.
+	GetUserSkill(ctx context.Context, name string) (UserSkill, error)
+
+	// CreateUserSkill inserts a new user_skill row.
+	// Returns ErrNameConflict when a row with the same name already exists.
+	CreateUserSkill(ctx context.Context, skill UserSkill) (UserSkill, error)
+
+	// UpdateUserSkill replaces all mutable fields on the row identified by
+	// skill.Name. Returns ErrNotFound when no matching row exists.
+	UpdateUserSkill(ctx context.Context, skill UserSkill) (UserSkill, error)
+
+	// DeleteUserSkill removes the row with the given name.
+	// Returns ErrNotFound when no row matches.
+	DeleteUserSkill(ctx context.Context, name string) error
 
 	Close() error
 }
@@ -294,6 +320,108 @@ type CostStore interface {
 	// its descendant conversations (via parent_conv_id). ConversationCount
 	// reflects the number of distinct conversations in the tree.
 	CostSummaryForTree(ctx context.Context, rootConvID string) (CostSummary, error)
+}
+
+// BudgetJSON is the wire/DB representation of a skill's execution budget.
+// TimeoutMin stores minutes (integer) so the DB column is human-readable.
+// Converted to BudgetConfig at runtime via skill.userSkillToParts.
+type BudgetJSON struct {
+	MaxCostUSD float64 `json:"max_cost_usd"`
+	MaxTurns   int     `json:"max_turns"`
+	TimeoutMin int     `json:"timeout_min"`
+}
+
+// UserSkill mirrors a single user_skills row 1:1.
+// Budget and ToolsAllowlist use pointer / slice semantics to distinguish
+// NULL (inherit / unlimited) from empty (no tools / zero budget).
+type UserSkill struct {
+	ID             string      `json:"id"`
+	Name           string      `json:"name"`
+	Description    string      `json:"description"`
+	Prose          string      `json:"prose"`
+	Executable     bool        `json:"executable"`
+	Model          string      `json:"model"`
+	Provider       string      `json:"provider"`
+	ToolsAllowlist []string    `json:"tools_allowlist"`  // nil = inherit all; []string{} = no tools
+	Budget         *BudgetJSON `json:"budget,omitempty"` // nil = unlimited
+	Version        int         `json:"version"`
+	Source         string      `json:"source"` // "user" for rows inserted via REST
+	CreatedAt      time.Time   `json:"created_at"`
+	UpdatedAt      time.Time   `json:"updated_at"`
+}
+
+// encodeAllowlist converts a []string to a sql.NullString JSON blob.
+// nil input → NULL (Valid=false). Empty or non-empty slice → JSON string.
+func encodeAllowlist(v []string) sql.NullString {
+	if v == nil {
+		return sql.NullString{}
+	}
+	data, _ := json.Marshal(v)
+	return sql.NullString{String: string(data), Valid: true}
+}
+
+// decodeAllowlist converts a sql.NullString JSON blob back to []string.
+// NULL (Valid=false) → nil. Valid JSON → parsed slice (may be empty non-nil).
+func decodeAllowlist(ns sql.NullString) []string {
+	if !ns.Valid {
+		return nil
+	}
+	var v []string
+	if err := json.Unmarshal([]byte(ns.String), &v); err != nil {
+		return nil
+	}
+	return v
+}
+
+// encodeBudget converts a *BudgetJSON to a sql.NullString JSON blob.
+// nil input → NULL (Valid=false).
+func encodeBudget(b *BudgetJSON) sql.NullString {
+	if b == nil {
+		return sql.NullString{}
+	}
+	data, _ := json.Marshal(b)
+	return sql.NullString{String: string(data), Valid: true}
+}
+
+// decodeBudget converts a sql.NullString JSON blob back to *BudgetJSON.
+// NULL (Valid=false) → nil.
+func decodeBudget(ns sql.NullString) *BudgetJSON {
+	if !ns.Valid {
+		return nil
+	}
+	var b BudgetJSON
+	if err := json.Unmarshal([]byte(ns.String), &b); err != nil {
+		return nil
+	}
+	return &b
+}
+
+// UserSkillStore is an optional extension of Store for user-defined skill CRUD.
+// Only *SQLiteStore implements this; FileStore does not.
+// Callers type-assert:
+//
+//	uss, ok := myStore.(store.UserSkillStore)
+type UserSkillStore interface {
+	// ListUserSkills returns all user_skills rows ordered by name ASC.
+	// Returns an empty non-nil slice when no rows exist.
+	ListUserSkills(ctx context.Context) ([]UserSkill, error)
+
+	// GetUserSkill returns the row with the given name.
+	// Returns ErrNotFound (wrapped) when no row matches.
+	GetUserSkill(ctx context.Context, name string) (UserSkill, error)
+
+	// CreateUserSkill inserts a new row. Returns ErrNameConflict (wrapped)
+	// when a row with the same name already exists.
+	CreateUserSkill(ctx context.Context, skill UserSkill) (UserSkill, error)
+
+	// UpdateUserSkill replaces all mutable fields on the row identified by
+	// skill.Name. updated_at is set to now(). Returns ErrNotFound (wrapped)
+	// when no matching row exists.
+	UpdateUserSkill(ctx context.Context, skill UserSkill) (UserSkill, error)
+
+	// DeleteUserSkill removes the row with the given name. Returns ErrNotFound
+	// (wrapped) when no row matches.
+	DeleteUserSkill(ctx context.Context, name string) error
 }
 
 // SecretsStore is an optional extension of Store for encrypted key-value secrets.

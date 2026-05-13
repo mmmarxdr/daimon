@@ -195,6 +195,29 @@ func (m *mockStore) SetConversationStatus(_ context.Context, _ string, status st
 	return nil
 }
 
+// UserSkillStore stubs — mockStore has no SQL backend; these are no-ops that
+// satisfy the store.Store interface.
+
+func (m *mockStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) {
+	return []store.UserSkill{}, nil
+}
+
+func (m *mockStore) GetUserSkill(_ context.Context, name string) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("get user_skill %q: %w", name, store.ErrNotFound)
+}
+
+func (m *mockStore) CreateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, nil
+}
+
+func (m *mockStore) UpdateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("update user_skill %q: %w", skill.Name, store.ErrNotFound)
+}
+
+func (m *mockStore) DeleteUserSkill(_ context.Context, name string) error {
+	return fmt.Errorf("delete user_skill %q: %w", name, store.ErrNotFound)
+}
+
 // ---------------------------------------------------------------------------
 // Helper to build a default agent config.
 // ---------------------------------------------------------------------------
