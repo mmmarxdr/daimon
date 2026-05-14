@@ -100,6 +100,23 @@ func (s *enrichMockStore) SetConversationStatus(_ context.Context, _ string, _ s
 	return nil
 }
 
+// UserSkillStore stubs.
+func (s *enrichMockStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) {
+	return []store.UserSkill{}, nil
+}
+func (s *enrichMockStore) GetUserSkill(_ context.Context, _ string) (store.UserSkill, error) {
+	return store.UserSkill{}, store.ErrNotFound
+}
+func (s *enrichMockStore) CreateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, nil
+}
+func (s *enrichMockStore) UpdateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, store.ErrNotFound
+}
+func (s *enrichMockStore) DeleteUserSkill(_ context.Context, _ string) error {
+	return store.ErrNotFound
+}
+
 func (s *enrichMockStore) getUpdateCalls() []store.MemoryEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()

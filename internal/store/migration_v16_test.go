@@ -81,8 +81,8 @@ func TestMigration_V16_SchemaVersion(t *testing.T) {
 	if err := s.db.QueryRow("SELECT version FROM schema_version").Scan(&version); err != nil {
 		t.Fatalf("reading schema_version: %v", err)
 	}
-	if version != 17 {
-		t.Errorf("expected schema_version=17 on fresh DB after all migrations, got %d", version)
+	if version != 18 {
+		t.Errorf("expected schema_version=18 on fresh DB after all migrations, got %d", version)
 	}
 }
 

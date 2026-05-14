@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -163,6 +164,23 @@ func (f *fakeWebStore) SetConversationStatus(_ context.Context, _ string, _ stri
 	return nil
 }
 
+// UserSkillStore stubs for fakeWebStore.
+func (f *fakeWebStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) {
+	return []store.UserSkill{}, nil
+}
+func (f *fakeWebStore) GetUserSkill(_ context.Context, name string) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("get user_skill %q: %w", name, store.ErrNotFound)
+}
+func (f *fakeWebStore) CreateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, nil
+}
+func (f *fakeWebStore) UpdateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("update user_skill %q: %w", skill.Name, store.ErrNotFound)
+}
+func (f *fakeWebStore) DeleteUserSkill(_ context.Context, name string) error {
+	return fmt.Errorf("delete user_skill %q: %w", name, store.ErrNotFound)
+}
+
 // noWebStore — a store.Store that does NOT implement WebStore.
 type noWebStore struct{}
 
@@ -184,6 +202,23 @@ func (noWebStore) ListChildConversations(_ context.Context, _ string) ([]store.C
 	return []store.Conversation{}, nil
 }
 func (noWebStore) SetConversationStatus(_ context.Context, _ string, _ string) error { return nil }
+
+// UserSkillStore stubs for noWebStore.
+func (noWebStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) {
+	return []store.UserSkill{}, nil
+}
+func (noWebStore) GetUserSkill(_ context.Context, name string) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("get user_skill %q: %w", name, store.ErrNotFound)
+}
+func (noWebStore) CreateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return skill, nil
+}
+func (noWebStore) UpdateUserSkill(_ context.Context, skill store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, fmt.Errorf("update user_skill %q: %w", skill.Name, store.ErrNotFound)
+}
+func (noWebStore) DeleteUserSkill(_ context.Context, name string) error {
+	return fmt.Errorf("delete user_skill %q: %w", name, store.ErrNotFound)
+}
 
 func newTestServerWithStore(t *testing.T, st store.Store) *Server {
 	t.Helper()

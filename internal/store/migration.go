@@ -179,6 +179,11 @@ func (s *SQLiteStore) initSchemaVersioned() error {
 			return fmt.Errorf("migration v17: %w", err)
 		}
 	}
+	if version < 18 {
+		if err := s.migrateV18(); err != nil {
+			return fmt.Errorf("migration v18: %w", err)
+		}
+	}
 
 	// Boot-time orphan sweep: cancel any conversation that was left in
 	// 'running' state (e.g. by a crash) and has not been updated in 24h.
@@ -1059,6 +1064,62 @@ func (s *SQLiteStore) migrateV16() error {
 
 	if _, err := tx.Exec("UPDATE schema_version SET version = 16"); err != nil {
 		return fmt.Errorf("updating schema version to 16: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// migrateV18 creates the user_skills table for user-defined executable skill
+// storage (OUTPUT-STORE-REQ-11). Columns mirror the UserSkill struct 1:1.
+// tools_allowlist and budget are NULL-able TEXT (JSON-encoded when set).
+// Two indexes: source and executable (for fast list-by-source and list-by-type
+// queries from REST handlers and the loader).
+//
+// Idempotent: uses CREATE TABLE IF NOT EXISTS so re-running on an already-v18
+// database is safe. Advances schema_version to 18.
+func (s *SQLiteStore) migrateV18() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS user_skills (
+			id              TEXT PRIMARY KEY,
+			name            TEXT UNIQUE NOT NULL,
+			description     TEXT NOT NULL DEFAULT '',
+			prose           TEXT NOT NULL DEFAULT '',
+			executable      INTEGER NOT NULL DEFAULT 0,
+			model           TEXT NOT NULL DEFAULT '',
+			provider        TEXT NOT NULL DEFAULT '',
+			tools_allowlist TEXT NULL,
+			budget          TEXT NULL,
+			version         INTEGER NOT NULL DEFAULT 1,
+			source          TEXT NOT NULL DEFAULT 'user',
+			created_at      DATETIME NOT NULL,
+			updated_at      DATETIME NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("creating user_skills table: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_user_skills_source
+			ON user_skills(source)
+	`); err != nil {
+		return fmt.Errorf("creating idx_user_skills_source: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_user_skills_executable
+			ON user_skills(executable)
+	`); err != nil {
+		return fmt.Errorf("creating idx_user_skills_executable: %w", err)
+	}
+
+	if _, err := tx.Exec("UPDATE schema_version SET version = 18"); err != nil {
+		return fmt.Errorf("updating schema version to 18: %w", err)
 	}
 
 	return tx.Commit()
