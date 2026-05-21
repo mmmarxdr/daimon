@@ -18,7 +18,7 @@ testing:
       command: go test -timeout 300s ./...
     frontend:
       framework: vitest
-      command: cd /home/marxdr/workspace/daimon-frontend && npm test
+      command: cd /home/marcd/workspace/daimon-frontend && npm test
   layers:
     unit:
       backend: true
@@ -37,7 +37,7 @@ testing:
     backend:
       command: go test -cover ./...
     frontend:
-      command: cd /home/marxdr/workspace/daimon-frontend && npm test -- --coverage
+      command: cd /home/marcd/workspace/daimon-frontend && npm test -- --coverage
       tool: "@vitest/coverage-v8"
   quality:
     backend:
@@ -45,8 +45,8 @@ testing:
       vet: go vet ./...
       formatter: gofmt -w .
     frontend:
-      linter: cd /home/marxdr/workspace/daimon-frontend && npm run lint
-      type_checker: cd /home/marxdr/workspace/daimon-frontend && tsc --noEmit
+      linter: cd /home/marcd/workspace/daimon-frontend && npm run lint
+      type_checker: cd /home/marcd/workspace/daimon-frontend && tsc --noEmit
       formatter: prettier (not wired in scripts)
 
 rules:
