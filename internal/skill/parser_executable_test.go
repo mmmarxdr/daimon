@@ -106,20 +106,80 @@ budget: random_value
 	}
 }
 
-// TestParseSkillContent_ExecutableWithNoBudgetIsError verifies that
-// `executable: true` without a budget block is a load error. Satisfies CONFIG-REQ-6.
-func TestParseSkillContent_ExecutableWithNoBudgetIsError(t *testing.T) {
+// TestParseSkillContent_ExecutableWithNoBudget_Succeeds verifies that
+// `executable: true` without a budget block loads successfully (REQ-12 reversal).
+// The resulting ExecutableSkillDef has zero-value Budget (unlimited semantics).
+// (REQ-12 reversal; CONFIG-REQ-6; task 5.4)
+func TestParseSkillContent_ExecutableWithNoBudget_Succeeds(t *testing.T) {
 	content := buildSkillFile(`
 executable: true
 `, "Prose.")
 
-	_, _, errs := parseSkillContent("nobud.skill.md", content)
-	if len(errs) == 0 {
-		t.Fatal("expected parse error for missing budget on executable skill, got none")
+	sc, _, errs := parseSkillContent("nobud.skill.md", content)
+	if len(errs) != 0 {
+		t.Fatalf("expected no parse errors for missing budget on executable skill, got: %v", errs)
 	}
-	errMsg := errs[0].Error()
-	if !strings.Contains(errMsg, "budget") {
-		t.Errorf("error should mention 'budget', got: %q", errMsg)
+	if !sc.Executable {
+		t.Error("Executable: want true")
+	}
+	// Zero-value Budget — all fields are 0 (unlimited semantics).
+	if sc.Budget.MaxCostUSD != 0 {
+		t.Errorf("Budget.MaxCostUSD: want 0 (unlimited), got %v", sc.Budget.MaxCostUSD)
+	}
+	if sc.Budget.MaxTurns != 0 {
+		t.Errorf("Budget.MaxTurns: want 0 (unlimited), got %v", sc.Budget.MaxTurns)
+	}
+	if sc.Budget.TimeoutMin != 0 {
+		t.Errorf("Budget.TimeoutMin: want 0 (no timeout), got %v", sc.Budget.TimeoutMin)
+	}
+}
+
+// TestParseSkillContent_ExecutableWithBudgetDefaults_Succeeds verifies that
+// `budget: defaults` on an executable skill still expands correctly. (REQ-12; task 5.5)
+func TestParseSkillContent_ExecutableWithBudgetDefaults_Succeeds(t *testing.T) {
+	content := buildSkillFile(`
+executable: true
+budget: defaults
+`, "Prose.")
+
+	sc, _, errs := parseSkillContent("withdefaults.skill.md", content)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	if sc.Budget.MaxCostUSD != 0.50 {
+		t.Errorf("Budget.MaxCostUSD: got %v, want 0.50", sc.Budget.MaxCostUSD)
+	}
+	if sc.Budget.MaxTurns != 20 {
+		t.Errorf("Budget.MaxTurns: got %d, want 20", sc.Budget.MaxTurns)
+	}
+	if sc.Budget.TimeoutMin != 10 {
+		t.Errorf("Budget.TimeoutMin: got %d, want 10", sc.Budget.TimeoutMin)
+	}
+}
+
+// TestParseSkillContent_ExecutableWithExplicitBudget_Succeeds verifies that
+// an explicit budget block on an executable skill still loads correctly. (REQ-12; task 5.6)
+func TestParseSkillContent_ExecutableWithExplicitBudget_Succeeds(t *testing.T) {
+	content := buildSkillFile(`
+executable: true
+budget:
+  max_cost_usd: 1.00
+  max_turns: 5
+  timeout_min: 30
+`, "Prose.")
+
+	sc, _, errs := parseSkillContent("explicit.skill.md", content)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	if sc.Budget.MaxCostUSD != 1.00 {
+		t.Errorf("Budget.MaxCostUSD: got %v, want 1.00", sc.Budget.MaxCostUSD)
+	}
+	if sc.Budget.MaxTurns != 5 {
+		t.Errorf("Budget.MaxTurns: got %d, want 5", sc.Budget.MaxTurns)
+	}
+	if sc.Budget.TimeoutMin != 30 {
+		t.Errorf("Budget.TimeoutMin: got %d, want 30", sc.Budget.TimeoutMin)
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -115,13 +116,26 @@ func runWebCommand(args []string, cfgPath string) error {
 	// ---- Tools ----
 	toolsRegistry := tool.BuildRegistrySimple(cfg.Tools)
 
+	// Type-assert UserSkillStore for DB-backed skill loading.
+	// Nil for FileStore backends; LoadSkillsUnified skips the DB pass cleanly.
+	var userSkillStore store.UserSkillStore
+	if uss, ok := st.(store.UserSkillStore); ok {
+		userSkillStore = uss
+	}
+
 	var skillContents []skill.SkillContent
 	var execSkillDefs []skill.ExecutableSkillDef
-	if len(cfg.Skills) > 0 {
+	{
 		var skillTools map[string]tool.Tool
 		var skillWarns []error
-		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
-		// execSkillDefs is wired into the agent via WithExecutableSkills after New().
+		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkillsUnified(
+			ctx,
+			cfg.Skills,
+			userSkillStore,
+			embed.FS{}, // Phase 6: replace with skill.CuratedFS
+			cfg.Tools.Shell,
+			cfg.Limits,
+		)
 		for _, w := range skillWarns {
 			slog.Warn("skills: load warning", "error", w)
 		}
@@ -401,6 +415,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		DocStore:         ragWiring.Store,
 		IngestWorker:     ragWiring.Worker,
 		RAGMetrics:       ragWiring.Metrics,
+		UserSkillStore:   userSkillStore, // nil for FileStore backends
 	})
 	// Wire the server's auditor accessor into the agent so that after a
 	// hot-swap (PUT /api/config with audit fields changed) the agent always

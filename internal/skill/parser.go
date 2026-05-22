@@ -254,13 +254,9 @@ func parseSkillContent(path string, content string) (SkillContent, []ToolDef, []
 		version = 1
 	}
 
-	// Validate executable constraints.
-	if fm.Executable {
-		// Missing budget block is a hard error.
-		if fm.Budget.IsZero() {
-			errs = append(errs, fmt.Errorf("skill %q: executable skills must declare a budget block (or 'budget: defaults')", path))
-		}
-	}
+	// Executable skills MAY omit `budget`; the loader produces ExecutableSkillDef
+	// with Budget = BudgetConfig{} which the runtime treats as "unlimited".
+	// (REQ-12 reversal; CONFIG-REQ-6; design §2.12)
 
 	// tools_allowlist: if explicitly empty (YAML list present but empty),
 	// preserve as non-nil empty slice so the caller can distinguish
