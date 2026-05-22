@@ -75,31 +75,31 @@ Chain strategy: pending
 
 ### Migration v18
 
-- [ ] 2.1 [TEST] In `internal/store/migration_v18_test.go` (NEW): table-driven — apply on v17 DB → `user_skills` table exists, row count 0, `schema_version`=18, both indexes present; apply again (idempotent) → no error, no duplicates. (OUTPUT-STORE-REQ-11)
-- [ ] 2.2 [IMPL] Implement `migrateV18()` in `internal/store/migration.go` — single tx, `CREATE TABLE IF NOT EXISTS user_skills(...)` + 2 indexes + `schema_version=18`. Register in `RunMigrations` with `if version < 18`. (OUTPUT-STORE-REQ-11; design §2.2)
+- [x] 2.1 [TEST] In `internal/store/migration_v18_test.go` (NEW): table-driven — apply on v17 DB → `user_skills` table exists, row count 0, `schema_version`=18, both indexes present; apply again (idempotent) → no error, no duplicates. (OUTPUT-STORE-REQ-11)
+- [x] 2.2 [IMPL] Implement `migrateV18()` in `internal/store/migration.go` — single tx, `CREATE TABLE IF NOT EXISTS user_skills(...)` + 2 indexes + `schema_version=18`. Register in `RunMigrations` with `if version < 18`. (OUTPUT-STORE-REQ-11; design §2.2)
 
 ### UserSkill Struct and Sentinels
 
-- [ ] 2.3 [TEST] In `internal/store/userskill_test.go` (NEW): JSON marshal/unmarshal — nil `Budget` → SQL NULL round-trip → nil; non-nil `Budget` round-trips with all values; nil `ToolsAllowlist` → SQL NULL round-trip → nil; `[]string{}` → JSON `"[]"` round-trip → empty non-nil slice. (OUTPUT-STORE-REQ-12)
-- [ ] 2.4 [IMPL] Add `UserSkill` struct + `BudgetJSON` struct in `internal/store/store.go`. Helpers `encodeAllowlist`, `decodeAllowlist`, `encodeBudget`, `decodeBudget` using `sql.NullString`. (OUTPUT-STORE-REQ-12; design §2.1 and §2.3)
-- [ ] 2.5 [IMPL] Add sentinel error `ErrNameConflict` in `internal/store/store.go`. (OUTPUT-STORE-REQ-12; design §2.1)
+- [x] 2.3 [TEST] In `internal/store/userskill_test.go` (NEW): JSON marshal/unmarshal — nil `Budget` → SQL NULL round-trip → nil; non-nil `Budget` round-trips with all values; nil `ToolsAllowlist` → SQL NULL round-trip → nil; `[]string{}` → JSON `"[]"` round-trip → empty non-nil slice. (OUTPUT-STORE-REQ-12)
+- [x] 2.4 [IMPL] Add `UserSkill` struct + `BudgetJSON` struct in `internal/store/store.go`. Helpers `encodeAllowlist`, `decodeAllowlist`, `encodeBudget`, `decodeBudget` using `sql.NullString`. (OUTPUT-STORE-REQ-12; design §2.1 and §2.3)
+- [x] 2.5 [IMPL] Add sentinel error `ErrNameConflict` in `internal/store/store.go`. (OUTPUT-STORE-REQ-12; design §2.1)
 
 ### UserSkillStore Interface + sqlitestore Implementation
 
-- [ ] 2.6 [TEST] `ListUserSkills`: empty DB → empty slice; populated DB → rows ordered by name ASC. (OUTPUT-STORE-REQ-12)
-- [ ] 2.7 [TEST] `GetUserSkill` by name: existing → returns matching row; missing → returns `ErrNotFound`. (OUTPUT-STORE-REQ-12)
-- [ ] 2.8 [TEST] `CreateUserSkill`: success + row matches input; UNIQUE name violation → `ErrNameConflict`. (OUTPUT-STORE-REQ-12)
-- [ ] 2.9 [TEST] `UpdateUserSkill`: existing row updated (`updated_at` advances, fields change); missing name → `ErrNotFound`. (OUTPUT-STORE-REQ-12)
-- [ ] 2.10 [TEST] `DeleteUserSkill`: removes row; subsequent `GetUserSkill` returns `ErrNotFound`. (OUTPUT-STORE-REQ-12)
-- [ ] 2.11 [TEST] Budget null round-trip: row stored with `Budget: nil` → retrieved `Budget` is nil (not zero-value struct). (OUTPUT-STORE-REQ-12)
-- [ ] 2.12 [TEST] `ToolsAllowlist` nil vs empty distinction: nil → SQL NULL → nil; `[]string{}` → `"[]"` → non-nil empty slice. (OUTPUT-STORE-REQ-12)
-- [ ] 2.13 [IMPL] Extend `Store` interface in `internal/store/store.go` with the 5 `UserSkillStore` methods. (OUTPUT-STORE-REQ-12)
-- [ ] 2.14 [IMPL] Implement all 5 methods in `internal/store/sqlitestore.go` — `QueryContext` for reads; `tx` wrapping for writes; SQLite UNIQUE error → `ErrNameConflict`; `sql.ErrNoRows` → `ErrNotFound`. (OUTPUT-STORE-REQ-12; design §2.3)
-- [ ] 2.15 [IMPL] Add no-op stubs for all 5 methods in `internal/store/filestore.go` so `FileStore` continues to satisfy `Store`. (OUTPUT-STORE-REQ-12)
+- [x] 2.6 [TEST] `ListUserSkills`: empty DB → empty slice; populated DB → rows ordered by name ASC. (OUTPUT-STORE-REQ-12)
+- [x] 2.7 [TEST] `GetUserSkill` by name: existing → returns matching row; missing → returns `ErrNotFound`. (OUTPUT-STORE-REQ-12)
+- [x] 2.8 [TEST] `CreateUserSkill`: success + row matches input; UNIQUE name violation → `ErrNameConflict`. (OUTPUT-STORE-REQ-12)
+- [x] 2.9 [TEST] `UpdateUserSkill`: existing row updated (`updated_at` advances, fields change); missing name → `ErrNotFound`. (OUTPUT-STORE-REQ-12)
+- [x] 2.10 [TEST] `DeleteUserSkill`: removes row; subsequent `GetUserSkill` returns `ErrNotFound`. (OUTPUT-STORE-REQ-12)
+- [x] 2.11 [TEST] Budget null round-trip: row stored with `Budget: nil` → retrieved `Budget` is nil (not zero-value struct). (OUTPUT-STORE-REQ-12)
+- [x] 2.12 [TEST] `ToolsAllowlist` nil vs empty distinction: nil → SQL NULL → nil; `[]string{}` → `"[]"` → non-nil empty slice. (OUTPUT-STORE-REQ-12)
+- [x] 2.13 [IMPL] Extend `Store` interface in `internal/store/store.go` with the 5 `UserSkillStore` methods. (OUTPUT-STORE-REQ-12)
+- [x] 2.14 [IMPL] Implement all 5 methods in `internal/store/sqlitestore.go` — `QueryContext` for reads; `tx` wrapping for writes; SQLite UNIQUE error → `ErrNameConflict`; `sql.ErrNoRows` → `ErrNotFound`. (OUTPUT-STORE-REQ-12; design §2.3)
+- [x] 2.15 [IMPL] Add no-op stubs for all 5 methods in `internal/store/filestore.go` so `FileStore` continues to satisfy `Store`. (OUTPUT-STORE-REQ-12)
 
 ### Mock Store Sweep
 
-- [ ] 2.16 [IMPL] Find all `type mockStore` (or equivalent) test fixtures across packages via `grep -r "mockStore\|MockStore" internal/`; add the 5 new method stubs to each. Confirm `go test ./...` compiles with no interface-satisfaction errors. (OUTPUT-STORE-REQ-12)
+- [x] 2.16 [IMPL] Find all `type mockStore` (or equivalent) test fixtures across packages via `grep -r "mockStore\|MockStore" internal/`; add the 5 new method stubs to each. Confirm `go test ./...` compiles with no interface-satisfaction errors. (OUTPUT-STORE-REQ-12)
 
 ---
 
