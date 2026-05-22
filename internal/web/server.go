@@ -56,6 +56,10 @@ type AgentReloader interface {
 	RegisterMCPServer(serverName string, tools map[string]tool.Tool, caller interface{ Close() error })
 	UnregisterMCPServer(serverName string) error
 	ReplaceSkills(skills []skill.SkillContent, idx skill.SkillIndex)
+	// ReplaceExecutableSkills atomically replaces the agent's spawnable
+	// subagent definitions. Called by the /api/skills CRUD handler after
+	// every successful write. (REQ-19)
+	ReplaceExecutableSkills(defs []skill.ExecutableSkillDef)
 }
 
 // SubagentProvider is a narrow interface the web layer uses to query live
@@ -75,20 +79,20 @@ type SubagentProvider interface {
 
 // ServerDeps holds the dependencies for the web server.
 type ServerDeps struct {
-	Store           store.Store
-	Auditor         audit.Auditor
-	Config          *config.Config
-	ConfigPath      string               // resolved path to config.yaml (for MCP/skill operations)
-	MCPService      MCPManager
-	Agent           AgentReloader        // optional; enables hot-reload of MCP/skills from the dashboard
-	ProviderRegistry providerRegistry      // nil until Phase 6 wiring is complete
-	ModelCache       *modelcache.Cache     // nil until Phase 5 wiring is complete; handler creates a default if nil
-	Tools            map[string]tool.Tool  // registered tool instances
-	StartedAt       time.Time
-	Version         string
-	WebChannel      *channel.WebChannel // nil disables the /ws/chat endpoint
-	MediaStore      store.MediaStore    // nil when media uploads are not configured
-	ProviderFactory providerFactory     // nil defaults to provider.NewFromConfig
+	Store            store.Store
+	Auditor          audit.Auditor
+	Config           *config.Config
+	ConfigPath       string // resolved path to config.yaml (for MCP/skill operations)
+	MCPService       MCPManager
+	Agent            AgentReloader        // optional; enables hot-reload of MCP/skills from the dashboard
+	ProviderRegistry providerRegistry     // nil until Phase 6 wiring is complete
+	ModelCache       *modelcache.Cache    // nil until Phase 5 wiring is complete; handler creates a default if nil
+	Tools            map[string]tool.Tool // registered tool instances
+	StartedAt        time.Time
+	Version          string
+	WebChannel       *channel.WebChannel // nil disables the /ws/chat endpoint
+	MediaStore       store.MediaStore    // nil when media uploads are not configured
+	ProviderFactory  providerFactory     // nil defaults to provider.NewFromConfig
 
 	// RAG — nil when the RAG subsystem is disabled. /api/knowledge endpoints
 	// return 501 Not Implemented when DocStore is nil.
@@ -152,7 +156,7 @@ func NewServer(deps ServerDeps) *Server {
 	// s.config() returns a snapshot under RLock so these closures never observe
 	// a torn struct from a concurrent handlePutConfig write.
 	handler = authMiddlewareDynamic(
-		func() string    { return s.config().Web.AuthToken },
+		func() string { return s.config().Web.AuthToken },
 		func() time.Time { return s.config().Web.AuthTokenIssuedAt },
 		handler,
 	)

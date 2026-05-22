@@ -12,14 +12,14 @@
 
 ## Review Workload Forecast
 
-| Field | Value |
-|-------|-------|
-| Estimated changed lines (nominal) | ~1,360 LoC implementation; ~2,700–3,400 with tests |
-| 400-line budget risk | High |
-| Chained PRs recommended | Yes |
-| Suggested split | PR1 = Phase 1 (standalone vs main); PR2 = Phase 2+3; PR3 = Phase 4+5 (small Phase 5 bundles with 4); PR4 = Phase 6 |
-| Delivery strategy | ask-on-risk |
-| Chain strategy | pending — orchestrator MUST ask user before apply |
+| Field                             | Value                                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Estimated changed lines (nominal) | ~1,360 LoC implementation; ~2,700–3,400 with tests                                                                 |
+| 400-line budget risk              | High                                                                                                               |
+| Chained PRs recommended           | Yes                                                                                                                |
+| Suggested split                   | PR1 = Phase 1 (standalone vs main); PR2 = Phase 2+3; PR3 = Phase 4+5 (small Phase 5 bundles with 4); PR4 = Phase 6 |
+| Delivery strategy                 | ask-on-risk                                                                                                        |
+| Chain strategy                    | pending — orchestrator MUST ask user before apply                                                                  |
 
 Decision needed before apply: Yes
 Chained PRs recommended: Yes
@@ -28,12 +28,12 @@ Chain strategy: pending
 
 ### Suggested Work Units
 
-| Unit | Goal | Likely PR | Base branch | Notes |
-|------|------|-----------|-------------|-------|
-| 1 | Foundation: ConfigurableProvider + cancel endpoint | PR1 | main | Orthogonal; no schema deps. Ships standalone. |
-| 2 | Schema + Store + REST CRUD + Hot-Reload | PR2 | PR1 branch | Phases 2+3 bundled (~550 LoC nominal; ~1,100 with tests) — may need to split further if risk is High after estimation |
-| 3 | Loader unification + Budget reversal + Timeout fix | PR3 | PR2 branch | Phases 4+5 bundled (~280 LoC) |
-| 4 | Curated catalog | PR4 | PR3 branch | Phase 6 (~300 LoC + templates) |
+| Unit | Goal                                               | Likely PR | Base branch | Notes                                                                                                                 |
+| ---- | -------------------------------------------------- | --------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| 1    | Foundation: ConfigurableProvider + cancel endpoint | PR1       | main        | Orthogonal; no schema deps. Ships standalone.                                                                         |
+| 2    | Schema + Store + REST CRUD + Hot-Reload            | PR2       | PR1 branch  | Phases 2+3 bundled (~550 LoC nominal; ~1,100 with tests) — may need to split further if risk is High after estimation |
+| 3    | Loader unification + Budget reversal + Timeout fix | PR3       | PR2 branch  | Phases 4+5 bundled (~280 LoC)                                                                                         |
+| 4    | Curated catalog                                    | PR4       | PR3 branch  | Phase 6 (~300 LoC + templates)                                                                                        |
 
 ---
 
@@ -109,16 +109,16 @@ Chain strategy: pending
 
 ### Agent.ReplaceExecutableSkills
 
-- [ ] 3.1 [TEST] `ReplaceExecutableSkills` removes old `*SubagentSpawnTool` entries and registers new defs; non-spawn tools in `a.tools` are untouched. (REQ-19)
-- [ ] 3.2 [TEST] Lazy `subMgr` init: call with no prior `subMgr` and non-empty defs → `subMgr` is initialized. (REQ-19)
-- [ ] 3.3 [TEST] Empty defs slice → all spawn tools removed; `subMgr` instance unchanged (not nilled out). (REQ-19)
-- [ ] 3.4 [TEST] Unknown tool in `tools_allowlist` → dropped with `slog.Warn`, no error returned. (REQ-19; CONFIG-REQ-5 warn-not-block at hot-reload)
-- [ ] 3.5 [IMPL] Add `func (a *Agent) ReplaceExecutableSkills(defs []skill.ExecutableSkillDef)` in `internal/agent/hot_reload.go` — (1) acquire `a.toolsMu.Lock`, (2) delete all `*SubagentSpawnTool` entries, (3) lazy-init `subMgr` if nil and `len(defs)>0`, (4) re-register with `filterKnownTools`. (REQ-19; design §2.5)
+- [x] 3.1 [TEST] `ReplaceExecutableSkills` removes old `*SubagentSpawnTool` entries and registers new defs; non-spawn tools in `a.tools` are untouched. (REQ-19)
+- [x] 3.2 [TEST] Lazy `subMgr` init: call with no prior `subMgr` and non-empty defs → `subMgr` is initialized. (REQ-19)
+- [x] 3.3 [TEST] Empty defs slice → all spawn tools removed; `subMgr` instance unchanged (not nilled out). (REQ-19)
+- [x] 3.4 [TEST] Unknown tool in `tools_allowlist` → dropped with `slog.Warn`, no error returned. (REQ-19; CONFIG-REQ-5 warn-not-block at hot-reload)
+- [x] 3.5 [IMPL] Add `func (a *Agent) ReplaceExecutableSkills(defs []skill.ExecutableSkillDef)` in `internal/agent/hot_reload.go` — (1) acquire `a.toolsMu.Lock`, (2) delete all `*SubagentSpawnTool` entries, (3) lazy-init `subMgr` if nil and `len(defs)>0`, (4) re-register with `filterKnownTools`. (REQ-19; design §2.5)
 
 ### AgentReloader Interface Extension
 
-- [ ] 3.6 [IMPL] Extend `AgentReloader` interface in `internal/web/server.go` with `ReplaceExecutableSkills(defs []skill.ExecutableSkillDef)`. (REQ-19)
-- [ ] 3.7 [IMPL] Find all test mocks implementing `AgentReloader` (via `grep -r "AgentReloader\|ReplaceSkills" internal/web/`); add `ReplaceExecutableSkills` stub to each mock. (REQ-19)
+- [x] 3.6 [IMPL] Extend `AgentReloader` interface in `internal/web/server.go` with `ReplaceExecutableSkills(defs []skill.ExecutableSkillDef)`. (REQ-19)
+- [x] 3.7 [IMPL] Find all test mocks implementing `AgentReloader` (via `grep -r "AgentReloader\|ReplaceSkills" internal/web/`); add `ReplaceExecutableSkills` stub to each mock. (REQ-19)
 
 ### REST CRUD Handlers
 
@@ -246,18 +246,18 @@ Chain strategy: pending
 
 ### REQ → Test Mapping
 
-| Requirement | Test Tasks |
-|---|---|
-| REQ-12 reversal (optional budget) | 5.4, 5.5, 5.6, 5.8 |
-| REQ-16 (Timeout==0 → WithCancel) | 5.1, 5.2, 5.8 |
-| REQ-17 (POST /api/subagents/{id}/cancel) | 1.0, 1.13, 1.16 |
-| REQ-18 (Agent.CancelSubagent nil-safe) | 1.10 |
-| REQ-19 (Agent.ReplaceExecutableSkills) | 3.1, 3.2, 3.3, 3.4, 3.13, 3.14, 3.15, 3.16 |
-| REQ-20 (ConfigurableProvider) | 1.2, 1.9 |
-| OUTPUT-STORE-REQ-11 (migration v18) | 2.1 |
-| OUTPUT-STORE-REQ-12 (UserSkillStore) | 2.3, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, 2.12 |
-| CONFIG-REQ-4 (budget OPTIONAL in frontmatter) | 5.4, 5.5, 5.6 |
-| CONFIG-REQ-6 (parser no hard-error) | 5.4, 5.7, 3.10 |
-| CONFIG-REQ-9 (source metadata-only) | 3.8, 3.11, 3.12, 6.12, 6.13 |
-| AGENT-LOOP-REQ-7 (LoadSkillsUnified) | 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.11, 6.8, 6.9 |
-| AGENT-LOOP-REQ-8 (hot-reload after CRUD) | 3.13, 3.14, 3.15, 3.16 |
+| Requirement                                   | Test Tasks                                   |
+| --------------------------------------------- | -------------------------------------------- |
+| REQ-12 reversal (optional budget)             | 5.4, 5.5, 5.6, 5.8                           |
+| REQ-16 (Timeout==0 → WithCancel)              | 5.1, 5.2, 5.8                                |
+| REQ-17 (POST /api/subagents/{id}/cancel)      | 1.0, 1.13, 1.16                              |
+| REQ-18 (Agent.CancelSubagent nil-safe)        | 1.10                                         |
+| REQ-19 (Agent.ReplaceExecutableSkills)        | 3.1, 3.2, 3.3, 3.4, 3.13, 3.14, 3.15, 3.16   |
+| REQ-20 (ConfigurableProvider)                 | 1.2, 1.9                                     |
+| OUTPUT-STORE-REQ-11 (migration v18)           | 2.1                                          |
+| OUTPUT-STORE-REQ-12 (UserSkillStore)          | 2.3, 2.6, 2.7, 2.8, 2.9, 2.10, 2.11, 2.12    |
+| CONFIG-REQ-4 (budget OPTIONAL in frontmatter) | 5.4, 5.5, 5.6                                |
+| CONFIG-REQ-6 (parser no hard-error)           | 5.4, 5.7, 3.10                               |
+| CONFIG-REQ-9 (source metadata-only)           | 3.8, 3.11, 3.12, 6.12, 6.13                  |
+| AGENT-LOOP-REQ-7 (LoadSkillsUnified)          | 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.11, 6.8, 6.9 |
+| AGENT-LOOP-REQ-8 (hot-reload after CRUD)      | 3.13, 3.14, 3.15, 3.16                       |
