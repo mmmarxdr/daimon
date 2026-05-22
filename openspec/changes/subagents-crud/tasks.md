@@ -147,20 +147,20 @@ Chain strategy: pending
 
 ### LoadSkillsUnified
 
-- [ ] 4.1 [TEST] In `internal/skill/loader_unified_test.go` (NEW): empty inputs (empty curatedFS, empty fsPaths, empty dbSkills) → empty slices, nil errors. (AGENT-LOOP-REQ-7)
-- [ ] 4.2 [TEST] Source isolation: only curated → returns curated only; only FS → returns FS only; only DB → returns DB only. (AGENT-LOOP-REQ-7)
-- [ ] 4.3 [TEST] Precedence — name collision: FS vs Curated → FS wins; DB vs FS → DB wins; DB vs Curated → DB wins. (AGENT-LOOP-REQ-7)
-- [ ] 4.4 [TEST] Collision logging: name collision → `slog.Warn` emitted with `"name"`, `"winner"`, `"loser"` keys. (AGENT-LOOP-REQ-7)
-- [ ] 4.5 [TEST] Tools map merges correctly: non-conflicting names from all three sources all appear in the returned `map[string]tool.Tool`. (AGENT-LOOP-REQ-7)
-- [ ] 4.6 [TEST] Error aggregation: parse error in one source does NOT suppress results from other sources; error slice contains the parse error alongside valid results. (AGENT-LOOP-REQ-7)
-- [ ] 4.7 [IMPL] Create `internal/skill/loader_unified.go` (NEW). Implement `LoadSkillsUnified(ctx, fsPaths, dbStore UserSkillStore, curatedFS embed.FS, shellCfg, limits)` — 3-pass merge (curated → fs → db) into `map[name]→entry`. Calls existing `LoadSkills` for FS pass. (AGENT-LOOP-REQ-7; design §2.4)
-- [ ] 4.8 [IMPL] Add helper `userSkillToParts(us UserSkill) (SkillContent, *ExecutableSkillDef)` in `loader_unified.go` — converts `BudgetJSON.TimeoutMin` to `time.Duration` for `BudgetConfig.Timeout`. (AGENT-LOOP-REQ-7; design §2.4)
+- [x] 4.1 [TEST] In `internal/skill/loader_unified_test.go` (NEW): empty inputs (empty curatedFS, empty fsPaths, empty dbSkills) → empty slices, nil errors. (AGENT-LOOP-REQ-7)
+- [x] 4.2 [TEST] Source isolation: only curated → returns curated only; only FS → returns FS only; only DB → returns DB only. (AGENT-LOOP-REQ-7)
+- [x] 4.3 [TEST] Precedence — name collision: FS vs Curated → FS wins; DB vs FS → DB wins; DB vs Curated → DB wins. (AGENT-LOOP-REQ-7)
+- [x] 4.4 [TEST] Collision logging: name collision → `slog.Warn` emitted with `"name"`, `"winner"`, `"loser"` keys. (AGENT-LOOP-REQ-7)
+- [x] 4.5 [TEST] Tools map merges correctly: non-conflicting names from all three sources all appear in the returned `map[string]tool.Tool`. (AGENT-LOOP-REQ-7)
+- [x] 4.6 [TEST] Error aggregation: parse error in one source does NOT suppress results from other sources; error slice contains the parse error alongside valid results. (AGENT-LOOP-REQ-7)
+- [x] 4.7 [IMPL] Create `internal/skill/loader_unified.go` (NEW). Implement `LoadSkillsUnified(ctx, fsPaths, dbStore UserSkillStore, curatedFS embed.FS, shellCfg, limits)` — 3-pass merge (curated → fs → db) into `map[name]→entry`. Calls existing `LoadSkills` for FS pass. (AGENT-LOOP-REQ-7; design §2.4)
+- [x] 4.8 [IMPL] Add helper `userSkillToParts(us UserSkill) (SkillContent, *ExecutableSkillDef)` in `loader_unified.go` — converts `BudgetJSON.TimeoutMin` to `time.Duration` for `BudgetConfig.Timeout`. (AGENT-LOOP-REQ-7; design §2.4)
 
 ### Wiring into Binary Entry Points
 
-- [ ] 4.9 [IMPL] In `cmd/daimon/main.go`: switch from `skill.LoadSkills` to `skill.LoadSkillsUnified`; inject `UserSkillStore` from store into `ServerDeps`. (AGENT-LOOP-REQ-7)
-- [ ] 4.10 [IMPL] In `cmd/daimon/web_cmd.go`: same switch + inject `UserSkillStore` into `ServerDeps`. (AGENT-LOOP-REQ-7)
-- [ ] 4.11 [TEST] Integration: boot loads from FS + DB simultaneously; DB > FS precedence respected; existing FS skills appear unchanged in result. (AGENT-LOOP-REQ-7)
+- [x] 4.9 [IMPL] In `cmd/daimon/main.go`: switch from `skill.LoadSkills` to `skill.LoadSkillsUnified`; inject `UserSkillStore` from store into `ServerDeps`. (AGENT-LOOP-REQ-7)
+- [x] 4.10 [IMPL] In `cmd/daimon/web_cmd.go`: same switch + inject `UserSkillStore` into `ServerDeps`. (AGENT-LOOP-REQ-7)
+- [x] 4.11 [TEST] Integration: boot loads from FS + DB simultaneously; DB > FS precedence respected; existing FS skills appear unchanged in result. (AGENT-LOOP-REQ-7)
 
 ---
 
@@ -170,20 +170,20 @@ Chain strategy: pending
 
 ### Spawn Timeout==0 Fix
 
-- [ ] 5.1 [TEST] In `internal/agent/subagent_manager_test.go`: spawn with `Budget.Timeout == 0` → subagent ctx is NOT done within 100 ms of spawn (no instant cancel). (REQ-16; design §2.11 — exact file line `subagent_manager.go:233`)
-- [ ] 5.2 [TEST] Spawn with `Budget.Timeout > 0` → existing timeout behavior unchanged (ctx done after timeout elapses). (REQ-16)
-- [ ] 5.3 [IMPL] In `internal/agent/subagent_manager.go` at line 233: replace unconditional `context.WithTimeout(ctx, def.Budget.Timeout)` with branch — `if def.Budget.Timeout > 0 { WithTimeout } else { WithCancel }`. (REQ-16; design §2.11)
+- [x] 5.1 [TEST] In `internal/agent/subagent_manager_test.go`: spawn with `Budget.Timeout == 0` → subagent ctx is NOT done within 100 ms of spawn (no instant cancel). (REQ-16; design §2.11 — exact file line `subagent_manager.go:233`)
+- [x] 5.2 [TEST] Spawn with `Budget.Timeout > 0` → existing timeout behavior unchanged (ctx done after timeout elapses). (REQ-16)
+- [x] 5.3 [IMPL] In `internal/agent/subagent_manager.go` at line 233: replace unconditional `context.WithTimeout(ctx, def.Budget.Timeout)` with branch — `if def.Budget.Timeout > 0 { WithTimeout } else { WithCancel }`. (REQ-16; design §2.11)
 
 ### Parser Budget Reversal
 
-- [ ] 5.4 [TEST] In `internal/skill/parser_test.go`: skill file with `executable: true` and NO `budget` key → loads successfully; resulting `ExecutableSkillDef` has zero-value `Budget` (was: load error). (REQ-12 reversal; CONFIG-REQ-6)
-- [ ] 5.5 [TEST] Skill file with `executable: true` and `budget: defaults` → unchanged: loads successfully and expands to `{0.50, 20, 10}`. (REQ-12)
-- [ ] 5.6 [TEST] Skill file with explicit budget block → unchanged: loads successfully. (REQ-12)
-- [ ] 5.7 [IMPL] In `internal/skill/parser.go` at lines 257-263: REMOVE the `if fm.Executable { if fm.Budget.IsZero() { errs = append(errs, ...) } }` block entirely. No replacement needed. (REQ-12; CONFIG-REQ-6; design §2.12)
+- [x] 5.4 [TEST] In `internal/skill/parser_test.go`: skill file with `executable: true` and NO `budget` key → loads successfully; resulting `ExecutableSkillDef` has zero-value `Budget` (was: load error). (REQ-12 reversal; CONFIG-REQ-6)
+- [x] 5.5 [TEST] Skill file with `executable: true` and `budget: defaults` → unchanged: loads successfully and expands to `{0.50, 20, 10}`. (REQ-12)
+- [x] 5.6 [TEST] Skill file with explicit budget block → unchanged: loads successfully. (REQ-12)
+- [x] 5.7 [IMPL] In `internal/skill/parser.go` at lines 257-263: REMOVE the `if fm.Executable { if fm.Budget.IsZero() { errs = append(errs, ...) } }` block entirely. No replacement needed. (REQ-12; CONFIG-REQ-6; design §2.12)
 
 ### End-to-End Regression
 
-- [ ] 5.8 [TEST] Integration: skill with no budget block → loads without error → spawns → subagent ctx lives past 500 ms → completes naturally (validates both parser change + Timeout==0 fix together). (REQ-12; REQ-16)
+- [x] 5.8 [TEST] Integration: skill with no budget block → loads without error → spawns → subagent ctx lives past 500 ms → completes naturally (validates both parser change + Timeout==0 fix together). (REQ-12; REQ-16)
 
 ---
 

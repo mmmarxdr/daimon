@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -43,14 +44,14 @@ var (
 )
 
 var (
-	cfgPath        = flag.String("config", "", "path to config file (searches ~/.daimon/config.yaml and ./config.yaml if empty)")
-	showVersion    = flag.Bool("version", false, "print version and exit")
-	dashboard      = flag.Bool("dashboard", false, "open read-only TUI dashboard and exit")
-	runSetup       = flag.Bool("setup", false, "run the interactive setup wizard and exit")
-	daemon         = flag.Bool("daemon", false, "run as background daemon (no interactive channel; cron only)")
-	webFlag        = flag.Bool("web", false, "also start web dashboard alongside the agent")
-	pruneMemories  = flag.Bool("prune-memories", false, "list memory entries that look like transcripts (long + markdown structure); pair with --confirm to delete them")
-	pruneConfirm   = flag.Bool("confirm", false, "actually delete when used with --prune-memories (defaults to dry-run)")
+	cfgPath       = flag.String("config", "", "path to config file (searches ~/.daimon/config.yaml and ./config.yaml if empty)")
+	showVersion   = flag.Bool("version", false, "print version and exit")
+	dashboard     = flag.Bool("dashboard", false, "open read-only TUI dashboard and exit")
+	runSetup      = flag.Bool("setup", false, "run the interactive setup wizard and exit")
+	daemon        = flag.Bool("daemon", false, "run as background daemon (no interactive channel; cron only)")
+	webFlag       = flag.Bool("web", false, "also start web dashboard alongside the agent")
+	pruneMemories = flag.Bool("prune-memories", false, "list memory entries that look like transcripts (long + markdown structure); pair with --confirm to delete them")
+	pruneConfirm  = flag.Bool("confirm", false, "actually delete when used with --prune-memories (defaults to dry-run)")
 )
 
 // extractFlagValue scans args for "--flag value" or "--flag=value" and returns
@@ -243,36 +244,12 @@ func main() {
 
 	toolsRegistry := tool.BuildRegistrySimple(cfg.Tools)
 
-	// Load skill files — non-fatal, warn+skip per file.
-	// Skills are merged before MCP so that user-authored skill tools win on collision.
-	// Priority: built-in > skill > MCP.
+	// skillContents, execSkillDefs, autoloadSkills, skillIndex are populated after
+	// the store is initialised (below) because LoadSkillsUnified needs UserSkillStore.
 	var skillContents []skill.SkillContent
 	var execSkillDefs []skill.ExecutableSkillDef
-	if len(cfg.Skills) > 0 {
-		var skillTools map[string]tool.Tool
-		var skillWarns []error
-		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkills(cfg.Skills, cfg.Tools.Shell, cfg.Limits)
-		// execSkillDefs is wired into the agent via WithExecutableSkills after New().
-		for _, w := range skillWarns {
-			slog.Warn("skills: load warning", "error", w)
-		}
-		for name, t := range skillTools {
-			if _, exists := toolsRegistry[name]; exists {
-				slog.Warn("skills: tool collision with built-in, built-in wins", "tool", name)
-				continue
-			}
-			toolsRegistry[name] = t
-		}
-	}
-
-	// Build skill index + budget check, create load_skill tool.
-	autoloadSkills, skillIndex := agent.InitSkillInjection(skillContents, cfg.Agent.MaxContextTokens)
-	skillMap := make(map[string]tool.SkillContent, len(skillContents))
-	for _, s := range skillContents {
-		skillMap[s.Name] = tool.SkillContent{Name: s.Name, Prose: s.Prose}
-	}
-	loadSkillTool := tool.NewSkillLoaderTool(skillMap)
-	toolsRegistry[loadSkillTool.Name()] = loadSkillTool
+	var autoloadSkills []skill.SkillContent
+	var skillIndex skill.SkillIndex
 
 	// Connect to MCP servers and merge their tools into the registry.
 	// Built-in and skill tools win on name collision.
@@ -332,6 +309,45 @@ func main() {
 		os.Exit(1)
 	}
 	defer st.Close()
+
+	// Load skill files via LoadSkillsUnified (merges curated + FS + DB sources).
+	// Skills are merged before MCP so that user-authored skill tools win on collision.
+	// Priority: built-in > skill > MCP.
+	var userSkillStore store.UserSkillStore
+	if uss, ok := st.(store.UserSkillStore); ok {
+		userSkillStore = uss
+	}
+	{
+		var skillTools map[string]tool.Tool
+		var skillWarns []error
+		skillContents, skillTools, execSkillDefs, skillWarns = skill.LoadSkillsUnified(
+			ctx,
+			cfg.Skills,
+			userSkillStore,
+			embed.FS{}, // Phase 6: replace with skill.CuratedFS
+			cfg.Tools.Shell,
+			cfg.Limits,
+		)
+		for _, w := range skillWarns {
+			slog.Warn("skills: load warning", "error", w)
+		}
+		for name, t := range skillTools {
+			if _, exists := toolsRegistry[name]; exists {
+				slog.Warn("skills: tool collision with built-in, built-in wins", "tool", name)
+				continue
+			}
+			toolsRegistry[name] = t
+		}
+	}
+
+	// Build skill index + budget check, create load_skill tool.
+	autoloadSkills, skillIndex = agent.InitSkillInjection(skillContents, cfg.Agent.MaxContextTokens)
+	skillMap := make(map[string]tool.SkillContent, len(skillContents))
+	for _, s := range skillContents {
+		skillMap[s.Name] = tool.SkillContent{Name: s.Name, Prose: s.Prose}
+	}
+	loadSkillTool := tool.NewSkillLoaderTool(skillMap)
+	toolsRegistry[loadSkillTool.Name()] = loadSkillTool
 
 	// Warn if media is enabled but the backing store does not support it.
 	// FileStore does not implement MediaStore; SQLiteStore does. Media ops will
@@ -627,6 +643,7 @@ func main() {
 			DocStore:         ragWiring.Store,
 			IngestWorker:     ragWiring.Worker,
 			RAGMetrics:       ragWiring.Metrics,
+			UserSkillStore:   userSkillStore, // nil for FileStore backends
 		})
 		if err := webSrv.Start(); err != nil {
 			slog.Error("failed to start web dashboard", "error", err)

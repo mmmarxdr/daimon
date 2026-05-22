@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,48 +14,6 @@ import (
 	"daimon/internal/skill"
 	"daimon/internal/store"
 )
-
-// userSkillToContent converts a store.UserSkill to a skill.SkillContent
-// for the prose index. This is the Phase 3 stub implementation; Phase 4 will
-// replace calls with skill.LoadSkillsUnified which performs the same conversion
-// together with FS and curated sources. (AGENT-LOOP-REQ-8)
-func userSkillToContent(us store.UserSkill) skill.SkillContent {
-	return skill.SkillContent{
-		Name:           us.Name,
-		Description:    us.Description,
-		Prose:          us.Prose,
-		Version:        us.Version,
-		Executable:     us.Executable,
-		Model:          us.Model,
-		ProviderName:   us.Provider,
-		SystemAddendum: us.Prose,
-		ToolsAllowlist: us.ToolsAllowlist,
-	}
-}
-
-// userSkillToExecDef converts a store.UserSkill to a skill.ExecutableSkillDef.
-// Budget == nil → zero BudgetConfig (unlimited; Timeout==0 → context.WithCancel
-// per REQ-16 / subagent_manager.go fix in Phase 5). (AGENT-LOOP-REQ-8)
-func userSkillToExecDef(us store.UserSkill) skill.ExecutableSkillDef {
-	var bcfg skill.BudgetConfig
-	if us.Budget != nil {
-		bcfg = skill.BudgetConfig{
-			MaxCostUSD: us.Budget.MaxCostUSD,
-			MaxTurns:   us.Budget.MaxTurns,
-			Timeout:    time.Duration(us.Budget.TimeoutMin) * time.Minute,
-		}
-	}
-	return skill.ExecutableSkillDef{
-		Name:           us.Name,
-		Description:    us.Description,
-		Version:        us.Version,
-		Model:          us.Model,
-		ProviderName:   us.Provider,
-		SystemAddendum: us.Prose,
-		ToolsAllowlist: us.ToolsAllowlist,
-		Budget:         bcfg,
-	}
-}
 
 // skillNameRE is the allowed pattern for user-defined skill names.
 // Matches ^[a-z][a-z0-9_-]*$ and length must be ≤ 64 characters.
@@ -435,40 +394,31 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 // Task 3.22 — reloadSkills helper
 // --------------------------------------------------------------------------
 
-// reloadSkills re-synchronises the running agent with the current DB skill set.
-// Called after every successful CRUD write to /api/skills. Idempotent; safe
-// to call when Agent is nil (returns silently).
+// reloadSkills re-runs LoadSkillsUnified and pushes the merged skill set into
+// the running agent. Called after every successful CRUD write to /api/skills.
+// Idempotent; safe to call when Agent is nil (returns silently).
 //
-// LoadSkillsUnified seam: LoadSkillsUnified is implemented in Phase 4.
-// Until then, this helper uses a DB-only pass: it calls ListUserSkills,
-// converts each row to runtime types, and pushes the merged set into the agent.
-// Phase 4 will replace the inline conversion with a call to
-// skill.LoadSkillsUnified(ctx, s.config().Skills, s.deps.UserSkillStore, ...)
-// without changing this function's signature or callers. (AGENT-LOOP-REQ-8)
+// curatedFS is the zero-value embed.FS until Phase 6 ships the curated catalog.
+// When Phase 6 adds curated_embed.go, this call site switches to skill.CuratedFS.
+// (AGENT-LOOP-REQ-8; design §2.8.4)
 func (s *Server) reloadSkills(ctx context.Context) {
 	if s.deps.Agent == nil {
 		return
 	}
 
-	var contents []skill.SkillContent
-	var execDefs []skill.ExecutableSkillDef
-
-	if s.deps.UserSkillStore != nil {
-		rows, err := s.deps.UserSkillStore.ListUserSkills(ctx)
-		if err != nil {
-			slog.Warn("reloadSkills: list user skills error", "error", err)
-			// Continue with empty set rather than leaving a potentially stale state.
-		} else {
-			for _, us := range rows {
-				contents = append(contents, userSkillToContent(us))
-				if us.Executable {
-					execDefs = append(execDefs, userSkillToExecDef(us))
-				}
-			}
-		}
+	contents, _, execs, warns := skill.LoadSkillsUnified(
+		ctx,
+		s.config().Skills,
+		s.deps.UserSkillStore,
+		embed.FS{}, // Phase 6: replace with skill.CuratedFS
+		s.config().Tools.Shell,
+		s.config().Limits,
+	)
+	for _, w := range warns {
+		slog.Warn("reloadSkills warning", "error", w)
 	}
 
-	s.deps.Agent.ReplaceExecutableSkills(execDefs)
+	s.deps.Agent.ReplaceExecutableSkills(execs)
 	autoload, idx := agent.InitSkillInjection(contents, s.config().Agent.MaxContextTokens)
 	s.deps.Agent.ReplaceSkills(autoload, idx)
 }
