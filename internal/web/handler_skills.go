@@ -175,8 +175,7 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	// "" or "all" — merged result: start with curated, then DB wins on collision.
 	// Build index from curated catalog (lowest precedence).
 	type entry struct {
-		sk  store.UserSkill
-		idx int // insertion order for stable output
+		sk store.UserSkill
 	}
 	index := make(map[string]*entry, len(s.deps.CuratedSkills))
 	order := make([]string, 0, len(s.deps.CuratedSkills))
