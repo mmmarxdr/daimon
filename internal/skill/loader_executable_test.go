@@ -90,6 +90,61 @@ Just prose.
 	}
 }
 
+// TestLoadSkills_ExecutableNoBudget_LoadsAndHasZeroTimeout is the Phase 5
+// integration regression test: a skill with `executable: true` and NO budget
+// block must load without error AND produce an ExecutableSkillDef with
+// Budget.Timeout == 0 (unlimited). Combined with the Spawn fix (5.3), a zero
+// Timeout no longer causes immediate context cancellation.
+// (REQ-12 + REQ-16; task 5.8)
+func TestLoadSkills_ExecutableNoBudget_LoadsAndHasZeroTimeout(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "unlimited.skill.md")
+	if err := os.WriteFile(p, []byte(`---
+name: unlimited-agent
+executable: true
+description: An agent with no budget constraint.
+---
+You are an agent with no budget restrictions.
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	contents, _, execDefs, warns := LoadSkills([]string{p}, config.ShellToolConfig{}, config.LimitsConfig{})
+
+	// Must load without any errors (REQ-12 reversal).
+	for _, w := range warns {
+		t.Errorf("unexpected warn/error: %v", w)
+	}
+
+	// Must produce exactly one SkillContent.
+	if len(contents) != 1 {
+		t.Fatalf("expected 1 SkillContent, got %d", len(contents))
+	}
+
+	// Must produce exactly one ExecutableSkillDef (executable: true).
+	if len(execDefs) != 1 {
+		t.Fatalf("expected 1 ExecutableSkillDef, got %d", len(execDefs))
+	}
+
+	def := execDefs[0]
+	if def.Name != "unlimited-agent" {
+		t.Errorf("Name: got %q, want %q", def.Name, "unlimited-agent")
+	}
+
+	// Budget must be zero-value (unlimited semantics).
+	// Specifically, Timeout==0 means the Spawn fix uses context.WithCancel
+	// instead of context.WithTimeout(ctx, 0) which would cancel immediately.
+	if def.Budget.Timeout != 0 {
+		t.Errorf("Budget.Timeout: want 0 (unlimited), got %v", def.Budget.Timeout)
+	}
+	if def.Budget.MaxCostUSD != 0 {
+		t.Errorf("Budget.MaxCostUSD: want 0 (unlimited), got %v", def.Budget.MaxCostUSD)
+	}
+	if def.Budget.MaxTurns != 0 {
+		t.Errorf("Budget.MaxTurns: want 0 (unlimited), got %d", def.Budget.MaxTurns)
+	}
+}
+
 // TestLoadSkills_FourReturnValueSignatureCompiles verifies that the 4-return
 // signature compiles correctly (compile-time test).
 func TestLoadSkills_FourReturnValueSignatureCompiles(t *testing.T) {

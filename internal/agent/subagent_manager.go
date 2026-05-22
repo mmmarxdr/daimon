@@ -54,7 +54,7 @@ type subRecord struct {
 	result     *SubagentResult
 	spawnedAt  time.Time
 
-	done   chan struct{} // closed when finalized
+	done   chan struct{}     // closed when finalized
 	events chan notify.Event // buffered cap-8 for budgetMonitor fan-out
 
 	mu sync.Mutex
@@ -67,13 +67,13 @@ type subRecord struct {
 
 // SubagentResult is the final output of a completed subagent.
 type SubagentResult struct {
-	Status   string            `json:"status"`            // "completed" | "failed" | "cancelled"
-	Summary  string            `json:"summary"`           // final assistant text
+	Status    string            `json:"status"`  // "completed" | "failed" | "cancelled"
+	Summary   string            `json:"summary"` // final assistant text
 	Artifacts map[string]string `json:"artifacts,omitempty"`
-	Cost     float64           `json:"cost_usd"`
-	Turns    int               `json:"turns"`
-	Errors   []string          `json:"errors,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Cost      float64           `json:"cost_usd"`
+	Turns     int               `json:"turns"`
+	Errors    []string          `json:"errors,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
 // SubagentStatus is a read-only snapshot returned by Active()/All()/Get().
@@ -230,7 +230,15 @@ func (m *SubagentManager) Spawn(
 	batchID := id // V1: 1:1 mapping; V2 will introduce real batch grouping
 	childConvID := "sub_" + id
 
-	subCtx, cancel := context.WithTimeout(ctx, def.Budget.Timeout)
+	// REQ-16: only wrap with a timeout when Budget.Timeout > 0. A zero Timeout
+	// means "no time limit" — context.WithTimeout(ctx, 0) cancels instantly.
+	var subCtx context.Context
+	var cancel context.CancelFunc
+	if def.Budget.Timeout > 0 {
+		subCtx, cancel = context.WithTimeout(ctx, def.Budget.Timeout)
+	} else {
+		subCtx, cancel = context.WithCancel(ctx)
+	}
 
 	// Persist the child conversation before starting the child agent.
 	now := time.Now()
@@ -484,8 +492,9 @@ func (m *SubagentManager) finalize(rec *subRecord, status, reason string) {
 // the softWarned flag), so this function never needs to re-check the flag.
 //
 // Message text follows the format specified by SUBAGENTS-REQ-5:
-//   ⚠ Budget warning: you have used 80% of your cost cap
-//   (current: 0.XXXX, max: Y.YYYY). Wrap up and produce a final summary.
+//
+//	⚠ Budget warning: you have used 80% of your cost cap
+//	(current: 0.XXXX, max: Y.YYYY). Wrap up and produce a final summary.
 func (m *SubagentManager) injectSoftWarning(rec *subRecord) {
 	rec.mu.Lock()
 	cost := rec.cost

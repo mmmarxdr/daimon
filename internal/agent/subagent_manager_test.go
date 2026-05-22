@@ -97,9 +97,9 @@ func newBusRecorder() *busRecorder {
 	return r
 }
 
-func (r *busRecorder) Emit(ev notify.Event)          { r.inner.Emit(ev) }
+func (r *busRecorder) Emit(ev notify.Event)            { r.inner.Emit(ev) }
 func (r *busRecorder) Subscribe(fn func(notify.Event)) { r.inner.Subscribe(fn) }
-func (r *busRecorder) Close()                         { r.inner.Close() }
+func (r *busRecorder) Close()                          { r.inner.Close() }
 
 func (r *busRecorder) eventsOfType(typ string) []notify.Event {
 	r.mu.Lock()
@@ -420,7 +420,7 @@ func TestSubagentManager_SoftWarning_FiredOnceAt80Percent(t *testing.T) {
 
 	def := defaultDef("expensive")
 	def.Budget = skill.BudgetConfig{
-		MaxCostUSD: 1.0,   // threshold at $1
+		MaxCostUSD: 1.0, // threshold at $1
 		MaxTurns:   100,
 		Timeout:    10 * time.Second,
 	}
@@ -506,9 +506,9 @@ func TestSubagentManager_SoftWarning_FiredOnceAt80Percent(t *testing.T) {
 // mockToolImpl is a minimal tool.Tool used to populate parent tool maps.
 type mockToolImpl struct{ n string }
 
-func (m *mockToolImpl) Name() string                                                  { return m.n }
-func (m *mockToolImpl) Description() string                                           { return "test tool" }
-func (m *mockToolImpl) Schema() json.RawMessage                                       { return json.RawMessage(`{}`) }
+func (m *mockToolImpl) Name() string            { return m.n }
+func (m *mockToolImpl) Description() string     { return "test tool" }
+func (m *mockToolImpl) Schema() json.RawMessage { return json.RawMessage(`{}`) }
 func (m *mockToolImpl) Execute(_ context.Context, _ json.RawMessage) (tool.ToolResult, error) {
 	return tool.ToolResult{}, nil
 }
@@ -796,6 +796,159 @@ func TestBatchID_SeparateSpawnsGetDifferentIDs(t *testing.T) {
 
 	if h1.BatchID == h2.BatchID {
 		t.Errorf("two separate spawns got the same BatchID %q — expected different IDs", h1.BatchID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Timeout==0 fix (REQ-16, tasks 5.1-5.2)
+// ---------------------------------------------------------------------------
+
+// TestSpawnTimeout_ZeroBudget_CtxNotDoneImmediately verifies that spawning a
+// skill with Budget.Timeout==0 does NOT produce a context that is already Done
+// within 100ms. Before the fix, context.WithTimeout(ctx, 0) cancelled instantly.
+// (REQ-16; design §2.11; task 5.1)
+func TestSpawnTimeout_ZeroBudget_CtxNotDoneImmediately(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	// Capture the sub-context created during Spawn so we can inspect it.
+	var capturedCtx context.Context
+	var capturedMu sync.Mutex
+
+	m := &SubagentManager{
+		bus:         bus,
+		store:       st,
+		subs:        make(map[string]*subRecord),
+		callerIsSub: make(map[string]bool),
+	}
+	m.softWarnFn = m.injectSoftWarning
+
+	m.newChildAgent = func(
+		_ skill.ExecutableSkillDef,
+		_ string,
+		subCtx context.Context,
+		subCh *channel.SubagentChannel,
+		_ map[string]tool.Tool,
+		_ store.Store,
+	) (*Agent, error) {
+		capturedMu.Lock()
+		capturedCtx = subCtx
+		capturedMu.Unlock()
+
+		inbox := make(chan channel.IncomingMessage, 10)
+		_ = subCh.Start(context.Background(), inbox)
+		go func() {
+			// Simulate a long-running task; do NOT close immediately.
+			time.Sleep(500 * time.Millisecond)
+			_ = subCh.Stop()
+		}()
+		return nil, nil
+	}
+
+	def := skill.ExecutableSkillDef{
+		Name:        "unlimited",
+		Description: "no budget",
+		// Budget.Timeout == 0 — should NOT cause instant cancellation.
+		Budget: skill.BudgetConfig{},
+	}
+
+	_, err := m.Spawn(context.Background(), def, "work", SpawnModeAsync, "parent-conv")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Wait a tiny bit to ensure the closure ran and set capturedCtx.
+	time.Sleep(20 * time.Millisecond)
+
+	capturedMu.Lock()
+	ctx := capturedCtx
+	capturedMu.Unlock()
+
+	if ctx == nil {
+		t.Fatal("capturedCtx was not set by newChildAgent closure")
+	}
+
+	// The sub-context must NOT be done within 100ms of spawn.
+	select {
+	case <-ctx.Done():
+		t.Errorf("subagent context was cancelled immediately — Timeout==0 must use WithCancel, not WithTimeout(ctx,0): %v", ctx.Err())
+	case <-time.After(100 * time.Millisecond):
+		// Good — context is still live.
+	}
+}
+
+// TestSpawnTimeout_PositiveBudget_CtxCancelledAfterTimeout verifies that a
+// positive Timeout still wires context.WithTimeout correctly.
+// (REQ-16; design §2.11; task 5.2)
+func TestSpawnTimeout_PositiveBudget_CtxCancelledAfterTimeout(t *testing.T) {
+	bus := newBusRecorder()
+	t.Cleanup(func() { bus.Close() })
+	st := &mockStore{}
+
+	var capturedCtx context.Context
+	var capturedMu sync.Mutex
+
+	m := &SubagentManager{
+		bus:         bus,
+		store:       st,
+		subs:        make(map[string]*subRecord),
+		callerIsSub: make(map[string]bool),
+	}
+	m.softWarnFn = m.injectSoftWarning
+
+	m.newChildAgent = func(
+		_ skill.ExecutableSkillDef,
+		_ string,
+		subCtx context.Context,
+		subCh *channel.SubagentChannel,
+		_ map[string]tool.Tool,
+		_ store.Store,
+	) (*Agent, error) {
+		capturedMu.Lock()
+		capturedCtx = subCtx
+		capturedMu.Unlock()
+
+		inbox := make(chan channel.IncomingMessage, 10)
+		_ = subCh.Start(context.Background(), inbox)
+		go func() {
+			// Task runs indefinitely until ctx is cancelled.
+			<-subCtx.Done()
+			_ = subCh.Stop()
+		}()
+		return nil, nil
+	}
+
+	def := skill.ExecutableSkillDef{
+		Name:        "short-lived",
+		Description: "50ms timeout",
+		Budget: skill.BudgetConfig{
+			Timeout: 50 * time.Millisecond, // very short timeout for testing
+		},
+	}
+
+	_, err := m.Spawn(context.Background(), def, "work", SpawnModeAsync, "parent-conv2")
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Wait for the closure to run.
+	time.Sleep(10 * time.Millisecond)
+
+	capturedMu.Lock()
+	ctx := capturedCtx
+	capturedMu.Unlock()
+
+	if ctx == nil {
+		t.Fatal("capturedCtx was not set")
+	}
+
+	// The context should be cancelled within 200ms (well past the 50ms timeout).
+	select {
+	case <-ctx.Done():
+		// Good — context expired as expected.
+	case <-time.After(200 * time.Millisecond):
+		t.Error("expected subagent context to be cancelled after 50ms timeout, but it is still live after 200ms")
 	}
 }
 
