@@ -110,6 +110,13 @@ type ServerDeps struct {
 	// UserSkillStore enables the /api/skills CRUD surface. Nil when the
 	// store backend does not support user-defined skills (e.g. FileStore).
 	UserSkillStore store.UserSkillStore
+
+	// CuratedSkills is the pre-parsed bundled catalog loaded at boot from
+	// skill.CuratedFS. It is used by handleListSkills (?source=curated) and
+	// handleGetSkill (curated fallback when DB has no row for the name).
+	// Nil or empty means no curated catalog is available.
+	// (spec-gap fix; tasks 3.8 + 6.13)
+	CuratedSkills []skill.SkillContent
 }
 
 // Server is the HTTP dashboard server.

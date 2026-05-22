@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"daimon/internal/config"
 	"daimon/internal/skill"
 	"daimon/internal/store"
 	"daimon/internal/tool"
@@ -189,13 +190,15 @@ func TestHandleListSkills_SourceUserFilter(t *testing.T) {
 }
 
 func TestHandleListSkills_SourceCuratedFilter(t *testing.T) {
-	// curated source is not in DB in V1; filter returns empty.
+	// Phase 6: ?source=curated returns the bundled curated catalog (5 templates),
+	// NOT the DB rows. The DB has a user row that must NOT appear in the result.
 	uss := &fakeUserSkillStore{
 		skills: []store.UserSkill{
 			{ID: "1", Name: "alpha", Source: "user", Version: 1},
 		},
 	}
-	srv := newSkillsTestServer(t, uss, nil, nil)
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, nil, nil, curatedSkills)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=curated", nil)
 	w := httptest.NewRecorder()
@@ -210,9 +213,21 @@ func TestHandleListSkills_SourceCuratedFilter(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	// V1: curated rows are not in DB — filter returns empty slice.
-	if len(resp.Skills) != 0 {
-		t.Errorf("expected 0 curated skills in V1, got %d", len(resp.Skills))
+	// Phase 6: curated catalog ships 5 templates.
+	const wantCurated = 5
+	if len(resp.Skills) != wantCurated {
+		t.Errorf("expected %d curated skills, got %d", wantCurated, len(resp.Skills))
+	}
+	for _, sk := range resp.Skills {
+		if sk.Source != "curated" {
+			t.Errorf("skill %q has source=%q, want 'curated'", sk.Name, sk.Source)
+		}
+	}
+	// The user DB row "alpha" must NOT appear.
+	for _, sk := range resp.Skills {
+		if sk.Name == "alpha" {
+			t.Errorf("user DB skill 'alpha' must not appear in ?source=curated response")
+		}
 	}
 }
 
@@ -570,9 +585,9 @@ func TestHandleDeleteSkill_Missing404(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestReloadSkills verifies that reloadSkills calls ReplaceExecutableSkills
-// and ReplaceSkills on the agent once per invocation. LoadSkillsUnified is not
-// available yet (Phase 4); reloadSkills uses a DB-only stub that calls
-// ListUserSkills and converts results without FS or curated passes.
+// and ReplaceSkills on the agent once per invocation. LoadSkillsUnified merges
+// curated (5 templates via skill.CuratedFS) + FS + DB, so exec defs include
+// both the bundled curated catalog and the user's DB skill.
 func TestReloadSkills_CallsAgentMethods(t *testing.T) {
 	execSkill := store.UserSkill{
 		ID:         "1",
@@ -594,11 +609,21 @@ func TestReloadSkills_CallsAgentMethods(t *testing.T) {
 	if reloader.replaceSkillsCalls != 1 {
 		t.Errorf("ReplaceSkills called %d times, want 1", reloader.replaceSkillsCalls)
 	}
-	if len(reloader.lastExecDefs) != 1 {
-		t.Errorf("exec defs = %d, want 1", len(reloader.lastExecDefs))
+	// Exec defs include 5 curated templates + 1 user DB skill = 6 total.
+	const curatedCount = 5
+	if len(reloader.lastExecDefs) != curatedCount+1 {
+		t.Errorf("exec defs = %d, want %d (5 curated + 1 user)", len(reloader.lastExecDefs), curatedCount+1)
 	}
-	if reloader.lastExecDefs[0].Name != "my-skill" {
-		t.Errorf("exec def name = %q, want 'my-skill'", reloader.lastExecDefs[0].Name)
+	// Verify the user skill is present by name (map iteration order is not guaranteed).
+	var foundMySkill bool
+	for _, ed := range reloader.lastExecDefs {
+		if ed.Name == "my-skill" {
+			foundMySkill = true
+			break
+		}
+	}
+	if !foundMySkill {
+		t.Error("exec def 'my-skill' not found — DB skill must be present in exec defs")
 	}
 }
 
@@ -710,6 +735,308 @@ func TestDeleteSkillTriggersReload(t *testing.T) {
 	if reloader.replaceExecutableSkillsCalls == 0 {
 		t.Error("expected ReplaceExecutableSkills to be called after successful delete")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 6.12 — DB wins over curated (HTTP layer)
+// ---------------------------------------------------------------------------
+
+// TestCreateSkill_ShadowsCuratedName_DBWins verifies CONFIG-REQ-9:
+// when a user creates a skill with the same name as a bundled curated template,
+// the user version is stored in DB and GET /api/skills/{name} returns source="user".
+// (CONFIG-REQ-9; design §3.3; task 6.12)
+func TestCreateSkill_ShadowsCuratedName_DBWins(t *testing.T) {
+	// "researcher" is one of the 5 bundled curated templates.
+	// When the user POSTs a skill with the same name, GET returns source="user".
+	uss := &fakeUserSkillStore{}
+	reloader := &fakeAgentReloader{}
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, reloader, nil, curatedSkills)
+
+	// POST: create a user skill named "researcher" (shadow the curated one).
+	w := postSkill(t, srv, map[string]any{
+		"name":  "researcher",
+		"prose": "My custom researcher instructions.",
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// GET: should return the user version from DB.
+	req := httptest.NewRequest(http.MethodGet, "/api/skills/researcher", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var s struct {
+		Source string `json:"source"`
+		Prose  string `json:"prose"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&s); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
+	if s.Source != "user" {
+		t.Errorf("source = %q, want 'user'", s.Source)
+	}
+	if s.Prose != "My custom researcher instructions." {
+		t.Errorf("prose = %q, want user version", s.Prose)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 6.13 — Curated reappears after user deletes override (HTTP layer)
+// ---------------------------------------------------------------------------
+
+// TestDeleteSkill_CuratedReappearsInReload verifies CONFIG-REQ-9:
+// after a user deletes their "researcher" override, reloadSkills pushes the
+// curated catalog back into the agent. The agent mock must receive "researcher"
+// in its skill contents and exec defs (from the bundled CuratedFS).
+// (CONFIG-REQ-9; design §3.3; task 6.13)
+func TestDeleteSkill_CuratedReappearsInReload(t *testing.T) {
+	// Start with a user override of "researcher" already in the store.
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{
+				ID:         "user-researcher",
+				Name:       "researcher",
+				Source:     "user",
+				Prose:      "My custom researcher.",
+				Executable: true,
+				Version:    1,
+			},
+		},
+	}
+	reloader := &fakeAgentReloader{}
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, reloader, nil, curatedSkills)
+
+	// DELETE the user override.
+	w := deleteSkill(t, srv, "researcher")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DELETE: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// reloadSkills was called — check agent methods were invoked.
+	if reloader.replaceExecutableSkillsCalls == 0 {
+		t.Fatal("ReplaceExecutableSkills was not called after delete")
+	}
+
+	// The curated "researcher" must be in the executable defs pushed to the agent.
+	// Curated templates are executable (executable: true, budget: defaults), so they
+	// appear in the execs slice returned by LoadSkillsUnified.
+	// After the user override is deleted, the curated default reappears via Pass 1 of
+	// LoadSkillsUnified (curated pass). (CONFIG-REQ-9; design §3.3)
+	var foundExec bool
+	for _, ed := range reloader.lastExecDefs {
+		if ed.Name == "researcher" {
+			foundExec = true
+			if ed.Description == "" {
+				t.Error("researcher exec: description must not be empty (curated template)")
+			}
+			break
+		}
+	}
+	if !foundExec {
+		t.Error("researcher not found in exec defs pushed to agent after delete — curated did not reappear")
+	}
+
+	// Task 6.13 (HTTP): After delete, GET /api/skills/researcher must return 200
+	// with source="curated" (the curated version re-surfaces via deps.CuratedSkills).
+	// (CONFIG-REQ-9; design §3.3; task 6.13)
+	req := httptest.NewRequest(http.MethodGet, "/api/skills/researcher", nil)
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET after delete: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got struct {
+		Source string `json:"source"`
+		Name   string `json:"name"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
+	if got.Source != "curated" {
+		t.Errorf("GET source = %q, want 'curated' — curated version did not reappear after user delete", got.Source)
+	}
+	if got.Name != "researcher" {
+		t.Errorf("GET name = %q, want 'researcher'", got.Name)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 3.8 spec-gap fix — curated catalog exposed through REST
+// ---------------------------------------------------------------------------
+
+// TestHandleListSkills_SourceCurated_ReturnsCatalog verifies that
+// GET /api/skills?source=curated returns the bundled curated catalog
+// (5 entries) each with source="curated". DB rows must not appear.
+// (CONFIG-REQ-9; task 3.8 spec-gap)
+func TestHandleListSkills_SourceCurated_ReturnsCatalog(t *testing.T) {
+	// One user DB row — must NOT appear in curated response.
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "1", Name: "user-only", Source: "user", Version: 1},
+		},
+	}
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, nil, nil, curatedSkills)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=curated", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Skills []store.UserSkill `json:"skills"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	const wantCount = 5
+	if len(resp.Skills) != wantCount {
+		t.Errorf("expected %d curated skills, got %d", wantCount, len(resp.Skills))
+	}
+	for _, sk := range resp.Skills {
+		if sk.Source != "curated" {
+			t.Errorf("skill %q: source=%q, want 'curated'", sk.Name, sk.Source)
+		}
+		if sk.Name == "" {
+			t.Error("curated skill has empty name")
+		}
+		if sk.Prose == "" {
+			t.Error("curated skill has empty prose — body content must be set")
+		}
+	}
+	// DB-only row must not appear.
+	for _, sk := range resp.Skills {
+		if sk.Name == "user-only" {
+			t.Error("user DB skill 'user-only' must not appear in ?source=curated response")
+		}
+	}
+}
+
+// TestHandleListSkills_SourceAll_DBWinsCollision verifies that when a DB row
+// and a curated entry share the same name, ?source=all (or no param) returns
+// the DB row (source="user"), not the curated one.
+// (CONFIG-REQ-9; design §3.3; task 3.8 spec-gap)
+func TestHandleListSkills_SourceAll_DBWinsCollision(t *testing.T) {
+	// DB has a user override of the curated "researcher" template.
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "u1", Name: "researcher", Source: "user", Prose: "custom researcher", Version: 1},
+		},
+	}
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, nil, nil, curatedSkills)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=all", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Skills []store.UserSkill `json:"skills"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// 5 curated + 1 user, but "researcher" appears only once (DB wins).
+	// So total = 5 (4 other curated + 1 user researcher).
+	const wantCount = 5
+	if len(resp.Skills) != wantCount {
+		t.Errorf("expected %d skills (4 curated + 1 user researcher), got %d", wantCount, len(resp.Skills))
+	}
+	var researcherCount int
+	var researcherSource string
+	for _, sk := range resp.Skills {
+		if sk.Name == "researcher" {
+			researcherCount++
+			researcherSource = sk.Source
+		}
+	}
+	if researcherCount != 1 {
+		t.Errorf("expected exactly 1 'researcher' entry, got %d", researcherCount)
+	}
+	if researcherSource != "user" {
+		t.Errorf("researcher source = %q, want 'user' — DB must win over curated", researcherSource)
+	}
+}
+
+// TestHandleGetSkill_NotInDB_ButInCurated_Returns200Curated verifies that
+// GET /api/skills/{name} returns 200 with source="curated" when the name is
+// not in DB but exists in the bundled curated catalog.
+// (CONFIG-REQ-9; task 6.13 spec-gap)
+func TestHandleGetSkill_NotInDB_ButInCurated_Returns200Curated(t *testing.T) {
+	// DB is empty — "researcher" is only in the curated catalog.
+	uss := &fakeUserSkillStore{}
+	curatedSkills, _, _ := skill.CuratedCatalog(config.ShellToolConfig{}, config.LimitsConfig{})
+	srv := newSkillsTestServerWithCurated(t, uss, nil, nil, curatedSkills)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills/researcher", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var sk struct {
+		Name   string `json:"name"`
+		Source string `json:"source"`
+		Prose  string `json:"prose"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&sk); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if sk.Name != "researcher" {
+		t.Errorf("name = %q, want 'researcher'", sk.Name)
+	}
+	if sk.Source != "curated" {
+		t.Errorf("source = %q, want 'curated'", sk.Source)
+	}
+	if sk.Prose == "" {
+		t.Error("prose must not be empty — curated template body must be set")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — newSkillsTestServerWithCurated
+// ---------------------------------------------------------------------------
+
+// newSkillsTestServerWithCurated builds a test server with the CuratedSkills
+// field populated so curated-catalog tests work correctly.
+func newSkillsTestServerWithCurated(
+	t *testing.T,
+	uss store.UserSkillStore,
+	agentReloader AgentReloader,
+	knownTools map[string]tool.Tool,
+	curated []skill.SkillContent,
+) *Server {
+	t.Helper()
+	if knownTools == nil {
+		knownTools = map[string]tool.Tool{}
+	}
+	s := &Server{
+		deps: ServerDeps{
+			Store:          &fakeWebStore{},
+			Config:         minimalConfig(),
+			UserSkillStore: uss,
+			Agent:          agentReloader,
+			Tools:          knownTools,
+			CuratedSkills:  curated,
+		},
+		mux:        http.NewServeMux(),
+		wsUpgrader: newWSUpgrader(nil),
+	}
+	s.routes()
+	return s
 }
 
 // ---------------------------------------------------------------------------

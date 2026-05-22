@@ -193,30 +193,30 @@ Chain strategy: pending
 
 ### Embedded FS
 
-- [ ] 6.1 [IMPL] Create directory `internal/skill/curated/`. (design §2.10)
-- [ ] 6.2 [IMPL] Create `internal/skill/curated_embed.go` (NEW) with `//go:embed curated/*.md` directive and exported `CuratedFS embed.FS`. (design §2.10)
+- [x] 6.1 [IMPL] Create directory `internal/skill/curated/`. (design §2.10)
+- [x] 6.2 [IMPL] Create `internal/skill/curated_embed.go` (NEW) with `//go:embed curated/*.md` directive and exported `CuratedFS embed.FS`. (design §2.10)
 
 ### Initial 5 Templates
 
 > Each template MUST include valid frontmatter (`executable: true`, `budget: defaults`) so a fresh install has working spawn tools out-of-the-box.
 
-- [ ] 6.3 [IMPL] `internal/skill/curated/researcher.skill.md` — researcher persona; reads/searches; `budget: defaults`. (design §2.10)
-- [ ] 6.4 [IMPL] `internal/skill/curated/summarizer.skill.md` — summarizes text/docs; `budget: defaults`. (design §2.10)
-- [ ] 6.5 [IMPL] `internal/skill/curated/code-reviewer.skill.md` — code review persona; references `read_file` in allowlist; `budget: defaults`. (design §2.10)
-- [ ] 6.6 [IMPL] `internal/skill/curated/email-drafter.skill.md` — email composition; `budget: defaults`. (design §2.10)
-- [ ] 6.7 [IMPL] `internal/skill/curated/meeting-notes.skill.md` — meeting note extractor; `budget: defaults`. (design §2.10)
+- [x] 6.3 [IMPL] `internal/skill/curated/researcher.skill.md` — researcher persona; reads/searches; `budget: defaults`. (design §2.10)
+- [x] 6.4 [IMPL] `internal/skill/curated/summarizer.skill.md` — summarizes text/docs; `budget: defaults`. (design §2.10)
+- [x] 6.5 [IMPL] `internal/skill/curated/code-reviewer.skill.md` — code review persona; references `read_file` in allowlist; `budget: defaults`. (design §2.10)
+- [x] 6.6 [IMPL] `internal/skill/curated/email-drafter.skill.md` — email composition; `budget: defaults`. (design §2.10)
+- [x] 6.7 [IMPL] `internal/skill/curated/meeting-notes.skill.md` — meeting note extractor; `budget: defaults`. (design §2.10)
 
 ### Loader Integration
 
-- [ ] 6.8 [TEST] In `internal/skill/loader_unified_test.go`: `loadCurated(embed.FS)` parses all 5 templates; each yields well-formed `SkillContent` and `ExecutableSkillDef`; `source` field = `"curated"`. (AGENT-LOOP-REQ-7)
-- [ ] 6.9 [TEST] Zero-value / empty `embed.FS` passed as curated source → returns empty slices, no error. (AGENT-LOOP-REQ-7)
-- [ ] 6.10 [IMPL] Implement `loadCurated(fs embed.FS) ([]SkillContent, []ExecutableSkillDef, []error)` helper in `internal/skill/loader_unified.go` or `curated_embed.go`. Walks `"curated/"` dir; parses each `.skill.md`; emits NO `tool.Tool` entries (curated templates reference environment tools only). (AGENT-LOOP-REQ-7; design §2.10)
-- [ ] 6.11 [IMPL] Integrate `loadCurated` into `LoadSkillsUnified` as the lowest-precedence pass (curated runs first; DB and FS can override). (AGENT-LOOP-REQ-7)
+- [x] 6.8 [TEST] In `internal/skill/loader_unified_test.go`: `loadCurated(embed.FS)` parses all 5 templates; each yields well-formed `SkillContent` and `ExecutableSkillDef`; `source` field = `"curated"`. (AGENT-LOOP-REQ-7)
+- [x] 6.9 [TEST] Zero-value / empty `embed.FS` passed as curated source → returns empty slices, no error. (AGENT-LOOP-REQ-7)
+- [x] 6.10 [IMPL] Implement `loadCurated(fs embed.FS) ([]SkillContent, []ExecutableSkillDef, []error)` helper in `internal/skill/loader_unified.go` or `curated_embed.go`. Walks `"curated/"` dir; parses each `.skill.md`; emits NO `tool.Tool` entries (curated templates reference environment tools only). (AGENT-LOOP-REQ-7; design §2.10)
+- [x] 6.11 [IMPL] Integrate `loadCurated` into `LoadSkillsUnified` as the lowest-precedence pass (curated runs first; DB and FS can override). (AGENT-LOOP-REQ-7)
 
 ### Shadow Tests
 
-- [ ] 6.12 [TEST] User creates `user_skill` with the same name as a curated skill → DB entry wins; `GET /api/skills/{name}` returns the user version with `source="user"`. (CONFIG-REQ-9; design §3.3)
-- [ ] 6.13 [TEST] User deletes their `user_skill` → curated skill reappears in `GET /api/skills/{name}` response with `source="curated"`. (CONFIG-REQ-9; design §3.3)
+- [x] 6.12 [TEST] User creates `user_skill` with the same name as a curated skill → DB entry wins; `GET /api/skills/{name}` returns the user version with `source="user"`. (CONFIG-REQ-9; design §3.3)
+- [x] 6.13 [TEST] User deletes their `user_skill` → curated skill reappears in `GET /api/skills/{name}` response with `source="curated"`. (CONFIG-REQ-9; design §3.3)
 
 ---
 

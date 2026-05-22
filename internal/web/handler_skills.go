@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -106,6 +105,22 @@ func (s *Server) knownToolNames() map[string]interface{} {
 	return out
 }
 
+// curatedSkillToUserSkill converts a skill.SkillContent from the bundled
+// curated catalog into the store.UserSkill response shape with source="curated".
+// Timestamps are zero — curated skills are immutable and have no DB row.
+func curatedSkillToUserSkill(sc skill.SkillContent) store.UserSkill {
+	return store.UserSkill{
+		Name:        sc.Name,
+		Description: sc.Description,
+		Prose:       sc.Prose,
+		Executable:  sc.Executable,
+		Model:       sc.Model,
+		Provider:    sc.ProviderName,
+		Version:     sc.Version,
+		Source:      "curated",
+	}
+}
+
 // --------------------------------------------------------------------------
 // Task 3.17 — handleListSkills
 // --------------------------------------------------------------------------
@@ -113,15 +128,65 @@ func (s *Server) knownToolNames() map[string]interface{} {
 // handleListSkills serves GET /api/skills.
 // Query param ?source=user|curated|all controls filtering.
 //
-// V1 note: curated skills are loaded from embed.FS at runtime (Phase 6), NOT
-// stored in the DB. Until Phase 6 ships, ?source=curated always returns an
-// empty slice. The filter parses correctly; the empty result is intentional.
-// (CONFIG-REQ-9; AGENT-LOOP-REQ-8)
+// source=user   — DB rows only (source="user")
+// source=curated — bundled curated catalog only (from deps.CuratedSkills)
+// source=all or "" — merged: curated + DB; DB wins on name collision
+//
+// (CONFIG-REQ-9; AGENT-LOOP-REQ-8; spec-gap fix tasks 3.8 + 6.13)
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	sourceFilter := r.URL.Query().Get("source")
 
-	skills := make([]store.UserSkill, 0)
+	switch sourceFilter {
+	case "curated":
+		// Return the bundled curated catalog directly — no DB needed.
+		out := make([]store.UserSkill, 0, len(s.deps.CuratedSkills))
+		for _, sc := range s.deps.CuratedSkills {
+			out = append(out, curatedSkillToUserSkill(sc))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: out}); err != nil {
+			slog.Warn("handleListSkills: encode error", "error", err)
+		}
+		return
 
+	case "user":
+		// DB rows only — current V1 behavior.
+		skills := make([]store.UserSkill, 0)
+		if s.deps.UserSkillStore != nil {
+			rows, err := s.deps.UserSkillStore.ListUserSkills(r.Context())
+			if err != nil {
+				slog.Error("handleListSkills: list error", "error", err)
+				writeSkillError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			for _, sk := range rows {
+				if sk.Source == "user" {
+					skills = append(skills, sk)
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: skills}); err != nil {
+			slog.Warn("handleListSkills: encode error", "error", err)
+		}
+		return
+	}
+
+	// "" or "all" — merged result: start with curated, then DB wins on collision.
+	// Build index from curated catalog (lowest precedence).
+	type entry struct {
+		sk  store.UserSkill
+		idx int // insertion order for stable output
+	}
+	index := make(map[string]*entry, len(s.deps.CuratedSkills))
+	order := make([]string, 0, len(s.deps.CuratedSkills))
+	for _, sc := range s.deps.CuratedSkills {
+		us := curatedSkillToUserSkill(sc)
+		index[sc.Name] = &entry{sk: us}
+		order = append(order, sc.Name)
+	}
+
+	// DB rows override curated on name collision.
 	if s.deps.UserSkillStore != nil {
 		rows, err := s.deps.UserSkillStore.ListUserSkills(r.Context())
 		if err != nil {
@@ -130,26 +195,22 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, sk := range rows {
-			switch sourceFilter {
-			case "user":
-				if sk.Source == "user" {
-					skills = append(skills, sk)
-				}
-			case "curated":
-				// V1: curated skills are not stored in DB. Phase 6 will seed them.
-				// For now, ?source=curated always returns empty.
-				if sk.Source == "curated" {
-					skills = append(skills, sk)
-				}
-			default:
-				// "" or "all" — return everything
-				skills = append(skills, sk)
+			if _, exists := index[sk.Name]; !exists {
+				order = append(order, sk.Name)
 			}
+			index[sk.Name] = &entry{sk: sk}
+		}
+	}
+
+	out := make([]store.UserSkill, 0, len(order))
+	for _, name := range order {
+		if e, ok := index[name]; ok {
+			out = append(out, e.sk)
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: skills}); err != nil {
+	if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: out}); err != nil {
 		slog.Warn("handleListSkills: encode error", "error", err)
 	}
 }
@@ -159,29 +220,43 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 // --------------------------------------------------------------------------
 
 // handleGetSkill serves GET /api/skills/{name}.
-// Returns 200 + UserSkill JSON on success, 404 on missing. (AGENT-LOOP-REQ-8)
+// Lookup precedence: DB first (source="user") → curated catalog fallback.
+// Returns 200 + UserSkill JSON on success, 404 if not found in either source.
+// (AGENT-LOOP-REQ-8; CONFIG-REQ-9; spec-gap fix task 6.13)
 func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if s.deps.UserSkillStore == nil {
-		writeSkillError(w, http.StatusNotFound, "skill '"+name+"' not found")
-		return
-	}
 
-	sk, err := s.deps.UserSkillStore.GetUserSkill(r.Context(), name)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeSkillError(w, http.StatusNotFound, "skill '"+name+"' not found")
+	// Pass 1: try DB.
+	if s.deps.UserSkillStore != nil {
+		sk, err := s.deps.UserSkillStore.GetUserSkill(r.Context(), name)
+		if err == nil {
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(sk); err != nil {
+				slog.Warn("handleGetSkill: encode error", "error", err)
+			}
 			return
 		}
-		slog.Error("handleGetSkill: get error", "name", name, "error", err)
-		writeSkillError(w, http.StatusInternalServerError, "internal error")
-		return
+		if !errors.Is(err, store.ErrNotFound) {
+			slog.Error("handleGetSkill: get error", "name", name, "error", err)
+			writeSkillError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		// ErrNotFound — fall through to curated lookup below.
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(sk); err != nil {
-		slog.Warn("handleGetSkill: encode error", "error", err)
+	// Pass 2: curated catalog fallback.
+	for _, sc := range s.deps.CuratedSkills {
+		if sc.Name == name {
+			us := curatedSkillToUserSkill(sc)
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(us); err != nil {
+				slog.Warn("handleGetSkill: encode error", "error", err)
+			}
+			return
+		}
 	}
+
+	writeSkillError(w, http.StatusNotFound, "skill '"+name+"' not found")
 }
 
 // --------------------------------------------------------------------------
@@ -397,9 +472,6 @@ func (s *Server) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 // reloadSkills re-runs LoadSkillsUnified and pushes the merged skill set into
 // the running agent. Called after every successful CRUD write to /api/skills.
 // Idempotent; safe to call when Agent is nil (returns silently).
-//
-// curatedFS is the zero-value embed.FS until Phase 6 ships the curated catalog.
-// When Phase 6 adds curated_embed.go, this call site switches to skill.CuratedFS.
 // (AGENT-LOOP-REQ-8; design §2.8.4)
 func (s *Server) reloadSkills(ctx context.Context) {
 	if s.deps.Agent == nil {
@@ -410,7 +482,7 @@ func (s *Server) reloadSkills(ctx context.Context) {
 		ctx,
 		s.config().Skills,
 		s.deps.UserSkillStore,
-		embed.FS{}, // Phase 6: replace with skill.CuratedFS
+		skill.CuratedFS,
 		s.config().Tools.Shell,
 		s.config().Limits,
 	)
