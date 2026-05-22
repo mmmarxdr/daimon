@@ -122,22 +122,22 @@ Chain strategy: pending
 
 ### REST CRUD Handlers
 
-- [ ] 3.8 [TEST] `handleListSkills` in `internal/web/handler_skills_test.go` (NEW): `?source=user` returns only user rows; `?source=curated` returns only curated; `?source=all` / no param returns merged; response shape `{"skills": [...]}`. (CONFIG-REQ-9; AGENT-LOOP-REQ-8)
-- [ ] 3.9 [TEST] `handleGetSkill`: existing name → 200 + skill body; missing name → 404. (AGENT-LOOP-REQ-8)
-- [ ] 3.10 [TEST] `handleCreateSkill`: valid payload → 201 + `Location: /api/skills/{name}` header; name regex violation → 422; name UNIQUE conflict → 409; prose > 8 KB → 422; `tools_allowlist` with unknown tool → 422; malformed JSON → 400. (CONFIG-REQ-6; OUTPUT-STORE-REQ-12)
-- [ ] 3.11 [TEST] `handleUpdateSkill`: `source=user` row → 200 + updated body; `source=curated` row → 403. (CONFIG-REQ-9)
-- [ ] 3.12 [TEST] `handleDeleteSkill`: `source=user` row → 204; `source=curated` row → 403; missing name → 404. (CONFIG-REQ-9)
-- [ ] 3.13 [TEST] `s.reloadSkills()` helper: re-runs `LoadSkillsUnified` + `Agent.ReplaceExecutableSkills` + `Agent.ReplaceSkills` in sequence; mock store + mock reloader verify each is called once per write. (AGENT-LOOP-REQ-8)
-- [ ] 3.14 [TEST] Integration — allowlist TWO modes: (a) REST write with unknown tool → 422 hard error; (b) hot-reload with unknown tool in stored allowlist → warn-and-drop (no 422). (CONFIG-REQ-5; REQ-19)
-- [ ] 3.15 [TEST] Integration: POST create skill → immediate spawn via `SubagentSpawnTool` succeeds (no restart). (AGENT-LOOP-REQ-8)
-- [ ] 3.16 [TEST] Integration: DELETE skill → subsequent spawn attempt returns tool-not-found error. (AGENT-LOOP-REQ-8)
-- [ ] 3.17 [IMPL] Create `internal/web/handler_skills.go` (NEW file). Implement `handleListSkills`. (CONFIG-REQ-9; AGENT-LOOP-REQ-8; design §2.8)
-- [ ] 3.18 [IMPL] Implement `handleGetSkill` in `internal/web/handler_skills.go`. (AGENT-LOOP-REQ-8)
-- [ ] 3.19 [IMPL] Implement `handleCreateSkill` with validation: name regex `^[a-z][a-z0-9_-]*$` ≤64 chars; prose ≤8 KB; `tools_allowlist` cross-check against `s.deps.Tools` (unknown → 422 at write time); budget if present requires ≥1 positive field. (CONFIG-REQ-6; CONFIG-REQ-9; OUTPUT-STORE-REQ-12; design §2.8)
-- [ ] 3.20 [IMPL] Implement `handleUpdateSkill` with curated 403 guard. (CONFIG-REQ-9)
-- [ ] 3.21 [IMPL] Implement `handleDeleteSkill` with curated 403 guard + missing 404. (CONFIG-REQ-9)
-- [ ] 3.22 [IMPL] Implement `s.reloadSkills()` helper in `handler_skills.go` or `server.go`: `ListUserSkills` → `LoadSkillsUnified` → `ReplaceExecutableSkills` → `ReplaceSkills`. (AGENT-LOOP-REQ-8)
-- [ ] 3.23 [IMPL] Register 5 skill routes in `internal/web/server.go` route table: `GET /api/skills`, `GET /api/skills/{name}`, `POST /api/skills`, `PUT /api/skills/{name}`, `DELETE /api/skills/{name}`. Mutating routes wrapped with `requireOriginIfCrossOrigin`. Also add `UserSkillStore` field to `ServerDeps`. (AGENT-LOOP-REQ-8; design §2.8)
+- [x] 3.8 [TEST] `handleListSkills` in `internal/web/handler_skills_test.go` (NEW): `?source=user` returns only user rows; `?source=curated` returns only curated; `?source=all` / no param returns merged; response shape `{"skills": [...]}`. (CONFIG-REQ-9; AGENT-LOOP-REQ-8)
+- [x] 3.9 [TEST] `handleGetSkill`: existing name → 200 + skill body; missing name → 404. (AGENT-LOOP-REQ-8)
+- [x] 3.10 [TEST] `handleCreateSkill`: valid payload → 201 + `Location: /api/skills/{name}` header; name regex violation → 422; name UNIQUE conflict → 409; prose > 8 KB → 422; `tools_allowlist` with unknown tool → 422; malformed JSON → 400. (CONFIG-REQ-6; OUTPUT-STORE-REQ-12)
+- [x] 3.11 [TEST] `handleUpdateSkill`: `source=user` row → 200 + updated body; `source=curated` row → 403. (CONFIG-REQ-9)
+- [x] 3.12 [TEST] `handleDeleteSkill`: `source=user` row → 204; `source=curated` row → 403; missing name → 404. (CONFIG-REQ-9)
+- [x] 3.13 [TEST] `s.reloadSkills()` helper: re-runs `LoadSkillsUnified` + `Agent.ReplaceExecutableSkills` + `Agent.ReplaceSkills` in sequence; mock store + mock reloader verify each is called once per write. (AGENT-LOOP-REQ-8)
+- [x] 3.14 [TEST] Integration — allowlist TWO modes: (a) REST write with unknown tool → 422 hard error; (b) hot-reload with unknown tool in stored allowlist → warn-and-drop (no 422). (CONFIG-REQ-5; REQ-19)
+- [x] 3.15 [TEST] Integration: POST create skill → immediate spawn via `SubagentSpawnTool` succeeds (no restart). (AGENT-LOOP-REQ-8)
+- [x] 3.16 [TEST] Integration: DELETE skill → subsequent spawn attempt returns tool-not-found error. (AGENT-LOOP-REQ-8)
+- [x] 3.17 [IMPL] Create `internal/web/handler_skills.go` (NEW file). Implement `handleListSkills`. (CONFIG-REQ-9; AGENT-LOOP-REQ-8; design §2.8)
+- [x] 3.18 [IMPL] Implement `handleGetSkill` in `internal/web/handler_skills.go`. (AGENT-LOOP-REQ-8)
+- [x] 3.19 [IMPL] Implement `handleCreateSkill` with validation: name regex `^[a-z][a-z0-9_-]*$` ≤64 chars; prose ≤8 KB; `tools_allowlist` cross-check against `s.deps.Tools` (unknown → 422 at write time); budget if present requires ≥1 positive field. (CONFIG-REQ-6; CONFIG-REQ-9; OUTPUT-STORE-REQ-12; design §2.8)
+- [x] 3.20 [IMPL] Implement `handleUpdateSkill` with curated 403 guard. (CONFIG-REQ-9)
+- [x] 3.21 [IMPL] Implement `handleDeleteSkill` with curated 403 guard + missing 404. (CONFIG-REQ-9)
+- [x] 3.22 [IMPL] Implement `s.reloadSkills()` helper in `handler_skills.go` or `server.go`: `ListUserSkills` → `LoadSkillsUnified` → `ReplaceExecutableSkills` → `ReplaceSkills`. (AGENT-LOOP-REQ-8)
+- [x] 3.23 [IMPL] Register 5 skill routes in `internal/web/server.go` route table: `GET /api/skills`, `GET /api/skills/{name}`, `POST /api/skills`, `PUT /api/skills/{name}`, `DELETE /api/skills/{name}`. Mutating routes wrapped with `requireOriginIfCrossOrigin`. Also add `UserSkillStore` field to `ServerDeps`. (AGENT-LOOP-REQ-8; design §2.8)
 
 ---
 

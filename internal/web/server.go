@@ -106,6 +106,10 @@ type ServerDeps struct {
 	// SubagentProvider exposes live subagent state and the event bus for the
 	// REST + WS visibility endpoints. Nil when no executable skills are loaded.
 	SubagentProvider SubagentProvider
+
+	// UserSkillStore enables the /api/skills CRUD surface. Nil when the
+	// store backend does not support user-defined skills (e.g. FileStore).
+	UserSkillStore store.UserSkillStore
 }
 
 // Server is the HTTP dashboard server.
@@ -352,6 +356,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/media", s.handleListMedia)
 	s.mux.HandleFunc("GET /api/media/{sha256}", s.handleGetMedia)
 	s.mux.Handle("DELETE /api/media/{sha256}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteMedia)))
+	// Skill CRUD endpoints.
+	s.mux.HandleFunc("GET /api/skills", s.handleListSkills)
+	s.mux.HandleFunc("GET /api/skills/{name}", s.handleGetSkill)
+	s.mux.Handle("POST /api/skills", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleCreateSkill)))
+	s.mux.Handle("PUT /api/skills/{name}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleUpdateSkill)))
+	s.mux.Handle("DELETE /api/skills/{name}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteSkill)))
 	// Subagent visibility endpoints.
 	s.mux.HandleFunc("GET /api/subagents/active", s.handleSubagentsActive)
 	s.mux.Handle("POST /api/subagents/{id}/cancel", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleSubagentCancel)))
