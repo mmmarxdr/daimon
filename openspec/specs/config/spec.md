@@ -40,18 +40,18 @@ Removes `FileChunkSize` from `ContextModeConfig` entirely. Any config file that 
 
 The skill loader SHALL parse the following new YAML frontmatter fields on `.skill.md` files:
 
-| Field | Type | Required for executable | Default (non-executable) | Description |
-|---|---|---|---|---|
-| `executable` | `bool` | — | `false` | Marks the skill as a spawnable subagent definition |
-| `version` | `int` | No | `1` | Profile schema version; reserved for future field evolution |
-| `model` | `string` | No | parent's model | LLM model the subagent runs on (e.g. `"claude-haiku-4-5"`) |
-| `provider` | `string` | No | parent's provider | Provider name (e.g. `"anthropic"`, `"openrouter"`) |
-| `system_prompt_addendum` | `string` | No | `""` | Extra system prompt text appended to the base system prompt for this subagent |
-| `tools_allowlist` | `[]string` | No | `[]` (inherit all parent tools) | Exact tool names the subagent may use |
-| `budget` | `BudgetConfig \| "defaults"` | YES (if `executable: true`) | N/A — load error if absent | Budget constraints block |
-| `budget.max_cost_usd` | `float64` | Yes (if explicit budget block) | — | Max spend in USD |
-| `budget.max_turns` | `int` | Yes (if explicit budget block) | — | Max turn count |
-| `budget.timeout_min` | `int` | Yes (if explicit budget block) | — | Max wall-clock runtime in minutes |
+| Field                    | Type                         | Required for executable        | Default (non-executable)        | Description                                                                   |
+| ------------------------ | ---------------------------- | ------------------------------ | ------------------------------- | ----------------------------------------------------------------------------- |
+| `executable`             | `bool`                       | —                              | `false`                         | Marks the skill as a spawnable subagent definition                            |
+| `version`                | `int`                        | No                             | `1`                             | Profile schema version; reserved for future field evolution                   |
+| `model`                  | `string`                     | No                             | parent's model                  | LLM model the subagent runs on (e.g. `"claude-haiku-4-5"`)                    |
+| `provider`               | `string`                     | No                             | parent's provider               | Provider name (e.g. `"anthropic"`, `"openrouter"`)                            |
+| `system_prompt_addendum` | `string`                     | No                             | `""`                            | Extra system prompt text appended to the base system prompt for this subagent |
+| `tools_allowlist`        | `[]string`                   | No                             | `[]` (inherit all parent tools) | Exact tool names the subagent may use                                         |
+| `budget`                 | `BudgetConfig \| "defaults"` | **No** — MAY be omitted        | `nil` (unlimited)               | Budget constraints block; absence means unlimited                             |
+| `budget.max_cost_usd`    | `float64`                    | Yes (if explicit budget block) | —                               | Max spend in USD                                                              |
+| `budget.max_turns`       | `int`                        | Yes (if explicit budget block) | —                               | Max turn count                                                                |
+| `budget.timeout_min`     | `int`                        | Yes (if explicit budget block) | —                               | Max wall-clock runtime in minutes                                             |
 
 #### Scenario: full executable skill frontmatter parses correctly
 
@@ -88,6 +88,13 @@ The skill loader SHALL parse the following new YAML frontmatter fields on `.skil
 - WHEN the skill loader processes this file
 - THEN the `ExecutableSkillDef` has `MaxCostUSD: 0.50`, `MaxTurns: 20`, `TimeoutMin: 10`
 
+#### Scenario: executable skill with NO budget block loads successfully (reversal)
+
+- GIVEN a skill file with `executable: true` and no `budget` key
+- WHEN the skill is loaded
+- THEN loading succeeds with no error
+- AND `Budget` on the resulting `ExecutableSkillDef` is nil (unlimited semantics)
+
 ---
 
 ### CONFIG-REQ-5 — Validation: unknown tool in `tools_allowlist` is a load error
@@ -121,20 +128,20 @@ The skill loader SHALL validate each name in `tools_allowlist` against the set o
 
 ---
 
-### CONFIG-REQ-6 — Validation: missing `budget` block on executable skill is a load error
+### CONFIG-REQ-6 — Validation: `budget` is OPTIONAL for executable skills
 
-Every skill file with `executable: true` MUST declare a `budget` block (either explicit values or the `"defaults"` shortcut). Absence of the `budget` key MUST cause a load error.
+Every skill file with `executable: true` MAY omit the `budget` block. When omitted, the skill loads with `Budget = nil`, meaning unlimited cost, unlimited turns, and no timeout. The parser MUST NOT return an error for a missing `budget` key on an executable skill.
 
-(Previously: no budget concept existed.)
+(Previously: CONFIG-REQ-6 required the `budget` block and returned a load error when absent. This requirement is explicitly reversed by the `subagents-crud` change.)
 
-#### Scenario: executable skill without budget key causes load error
+#### Scenario: executable skill without budget key loads successfully
 
 - GIVEN a skill file with `executable: true` and no `budget` key
 - WHEN the skill is loaded
-- THEN loading returns a non-nil error
-- AND the error message references `"budget"` and the skill name
+- THEN loading succeeds with no error
+- AND `Budget` is nil on the resulting `ExecutableSkillDef`
 
-#### Scenario: explicit budget block with all three fields loads successfully
+#### Scenario: explicit budget block with all three fields still loads successfully
 
 - GIVEN `budget: { max_cost_usd: 0.25, max_turns: 15, timeout_min: 8 }`
 - WHEN the skill is loaded
