@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"flag"
 	"fmt"
@@ -132,7 +131,7 @@ func runWebCommand(args []string, cfgPath string) error {
 			ctx,
 			cfg.Skills,
 			userSkillStore,
-			embed.FS{}, // Phase 6: replace with skill.CuratedFS
+			skill.CuratedFS,
 			cfg.Tools.Shell,
 			cfg.Limits,
 		)
@@ -398,6 +397,13 @@ func runWebCommand(args []string, cfgPath string) error {
 
 	provRegistry := provider.NewStaticRegistry(*cfg)
 
+	// Pre-parse the curated catalog for REST handler use.
+	// Errors are non-fatal; a partial catalog is still usable.
+	curatedCatalog, _, curatedErrs := skill.CuratedCatalog(cfg.Tools.Shell, cfg.Limits)
+	for _, cerr := range curatedErrs {
+		slog.Warn("curated catalog: parse warning", "error", cerr)
+	}
+
 	mediaStore, _ := st.(store.MediaStore)
 	srv := web.NewServer(web.ServerDeps{
 		Store:            st,
@@ -416,6 +422,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		IngestWorker:     ragWiring.Worker,
 		RAGMetrics:       ragWiring.Metrics,
 		UserSkillStore:   userSkillStore, // nil for FileStore backends
+		CuratedSkills:    curatedCatalog,
 	})
 	// Wire the server's auditor accessor into the agent so that after a
 	// hot-swap (PUT /api/config with audit fields changed) the agent always
