@@ -8,6 +8,55 @@ import (
 	"daimon/internal/tool"
 )
 
+// ReplaceExecutableSkills atomically replaces the agent's spawnable subagent
+// definitions. Used by the /api/skills CRUD handler after every successful
+// write. Removes ALL existing *SubagentSpawnTool entries from a.tools, then
+// re-registers fresh ones from defs (with two-phase allowlist filtering).
+//
+// Lazy-initializes a.subMgr when defs is non-empty and no manager exists yet
+// (covers the case where the agent was constructed without WithExecutableSkills
+// but later gains its first executable skill via CRUD).
+//
+// Lock ordering: acquires only a.toolsMu (write). a.subMgr has its own internal
+// mu.RWMutex which is acquired downstream by Spawn/Cancel — no overlap, no
+// nested-lock scenarios.
+//
+// Idempotent: passing the same defs slice twice produces the same registry.
+// Empty defs ([] or nil) leaves a.tools without any *SubagentSpawnTool entries
+// but does NOT nil out a.subMgr (in-flight spawns continue to drain through it).
+// (REQ-19; design §2.5)
+func (a *Agent) ReplaceExecutableSkills(defs []skill.ExecutableSkillDef) {
+	a.toolsMu.Lock()
+	defer a.toolsMu.Unlock()
+
+	// Phase 1: remove existing spawn tools.
+	for name, t := range a.tools {
+		if _, ok := t.(*SubagentSpawnTool); ok {
+			delete(a.tools, name)
+		}
+	}
+
+	// Phase 2: lazy-init subMgr on first registration.
+	if a.subMgr == nil && len(defs) > 0 {
+		a.subMgr = NewSubagentManager(a.bus, a.store)
+		a.subMgr.installBusSubscription()
+		a.subMgr.newChildAgent = a.makeChildAgentFn()
+	}
+
+	// Phase 3: re-register from fresh defs (two-phase allowlist filter).
+	for _, def := range defs {
+		def.ToolsAllowlist = filterKnownTools(def.ToolsAllowlist, a.tools)
+		if _, exists := a.tools[def.Name]; exists {
+			slog.Warn("hot_reload: subagent tool name collides; subagent wins", "name", def.Name)
+		}
+		a.tools[def.Name] = &SubagentSpawnTool{def: def, manager: a.subMgr}
+	}
+
+	slog.Info("hot_reload: executable skills replaced",
+		"count", len(defs),
+		"total_tools", len(a.tools))
+}
+
 // RegisterMCPServer adds a freshly-connected MCP server's tools to the
 // running agent without requiring a restart. Used by the dashboard after
 // the user adds a server from the catalog: handler connects the server,
