@@ -68,7 +68,7 @@ re-run with `sudo`.
 
 > Note: builds produced by plain `go build` or `go install` (Option D) carry
 > no version metadata and will refuse self-update — use `go install
-> github.com/mmmarxdr/daimon/cmd/daimon@latest` instead, or pass an explicit
+github.com/mmmarxdr/daimon/cmd/daimon@latest` instead, or pass an explicit
 > `--version vX.Y.Z` to opt into self-replacement.
 
 ## First run
@@ -87,4 +87,4 @@ Alternative TUI wizard:
 daimon --setup
 ```
 
-Manual config: see [docs/CONFIG.md](CONFIG.md).
+Manual config: see [docs/modules/config.md](modules/config.md).

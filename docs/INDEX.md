@@ -24,8 +24,8 @@ All module docs follow the canonical template at [`modules/_TEMPLATE.md`](module
 | [DEPLOY.md](DEPLOY.md)                     | Production deployment patterns                                                  |
 | [DEVELOPMENT.md](DEVELOPMENT.md)           | Local dev workflow, test/run loop                                               |
 | [release-pipeline.md](release-pipeline.md) | Release & versioning process                                                    |
-| [design-system.md](design-system.md)       | Frontend design system reference                                                |
-| [dashboard-design.md](dashboard-design.md) | Web dashboard UX brief                                                          |
+| [WEB_DASHBOARD.md](WEB_DASHBOARD.md)       | User-facing guide to the browser dashboard                                      |
+| [auth-e2e.md](auth-e2e.md)                 | Manual QA checklist for the auth flow                                           |
 
 ---
 
