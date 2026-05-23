@@ -12,7 +12,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"daimon/internal/audit"
 	"daimon/internal/channel"
 	"daimon/internal/config"
@@ -24,6 +23,7 @@ import (
 	"daimon/internal/rag/metrics"
 	"daimon/internal/store"
 	"daimon/internal/tool"
+	"github.com/google/uuid"
 )
 
 // isCronMessage returns true when a ChannelID was created by the cron scheduler
@@ -403,6 +403,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			}
 			resp, textStreamed, err = a.processStreamingCall(
 				loopCtx, streamingProv, streamSender, req, msg.ChannelID, i, llmStart, te,
+				nil, // subagentMeta: wired in WU8 (PR 2); nil is safe — bus emits nil-guard REQ-14
 			)
 		} else {
 			resp, err = a.provider.Chat(loopCtx, req)
@@ -482,7 +483,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			_ = cs.RecordCost(ctx, store.CostRecord{
 				ID:              uuid.New().String(),
 				SessionID:       conv.ID,
-				ConvID:          conv.ID,          // REQ-13: explicit conv-level attribution
+				ConvID:          conv.ID,           // REQ-13: explicit conv-level attribution
 				ParentConvID:    conv.ParentConvID, // REQ-13: non-empty for subagent turns; "" for principals
 				AttributionKind: "self",            // V1: always self; advisor_call reserved for V2
 				ChannelID:       msg.ChannelID,

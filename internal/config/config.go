@@ -21,15 +21,15 @@ var ErrNoConfig = errors.New("no config file found")
 
 // WebConfig holds configuration for the optional HTTP dashboard server.
 type WebConfig struct {
-	Enabled            bool      `yaml:"enabled"                json:"enabled"`
-	Port               int       `yaml:"port"                   json:"port"`
-	Host               string    `yaml:"host"                   json:"host"`
-	AuthToken          string    `yaml:"auth_token"             json:"auth_token"`           // Bearer token for API/WS auth. Auto-generated if empty.
-	AuthTokenIssuedAt  time.Time `yaml:"auth_token_issued_at"   json:"auth_token_issued_at"` // When the current auth token was last issued (rotation or setup-complete). Used for server-side TTL enforcement.
-	AllowedOrigins     []string  `yaml:"allowed_origins"        json:"allowed_origins"`      // CORS: allowed origins. Empty or ["*"] = allow all.
-	TLSCert            string    `yaml:"tls_cert"               json:"tls_cert"`             // Path to TLS certificate file (optional).
-	TLSKey             string    `yaml:"tls_key"                json:"tls_key"`              // Path to TLS private key file (optional).
-	TrustProxy         bool      `yaml:"trust_proxy"            json:"trust_proxy"`          // When true, X-Forwarded-For is trusted for client IP. Only enable behind a trusted reverse proxy.
+	Enabled           bool      `yaml:"enabled"                json:"enabled"`
+	Port              int       `yaml:"port"                   json:"port"`
+	Host              string    `yaml:"host"                   json:"host"`
+	AuthToken         string    `yaml:"auth_token"             json:"auth_token"`           // Bearer token for API/WS auth. Auto-generated if empty.
+	AuthTokenIssuedAt time.Time `yaml:"auth_token_issued_at"   json:"auth_token_issued_at"` // When the current auth token was last issued (rotation or setup-complete). Used for server-side TTL enforcement.
+	AllowedOrigins    []string  `yaml:"allowed_origins"        json:"allowed_origins"`      // CORS: allowed origins. Empty or ["*"] = allow all.
+	TLSCert           string    `yaml:"tls_cert"               json:"tls_cert"`             // Path to TLS certificate file (optional).
+	TLSKey            string    `yaml:"tls_key"                json:"tls_key"`              // Path to TLS private key file (optional).
+	TrustProxy        bool      `yaml:"trust_proxy"            json:"trust_proxy"`          // When true, X-Forwarded-For is trusted for client IP. Only enable behind a trusted reverse proxy.
 }
 
 // ProviderThinkingConfig is the unified nested thinking/reasoning configuration block.
@@ -93,7 +93,7 @@ func IsKnownProvider(name string) bool {
 }
 
 type Config struct {
-	Agent   AgentConfig `yaml:"agent" json:"agent"`
+	Agent AgentConfig `yaml:"agent" json:"agent"`
 
 	// DEPRECATED: Provider is the v1 shape. It is unmarshaled from disk only when a
 	// legacy config is encountered; migrateLegacyProvider nils it out immediately
@@ -120,9 +120,9 @@ type Config struct {
 	Web           WebConfig           `yaml:"web"                 json:"web"`
 	Notifications NotificationsConfig `yaml:"notifications"       json:"notifications"`
 
-	Skills            []string `yaml:"skills"              json:"skills"`
-	SkillsDir         string   `yaml:"skills_dir"          json:"skills_dir"`
-	SkillsRegistryURL string   `yaml:"skills_registry_url" json:"skills_registry_url"`
+	Skills            []string  `yaml:"skills"              json:"skills"`
+	SkillsDir         string    `yaml:"skills_dir"          json:"skills_dir"`
+	SkillsRegistryURL string    `yaml:"skills_registry_url" json:"skills_registry_url"`
 	RAG               RAGConfig `yaml:"rag"                json:"rag"`
 
 	// Conversations scopes conversation-lifecycle concerns (soft-delete pruner,
@@ -155,11 +155,11 @@ type AIConfig struct {
 // CompactionConfig configures the background ConversationCompactor that
 // summarises idle conversations and evicts their raw tool_outputs.
 type CompactionConfig struct {
-	Enabled        bool          `yaml:"enabled"           json:"enabled"`
-	Model          string        `yaml:"model,omitempty"   json:"model,omitempty"`
-	IntervalSec    int           `yaml:"interval_sec"      json:"interval_sec"`        // default 3600 (1h)
-	IdleAfterSec   int           `yaml:"idle_after_sec"    json:"idle_after_sec"`      // default 604800 (7d)
-	CallTimeoutSec int           `yaml:"call_timeout_sec"  json:"call_timeout_sec"`    // default 60
+	Enabled        bool   `yaml:"enabled"           json:"enabled"`
+	Model          string `yaml:"model,omitempty"   json:"model,omitempty"`
+	IntervalSec    int    `yaml:"interval_sec"      json:"interval_sec"`      // default 3600 (1h)
+	IdleAfterSec   int    `yaml:"idle_after_sec"    json:"idle_after_sec"`    // default 604800 (7d)
+	CallTimeoutSec int    `yaml:"call_timeout_sec"  json:"call_timeout_sec"`  // default 60
 	MaxConvsPerRun int    `yaml:"max_convs_per_run" json:"max_convs_per_run"` // default 5
 }
 
@@ -170,16 +170,16 @@ type CompactionConfig struct {
 type TitleGenYAMLConfig struct {
 	Enabled       bool   `yaml:"enabled"         json:"enabled"`
 	Model         string `yaml:"model,omitempty" json:"model,omitempty"`
-	WorkerCount   int    `yaml:"worker_count"    json:"worker_count"`   // clamped 1..8, default 2
-	QueueSize     int    `yaml:"queue_size"      json:"queue_size"`     // clamped 4..256, default 32
+	WorkerCount   int    `yaml:"worker_count"    json:"worker_count"`    // clamped 1..8, default 2
+	QueueSize     int    `yaml:"queue_size"      json:"queue_size"`      // clamped 4..256, default 32
 	CallTimeoutMS int    `yaml:"call_timeout_ms" json:"call_timeout_ms"` // clamped 1000..120000, default 30000
 }
 
 // FilterConfig controls post-execution tool output compression.
 // YAML key: filter
 type FilterConfig struct {
-	Enabled            bool         `yaml:"enabled"             json:"enabled"`                           // default: false (opt-in)
-	TruncationChars    int          `yaml:"truncation_chars"    json:"truncation_chars"`                  // default: 8000
+	Enabled            bool         `yaml:"enabled"             json:"enabled"`          // default: false (opt-in)
+	TruncationChars    int          `yaml:"truncation_chars"    json:"truncation_chars"` // default: 8000
 	Levels             FilterLevels `yaml:"levels"              json:"levels"`
 	InjectionDetection *bool        `yaml:"injection_detection" json:"injection_detection,omitempty"` // default: true — detect prompt injection in tool results
 }
@@ -202,12 +202,12 @@ const (
 
 // ContextModeConfig configures context-mode behavior.
 type ContextModeConfig struct {
-	Mode             ContextMode   `yaml:"mode"               json:"mode"`                             // default: "off"
-	ShellMaxOutput   int           `yaml:"shell_max_output"   json:"shell_max_output"`                  // bytes, default 4096 (auto), 8192 (conservative)
-	SandboxTimeout   time.Duration `yaml:"sandbox_timeout"    json:"sandbox_timeout"`                   // default 30s
+	Mode             ContextMode   `yaml:"mode"               json:"mode"`                         // default: "off"
+	ShellMaxOutput   int           `yaml:"shell_max_output"   json:"shell_max_output"`             // bytes, default 4096 (auto), 8192 (conservative)
+	SandboxTimeout   time.Duration `yaml:"sandbox_timeout"    json:"sandbox_timeout"`              // default 30s
 	AutoIndexOutputs *bool         `yaml:"auto_index_outputs" json:"auto_index_outputs,omitempty"` // default true in auto mode, false otherwise
-	SandboxKeepFirst int           `yaml:"sandbox_keep_first" json:"sandbox_keep_first"`                // default 20 lines
-	SandboxKeepLast  int           `yaml:"sandbox_keep_last"  json:"sandbox_keep_last"`                 // default 10 lines
+	SandboxKeepFirst int           `yaml:"sandbox_keep_first" json:"sandbox_keep_first"`           // default 20 lines
+	SandboxKeepLast  int           `yaml:"sandbox_keep_last"  json:"sandbox_keep_last"`            // default 10 lines
 }
 
 // CronConfig holds configuration for the cron scheduling subsystem.
@@ -222,8 +222,8 @@ type CronConfig struct {
 
 // AgentConfig holds all agent-level configuration.
 type AgentConfig struct {
-	Name             string `yaml:"name"               json:"name"`
-	Personality      string `yaml:"personality"        json:"personality"`
+	Name        string `yaml:"name"               json:"name"`
+	Personality string `yaml:"personality"        json:"personality"`
 	// MaxIterations caps the number of tool-use cycles per user message.
 	// 0 (default) means unlimited; the turn is still bounded by limits.total_timeout
 	// and by MaxTotalTokens below. Set a positive value only if you want a hard
@@ -236,11 +236,11 @@ type AgentConfig struct {
 	// input+output tokens across all iterations. 0 (default) means no budget.
 	// When crossed, the loop stops and surfaces a "continue" pill in the UI
 	// so the user can choose to extend.
-	MaxTotalTokens int `yaml:"max_total_tokens"   json:"max_total_tokens"`
-	HistoryLength  int `yaml:"history_length"     json:"history_length"`
-	MemoryResults    int    `yaml:"memory_results"     json:"memory_results"`
-	MaxContextTokens int    `yaml:"max_context_tokens" json:"max_context_tokens"` // token budget for context; 0 = use HistoryLength only
-	SummaryTokens    int    `yaml:"summary_tokens"     json:"summary_tokens"`     // max tokens for LLM-generated summaries
+	MaxTotalTokens   int `yaml:"max_total_tokens"   json:"max_total_tokens"`
+	HistoryLength    int `yaml:"history_length"     json:"history_length"`
+	MemoryResults    int `yaml:"memory_results"     json:"memory_results"`
+	MaxContextTokens int `yaml:"max_context_tokens" json:"max_context_tokens"` // token budget for context; 0 = use HistoryLength only
+	SummaryTokens    int `yaml:"summary_tokens"     json:"summary_tokens"`     // max tokens for LLM-generated summaries
 
 	// Native memory — Layer 2: LLM tag enrichment.
 	EnrichMemory     bool   `yaml:"enrich_memory"          json:"enrich_memory"`          // default: false — enables async tag enrichment
@@ -601,7 +601,7 @@ type RAGHydeConf struct {
 // RAGMetricsConf configures the in-memory RAG retrieval metrics ring buffer.
 // YAML key: rag.metrics
 type RAGMetricsConf struct {
-	Enabled    bool `yaml:"enabled"     json:"enabled"`      // default true — collection is always-on when RAG is enabled
+	Enabled    bool `yaml:"enabled"     json:"enabled"`     // default true — collection is always-on when RAG is enabled
 	BufferSize int  `yaml:"buffer_size" json:"buffer_size"` // default 200
 }
 
@@ -637,10 +637,10 @@ type RAGConfig struct {
 // per chunk and allow re-embedding.
 type RAGEmbeddingConf struct {
 	Enabled  bool   `yaml:"enabled"   json:"enabled"`
-	Provider string `yaml:"provider"  json:"provider"`  // openai | gemini
-	Model    string `yaml:"model"     json:"model"`     // e.g. text-embedding-3-small; empty = provider's hardcoded default
+	Provider string `yaml:"provider"  json:"provider"` // openai | gemini
+	Model    string `yaml:"model"     json:"model"`    // e.g. text-embedding-3-small; empty = provider's hardcoded default
 	APIKey   string `yaml:"api_key"   json:"api_key"`
-	BaseURL  string `yaml:"base_url"  json:"base_url"`  // empty = provider's standard endpoint
+	BaseURL  string `yaml:"base_url"  json:"base_url"` // empty = provider's standard endpoint
 }
 
 // NotificationsConfig is the top-level notifications block.
@@ -657,7 +657,7 @@ type NotificationsConfig struct {
 type NotificationRule struct {
 	Name            string `yaml:"name"             json:"name"`
 	EventType       string `yaml:"event_type"       json:"event_type"`
-	JobID           string `yaml:"job_id"           json:"job_id"`            // optional filter
+	JobID           string `yaml:"job_id"           json:"job_id"` // optional filter
 	TargetChannel   string `yaml:"target_channel"   json:"target_channel"`
 	FallbackChannel string `yaml:"fallback_channel" json:"fallback_channel"`
 	Template        string `yaml:"template"         json:"template"`
@@ -891,12 +891,12 @@ func (c *Config) ApplyDefaults() {
 	// Conversations (soft-delete pruner) + AI (title generation) defaults.
 	c.setConversationsAndAIDefaults()
 
-	// Notifications defaults.
+	// Notifications defaults (V2 caps — agent-stream-events, REQ-13, D4).
 	if c.Notifications.MaxPerMinute == 0 {
-		c.Notifications.MaxPerMinute = 30
+		c.Notifications.MaxPerMinute = 1000
 	}
 	if c.Notifications.BusBufferSize == 0 {
-		c.Notifications.BusBufferSize = 256
+		c.Notifications.BusBufferSize = 1024
 	}
 	if c.Notifications.HandlerTimeoutSec == 0 {
 		c.Notifications.HandlerTimeoutSec = 5

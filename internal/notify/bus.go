@@ -17,6 +17,16 @@ type Event struct {
 	Error     string            `json:"error,omitempty"`
 	Timestamp time.Time         `json:"timestamp"`
 	Meta      map[string]string `json:"meta,omitempty"`
+
+	// Streaming / tool-lifecycle typed fields (REQ-1). All omitempty so that
+	// legacy events serialise byte-identically — zero values are absent from JSON.
+	ToolCallID string  `json:"tool_call_id,omitempty"`
+	ToolName   string  `json:"tool_name,omitempty"`
+	Iteration  int     `json:"iteration,omitempty"`
+	TokenCount int     `json:"token_count,omitempty"`
+	DurationMs int64   `json:"duration_ms,omitempty"`
+	CostUSD    float64 `json:"cost_usd,omitempty"`
+	IsError    bool    `json:"is_error,omitempty"`
 }
 
 // Bus is the central event distribution interface. It is safe for concurrent use.
@@ -29,6 +39,12 @@ type Bus interface {
 	// Subscribe registers a handler function to be called for every event that
 	// passes the circuit breaker. Should be called during setup before events
 	// start flowing.
+	//
+	// Handlers MUST be thin dispatchers — perform only a non-blocking channel
+	// send (or other fast operation) and return immediately. The bus enforces
+	// a 5-second watchdog (callWithTimeout); handlers that exceed it are
+	// abandoned and may leak goroutines. Business logic must run in a separate
+	// goroutine downstream from the dispatched event.
 	Subscribe(handler func(Event))
 
 	// Close drains the internal channel and stops the worker goroutine.
@@ -61,17 +77,17 @@ type EventBus struct {
 }
 
 // NewEventBus creates and starts an EventBus.
-//   - bufferSize: internal channel buffer; if <= 0 defaults to 256.
-//   - maxPerMin: circuit breaker cap per 60-second window; if <= 0 defaults to 30.
+//   - bufferSize: internal channel buffer; if <= 0 defaults to 1024 (V2 cap).
+//   - maxPerMin: circuit breaker cap per 60-second window; if <= 0 defaults to 1000 (V2 cap).
 //   - handlerTimeout: max duration each handler may run; if <= 0 defaults to 5s.
 //
 // The worker goroutine is started immediately.
 func NewEventBus(bufferSize, maxPerMin int, handlerTimeout time.Duration) *EventBus {
 	if bufferSize <= 0 {
-		bufferSize = 256
+		bufferSize = 1024
 	}
 	if maxPerMin <= 0 {
-		maxPerMin = 30
+		maxPerMin = 1000
 	}
 	if handlerTimeout <= 0 {
 		handlerTimeout = 5 * time.Second

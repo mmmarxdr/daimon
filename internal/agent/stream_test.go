@@ -37,13 +37,13 @@ func (m *mockStreamingProvider) ChatStream(ctx context.Context, req provider.Cha
 
 // mockStreamWriter captures chunks and reasoning calls for assertion.
 type mockStreamWriter struct {
-	mu             sync.Mutex
-	chunks         []string
-	reasoning      []string
-	finalized      bool
-	aborted        bool
-	abortErr       error
-	reasoningErr   error // if non-nil, WriteReasoning returns this error
+	mu           sync.Mutex
+	chunks       []string
+	reasoning    []string
+	finalized    bool
+	aborted      bool
+	abortErr     error
+	reasoningErr error // if non-nil, WriteReasoning returns this error
 }
 
 func (w *mockStreamWriter) WriteChunk(text string) error {
@@ -141,7 +141,7 @@ func TestProcessStreamingCall_TextOnly_WithWriter(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -195,7 +195,7 @@ func TestProcessStreamingCall_TextOnly_WithoutWriter(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, nil, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, nil, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -237,7 +237,7 @@ func TestProcessStreamingCall_ToolOnly(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -289,7 +289,7 @@ func TestProcessStreamingCall_TextThenTools(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -336,7 +336,7 @@ func TestProcessStreamingCall_Error(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, _, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err == nil {
@@ -371,7 +371,7 @@ func TestProcessStreamingCall_PreStreamError(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, _, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if !errors.Is(err, preErr) {
@@ -412,7 +412,7 @@ func TestProcessStreamingCall_ContextCancel(t *testing.T) {
 	go func() {
 		defer close(done)
 		_, _, err := ag.processStreamingCall(
-			ctx, sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+			ctx, sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 		)
 		if err == nil {
 			t.Error("expected error after context cancel")
@@ -610,7 +610,7 @@ func TestProcessStreamingCall_ReasoningDelta_Forwarded(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -652,7 +652,7 @@ func TestProcessStreamingCall_TextDeltaOnly_NoReasoning(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, _, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -684,7 +684,7 @@ func TestProcessStreamingCall_ReasoningWriteError_NonFatal(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, customCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, customCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, customCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -716,7 +716,7 @@ func TestProcessStreamingCall_ReasoningOnly_FinalizesWriter(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, sCh, sp, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "test", 0, time.Now(), nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

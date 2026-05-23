@@ -48,7 +48,7 @@ func TestIntegration_ReasoningFlow(t *testing.T) {
 		audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	resp, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "integration-test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "integration-test", 0, time.Now(), nil, nil,
 	)
 
 	if err != nil {
@@ -116,7 +116,7 @@ func TestIntegration_ReasoningOnly_WriterNotLeaked(t *testing.T) {
 		audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, true)
 
 	_, textStreamed, err := ag.processStreamingCall(
-		context.Background(), sp, sCh, provider.ChatRequest{}, "integration-test", 0, time.Now(), nil,
+		context.Background(), sp, sCh, provider.ChatRequest{}, "integration-test", 0, time.Now(), nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
