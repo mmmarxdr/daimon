@@ -58,6 +58,13 @@ type subRecord struct {
 	events chan notify.Event // buffered cap-8 for budgetMonitor fan-out
 
 	mu sync.Mutex
+
+	// REQ-11, D3: per-handle filtered subscription fields.
+	// bus is the shared bus set at Spawn time; subMu protects subs and subInstalled.
+	bus          notify.Bus
+	subMu        sync.Mutex
+	subs         []chan notify.Event
+	subInstalled bool
 }
 
 // BudgetConfig is a resolved budget consumed by SubagentManager.
@@ -106,13 +113,77 @@ func (h *SubagentHandle) Wait(ctx context.Context) (*SubagentResult, error) {
 // Cancel cancels this specific subagent. Idempotent.
 func (h *SubagentHandle) Cancel() { h.rec.cancel() }
 
-// Subscribe is reserved for V2 — see design §2.1. It returns a closed channel
-// so that callers who attempt to range over it exit immediately rather than
-// blocking forever. The real streaming-status path will be wired in a later
-// change once the V2 event model is defined.
-func (h *SubagentHandle) Subscribe(_ context.Context) (<-chan SubagentStatus, error) {
-	ch := make(chan SubagentStatus)
-	close(ch)
+// Subscribe returns a channel that yields only bus events attributed to this
+// subagent (filtered by Meta["subagent_id"] == h.ID). The channel is closed
+// when ctx is cancelled or the subagent finishes (h.rec.done is closed).
+//
+// Implementation (D3): a single bus.Subscribe handler is installed lazily on
+// the first Subscribe call. It fans out to all active per-Subscribe channels
+// using a non-blocking send (REQ-18: thin-dispatcher contract). Slow consumers
+// receive a WARN log and their event is dropped.
+//
+// If h.rec.bus is nil, a closed channel is returned immediately (REQ-11
+// nil-bus safety).
+func (h *SubagentHandle) Subscribe(ctx context.Context) (<-chan notify.Event, error) {
+	h.rec.subMu.Lock()
+	defer h.rec.subMu.Unlock()
+
+	// Nil bus — return a closed channel immediately so range loops exit.
+	if h.rec.bus == nil {
+		ch := make(chan notify.Event)
+		close(ch)
+		return ch, nil
+	}
+
+	// Lazy: install the shared bus subscription on the first Subscribe call.
+	if !h.rec.subInstalled {
+		id := h.rec.id
+		rec := h.rec
+		h.rec.bus.Subscribe(func(ev notify.Event) {
+			// Fast path: filter by subagent_id.
+			if ev.Meta["subagent_id"] != id {
+				return
+			}
+			rec.subMu.Lock()
+			subs := make([]chan notify.Event, len(rec.subs))
+			copy(subs, rec.subs)
+			rec.subMu.Unlock()
+
+			for _, sub := range subs {
+				select {
+				case sub <- ev: // non-blocking
+				default:
+					slog.Warn("subagent subscriber lagging, dropping event",
+						"subagent_id", id, "type", ev.Type)
+				}
+			}
+		})
+		h.rec.subInstalled = true
+	}
+
+	// Per-Subscribe channel with a generous buffer (REQ-18: absorbs ~3s of TUI
+	// render hiccup at worst-case bus throughput).
+	ch := make(chan notify.Event, 32)
+	h.rec.subs = append(h.rec.subs, ch)
+
+	// Cleanup goroutine: close ch when ctx cancels OR rec.done closes.
+	// Removes ch from rec.subs before closing to stop future fan-out sends.
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-h.rec.done:
+		}
+		h.rec.subMu.Lock()
+		for i, c := range h.rec.subs {
+			if c == ch {
+				h.rec.subs = append(h.rec.subs[:i], h.rec.subs[i+1:]...)
+				break
+			}
+		}
+		h.rec.subMu.Unlock()
+		close(ch)
+	}()
+
 	return ch, nil
 }
 
@@ -296,6 +367,7 @@ func (m *SubagentManager) Spawn(
 		spawnedAt:    now,
 		done:         make(chan struct{}),
 		events:       make(chan notify.Event, 8),
+		bus:          m.bus, // REQ-11, D3: stored for lazy Subscribe bus subscription
 	}
 
 	m.mu.Lock()
