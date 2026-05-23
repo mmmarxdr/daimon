@@ -15,6 +15,11 @@ import "daimon/internal/store"
 // For top-level conversations (ParentConvID == "") base is returned unchanged so
 // that top-level events never carry the attribution keys (REQ-10.1).
 //
+// Invariant: SubagentManager.Spawn always populates conv.Metadata with
+// "subagent_id", "batch_id", and "skill". The conditional checks below are
+// defensive against future code paths that materialize subagent conversations
+// outside the Spawn flow; under normal operation all 4 keys are always present.
+//
 // If base is nil and the function would add keys, a new map is allocated.
 func mergeSubagentMeta(conv *store.Conversation, base map[string]string) map[string]string {
 	if conv == nil || conv.ParentConvID == "" {
