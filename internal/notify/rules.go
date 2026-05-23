@@ -23,7 +23,7 @@ type RulesEngine struct {
 	sender    *NotificationSender
 	mu        sync.Mutex
 	lastFired map[string]time.Time // key: rule.Name → last fire timestamp
-	sem       chan struct{}         // semaphore: limits concurrent notification sends
+	sem       chan struct{}        // semaphore: limits concurrent notification sends
 }
 
 // NewRulesEngine creates a RulesEngine with pre-compiled templates.
@@ -53,6 +53,12 @@ func NewRulesEngine(rules []config.NotificationRule, sender *NotificationSender)
 // Handle evaluates all rules against the event. It is registered as a Bus subscriber
 // and called from the bus worker goroutine. Must not block — dispatch goroutines.
 func (r *RulesEngine) Handle(event Event) {
+	// Skip streaming boundary events — they are in KnownEventTypes for
+	// completeness but must not trigger user notification rules in V1 (REQ-12.3).
+	if StreamingSkipSet[event.Type] {
+		return
+	}
+
 	for _, rule := range r.rules {
 		// 1. Event type must match.
 		if event.Type != rule.EventType {

@@ -37,11 +37,27 @@ const (
 	EventSubagentSpawned   = "agent.subagent.spawned"
 	EventSubagentCompleted = "agent.subagent.completed"
 	EventSubagentFailed    = "agent.subagent.failed"
+
+	// Streaming / tool-lifecycle event types (agent-stream-events change, REQ-12).
+	//
+	// Bus-routed events (structured boundaries, ~5–50 per turn):
+	EventReasoningStart = "agent.reasoning.start" // first ReasoningDelta of a contiguous span
+	EventReasoningEnd   = "agent.reasoning.end"   // last ReasoningDelta or StreamEventDone closes span
+	EventToolStart      = "agent.tool.start"      // before tool execution (processMessage)
+	EventToolEnd        = "agent.tool.end"        // after tool execution (processMessage)
+	EventTokensUsage    = "agent.tokens.usage"    // once per turn at turn end (processMessage)
+
+	// Interface-only events (high-frequency; NOT on the bus — via StreamWriter/TelemetryEmitter):
+	EventMessageChunk   = "agent.message.chunk"   // text delta via StreamWriter.WriteChunk
+	EventReasoningDelta = "agent.reasoning.delta" // reasoning delta via StreamWriter.WriteReasoning
+	EventToolDelta      = "agent.tool.delta"      // tool input assembly delta via TelemetryEmitter
 )
 
 // KnownEventTypes is the set of valid event types for rule validation.
 // notification.sent and notification.failed are intentionally excluded —
 // they are never matched by rules (OriginNotification guard drops them).
+// Interface-only streaming types (agent.message.chunk, agent.reasoning.delta,
+// agent.tool.delta) are also excluded — they never travel on the bus.
 var KnownEventTypes = map[string]bool{
 	EventCronJobFired:     true,
 	EventCronJobCompleted: true,
@@ -54,4 +70,24 @@ var KnownEventTypes = map[string]bool{
 	EventSubagentSpawned:   true,
 	EventSubagentCompleted: true,
 	EventSubagentFailed:    true,
+
+	// Bus-routed streaming boundary events (REQ-12).
+	// These are registered for completeness / validation tooling but are
+	// skipped by the rules engine via StreamingSkipSet (REQ-12.3).
+	EventReasoningStart: true,
+	EventReasoningEnd:   true,
+	EventToolStart:      true,
+	EventToolEnd:        true,
+	EventTokensUsage:    true,
+}
+
+// StreamingSkipSet contains the new bus-routed event types that the rules
+// engine must skip in V1 (REQ-12.3). They are registered in KnownEventTypes
+// for validation tooling but MUST NOT trigger user notification rules.
+var StreamingSkipSet = map[string]bool{
+	EventReasoningStart: true,
+	EventReasoningEnd:   true,
+	EventToolStart:      true,
+	EventToolEnd:        true,
+	EventTokensUsage:    true,
 }

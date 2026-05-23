@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"daimon/internal/channel"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 )
 
@@ -23,6 +24,10 @@ func streamTelemetry(ctx context.Context, te channel.TelemetryEmitter, channelID
 // text deltas to the channel's StreamWriter. Tool call events are buffered
 // internally by the provider and returned in the assembled ChatResponse.
 //
+// subagentMeta carries the 4 attribution Meta keys for subagent conversations
+// (REQ-10). It is nil for top-level agent turns. Every bus.Emit call merges
+// these keys into the event Meta additively.
+//
 // Returns:
 //   - resp: the fully assembled ChatResponse (text + tool calls + usage)
 //   - textStreamed: true if text was already delivered to the user via StreamWriter;
@@ -37,6 +42,7 @@ func (a *Agent) processStreamingCall(
 	iteration int,
 	llmStart time.Time,
 	te channel.TelemetryEmitter, // may be nil if channel doesn't support telemetry
+	subagentMeta map[string]string, // nil for top-level turns (REQ-10, D7)
 ) (resp *provider.ChatResponse, textStreamed bool, err error) {
 	// 1. Initiate the streaming request.
 	result, err := sp.ChatStream(ctx, req)
@@ -48,10 +54,66 @@ func (a *Agent) processStreamingCall(
 	//    Tool-only responses never open a writer.
 	var sw channel.StreamWriter
 
-	// 3. Consume events from the stream.
+	// 3. Reasoning span state (D2). Local to this call; one span per contiguous
+	//    block of ReasoningDelta events.
+	var span struct {
+		active    bool
+		startedAt time.Time
+	}
+
+	// closeSpanIfOpen emits agent.reasoning.end and resets span state.
+	// It is a no-op when no span is active or when bus is nil (REQ-14).
+	closeSpanIfOpen := func() {
+		if !span.active {
+			return
+		}
+		if a.bus != nil {
+			meta := make(map[string]string, len(subagentMeta)+1)
+			for k, v := range subagentMeta {
+				meta[k] = v
+			}
+			meta["conv_id"] = channelID // best proxy available in stream.go
+			a.bus.Emit(notify.Event{
+				Type:       notify.EventReasoningEnd,
+				Origin:     notify.OriginAgent,
+				ChannelID:  channelID,
+				Timestamp:  time.Now(),
+				DurationMs: time.Since(span.startedAt).Milliseconds(),
+				Iteration:  iteration,
+				Meta:       meta,
+			})
+		}
+		span.active = false
+	}
+
+	// inputBytes tracks cumulative tool-call input bytes per tool ID (REQ-4, D6).
+	inputBytes := map[string]int{}
+
+	// 4. Consume events from the stream.
 	for ev := range result.Events {
 		switch ev.Type {
 		case provider.StreamEventReasoningDelta:
+			// Open a new reasoning span on the first delta of a contiguous block.
+			if !span.active {
+				span.active = true
+				span.startedAt = time.Now()
+				if a.bus != nil {
+					meta := make(map[string]string, len(subagentMeta)+1)
+					for k, v := range subagentMeta {
+						meta[k] = v
+					}
+					meta["conv_id"] = channelID
+					a.bus.Emit(notify.Event{
+						Type:      notify.EventReasoningStart,
+						Origin:    notify.OriginAgent,
+						ChannelID: channelID,
+						Timestamp: time.Now(),
+						Iteration: iteration,
+						Meta:      meta,
+					})
+				}
+			}
+
 			// Lazy init: open the stream writer on the first reasoning delta so
 			// reasoning tokens that arrive before any text delta are still forwarded.
 			if sw == nil && ss != nil {
@@ -73,6 +135,9 @@ func (a *Agent) processStreamingCall(
 			}
 
 		case provider.StreamEventTextDelta:
+			// Close any active reasoning span before switching to text (REQ-7.1).
+			closeSpanIfOpen()
+
 			// Lazy init: open the stream writer on the first text delta.
 			if sw == nil && ss != nil {
 				w, beginErr := ss.BeginStream(ctx, channelID)
@@ -94,6 +159,9 @@ func (a *Agent) processStreamingCall(
 			}
 
 		case provider.StreamEventToolCallStart:
+			// Close any active reasoning span (REQ-7.1 — non-reasoning event boundary).
+			closeSpanIfOpen()
+
 			// Forward to telemetry so the UI can show "tool in progress".
 			streamTelemetry(ctx, te, channelID, map[string]any{
 				"type":         "tool_start",
@@ -102,7 +170,14 @@ func (a *Agent) processStreamingCall(
 			})
 
 		case provider.StreamEventToolCallDelta:
-			// Input fragment — not forwarded; tool_start covers the signal.
+			// Accumulate cumulative input bytes and emit tool.delta telemetry (REQ-4, D6).
+			// This is NOT a bus event — high-frequency, routes via TelemetryEmitter.
+			inputBytes[ev.ToolCallID] += len(ev.ToolInput)
+			streamTelemetry(ctx, te, channelID, map[string]any{
+				"type":         notify.EventToolDelta,
+				"tool_call_id": ev.ToolCallID,
+				"token_count":  inputBytes[ev.ToolCallID],
+			})
 
 		case provider.StreamEventToolCallEnd:
 			// Tool call assembly complete — provider will execute after stream ends.
@@ -113,6 +188,9 @@ func (a *Agent) processStreamingCall(
 			})
 
 		case provider.StreamEventUsage:
+			// Close any active reasoning span (REQ-7.1).
+			closeSpanIfOpen()
+
 			// Forward live token counts to the UI.
 			if ev.Usage != nil {
 				streamTelemetry(ctx, te, channelID, map[string]any{
@@ -124,6 +202,9 @@ func (a *Agent) processStreamingCall(
 			}
 
 		case provider.StreamEventError:
+			// Close any active reasoning span before aborting (D10).
+			closeSpanIfOpen()
+
 			if sw != nil {
 				_ = sw.Abort(ev.Err)
 				sw = nil // prevent double-finalize
@@ -131,6 +212,9 @@ func (a *Agent) processStreamingCall(
 			// Don't return yet — let result.Response() provide the canonical error.
 
 		case provider.StreamEventDone:
+			// Close any active reasoning span before finalizing (REQ-7.2).
+			closeSpanIfOpen()
+
 			// Finalize whenever a writer was opened, regardless of whether text
 			// was streamed. A reasoning-only response (no TextDelta) still needs
 			// the writer closed to avoid a leaked stream on the channel side.
@@ -143,7 +227,7 @@ func (a *Agent) processStreamingCall(
 		}
 	}
 
-	// 4. Get the fully assembled response.
+	// 5. Get the fully assembled response.
 	resp, err = result.Response()
 	if err != nil {
 		// Clean up writer if still open (e.g. error without explicit Error event).
