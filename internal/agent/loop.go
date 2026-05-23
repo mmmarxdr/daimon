@@ -157,25 +157,6 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 
-	if a.bus != nil {
-		a.bus.Emit(notify.Event{
-			Type:      notify.EventTurnStarted,
-			Origin:    notify.OriginAgent,
-			ChannelID: msg.ChannelID,
-			Timestamp: time.Now(),
-		})
-	}
-
-	// Detect telemetry capability once per message.
-	telemetry, hasTelemetry := a.channel.(channel.TelemetryEmitter)
-	if hasTelemetry {
-		_ = telemetry.EmitTelemetry(ctx, msg.ChannelID, map[string]any{
-			"type": "turn_start",
-		})
-	}
-	turnStart := time.Now()
-	var totalInputTokens, totalOutputTokens int
-
 	// Resolve convID: explicit ConversationID on the incoming message
 	// (populated by the web channel when `?conversation_id=` was sent on
 	// the WS upgrade) overrides the userScope derivation. The scope used
@@ -200,6 +181,39 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			CreatedAt: time.Now(),
 		}
 	}
+
+	// REQ-10, WU8: compute subagent attribution once; reused by every bus emit
+	// in this turn (TurnStarted/TurnCompleted/Tool*/TokensUsage) and forwarded
+	// to processStreamingCall. nil for top-level convs — mergeSubagentMeta
+	// returns nil when ParentConvID is empty.
+	var subagentMeta map[string]string
+	if conv.ParentConvID != "" {
+		subagentMeta = mergeSubagentMeta(conv, nil)
+	}
+
+	// REQ-10: TurnStarted MUST carry the same 4 attribution keys as the rest
+	// of the turn's events. Emitted AFTER conv load so subagentMeta is
+	// available; top-level convs send nil Meta (no attribution keys present).
+	if a.bus != nil {
+		a.bus.Emit(notify.Event{
+			Type:      notify.EventTurnStarted,
+			Origin:    notify.OriginAgent,
+			ChannelID: msg.ChannelID,
+			Timestamp: time.Now(),
+			Meta:      subagentMeta,
+		})
+	}
+
+	// Detect telemetry capability once per message.
+	telemetry, hasTelemetry := a.channel.(channel.TelemetryEmitter)
+	if hasTelemetry {
+		_ = telemetry.EmitTelemetry(ctx, msg.ChannelID, map[string]any{
+			"type": "turn_start",
+		})
+	}
+	turnStart := time.Now()
+	var totalInputTokens, totalOutputTokens int
+	var turnCostUSD float64 // REQ-9.2: accumulated per-turn cost for agent.tokens.usage
 
 	// Continuation requests re-enter the loop against the existing conv —
 	// no new user message, no fresh memory/RAG search. The conversation
@@ -403,7 +417,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			}
 			resp, textStreamed, err = a.processStreamingCall(
 				loopCtx, streamingProv, streamSender, req, msg.ChannelID, i, llmStart, te,
-				nil, // subagentMeta: wired in WU8 (PR 2); nil is safe — bus emits nil-guard REQ-14
+				subagentMeta, // REQ-10 WU8: computed once after conv loaded; nil for top-level
 			)
 		} else {
 			resp, err = a.provider.Chat(loopCtx, req)
@@ -498,6 +512,12 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 		totalInputTokens += resp.Usage.InputTokens
 		totalOutputTokens += resp.Usage.OutputTokens
+		// REQ-9.2: accumulate per-iteration cost for the per-turn tokens.usage bus event.
+		{
+			modelName := a.provider.Model()
+			iCost, oCost := audit.EstimateCostSplit(modelName, int64(resp.Usage.InputTokens), int64(resp.Usage.OutputTokens))
+			turnCostUSD += iCost + oCost
+		}
 		if hasTelemetry {
 			_ = telemetry.EmitTelemetry(ctx, msg.ChannelID, map[string]any{
 				"type":          "status",
@@ -590,6 +610,22 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					"name":         tc.Name,
 					"input":        string(tc.Input),
 					"tool_call_id": tc.ID,
+				})
+			}
+			// REQ-2.2, REQ-14: emit agent.tool.start on bus before execution.
+			// Uses subagentMeta (computed below from conv) for REQ-10 attribution.
+			if a.bus != nil {
+				a.bus.Emit(notify.Event{
+					Type:       notify.EventToolStart,
+					Origin:     notify.OriginAgent,
+					ChannelID:  msg.ChannelID,
+					Timestamp:  time.Now(),
+					ToolCallID: tc.ID,
+					ToolName:   tc.Name,
+					Iteration:  i,
+					Meta: mergeSubagentMeta(conv, map[string]string{
+						"conv_id": conv.ID,
+					}),
 				})
 			}
 
@@ -755,6 +791,29 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				OriginalBytes: filterMetrics.OriginalBytes, CompressedBytes: filterMetrics.CompressedBytes,
 				FilterName: filterMetrics.FilterName,
 			})
+			// REQ-3, REQ-14: emit agent.tool.end on bus after execution completes.
+			// busStatus maps the internal "success" label to the canonical "done" per REQ-3.
+			busStatus := "done"
+			if result.IsError {
+				busStatus = "error"
+			}
+			if a.bus != nil {
+				toolEndMeta := mergeSubagentMeta(conv, map[string]string{
+					"conv_id": conv.ID,
+					"status":  busStatus,
+				})
+				a.bus.Emit(notify.Event{
+					Type:       notify.EventToolEnd,
+					Origin:     notify.OriginAgent,
+					ChannelID:  msg.ChannelID,
+					Timestamp:  time.Now(),
+					ToolCallID: tc.ID,
+					ToolName:   tc.Name,
+					DurationMs: toolDuration.Milliseconds(),
+					IsError:    result.IsError,
+					Meta:       toolEndMeta,
+				})
+			}
 			// Apply injection detection before wrapping, if enabled.
 			resultContent := result.Content
 			if config.BoolVal(a.filterCfg.InjectionDetection) {
@@ -842,10 +901,26 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			ChannelID: msg.ChannelID,
 			Text:      lastRespContent,
 			Timestamp: time.Now(),
-			Meta: map[string]string{
+			Meta: mergeSubagentMeta(conv, map[string]string{
+				"conv_id":       conv.ID,
 				"input_tokens":  fmt.Sprintf("%d", totalInputTokens),
 				"output_tokens": fmt.Sprintf("%d", totalOutputTokens),
-			},
+			}),
+		})
+		// REQ-9.2: one per-turn coalesced agent.tokens.usage event on the bus.
+		a.bus.Emit(notify.Event{
+			Type:       notify.EventTokensUsage,
+			Origin:     notify.OriginAgent,
+			ChannelID:  msg.ChannelID,
+			Timestamp:  time.Now(),
+			TokenCount: totalOutputTokens,
+			CostUSD:    turnCostUSD,
+			Meta: mergeSubagentMeta(conv, map[string]string{
+				"conv_id":       conv.ID,
+				"input_tokens":  strconv.Itoa(totalInputTokens),
+				"output_tokens": strconv.Itoa(totalOutputTokens),
+				"elapsed_ms":    strconv.FormatInt(time.Since(turnStart).Milliseconds(), 10),
+			}),
 		})
 	}
 }
