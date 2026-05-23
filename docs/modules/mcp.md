@@ -367,5 +367,4 @@ flowchart LR
   - [[agent]] — owns the live registry and the hot-reload entry points (`RegisterMCPServer`, `UnregisterMCPServer`, `CloseHotMCPServers`).
   - [[web]] — `/api/mcp` CRUD handler that drives hot-add / hot-remove.
   - [[tui]] — `mcp_manage.go` builds a TUI panel atop `MCPService`.
-- Original protocol details: [`../MCP.md`](../MCP.md) (legacy doc; verify against this module first).
 - Wiring: `cmd/daimon/main.go:255-269`, `cmd/daimon/web_cmd.go:159-163`.
