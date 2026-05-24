@@ -2062,3 +2062,106 @@ func TestFormatToolError_GenericErrorPassesThrough(t *testing.T) {
 		t.Errorf("expected raw error message for non-deadline errors, got %q", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6 — processMessage mode wiring (REQ-4, REQ-5, REQ-11)
+// ---------------------------------------------------------------------------
+
+// S5-2: a new conversation (store returns ErrNotFound) must have
+// Metadata["daimon/mode"] = "build" written explicitly (AD-9).
+func TestProcessMessage_NewConv_InitializedToBuild(t *testing.T) {
+	prov := &mockProvider{
+		responses: []provider.ChatResponse{{Content: "ok"}},
+	}
+	st := &mockStore{} // nil conv → ErrNotFound → fresh conv path
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, &mockChannel{},
+		prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "ch1",
+		SenderID:  "u1",
+		Content:   content.TextBlock("hello"),
+	})
+
+	st.mu.Lock()
+	saved := st.conv
+	st.mu.Unlock()
+	if saved == nil {
+		t.Fatal("expected conversation to be saved after processMessage")
+	}
+	if saved.Metadata == nil {
+		t.Fatal("expected conv.Metadata to be non-nil after processMessage")
+	}
+	mode, ok := saved.Metadata["daimon/mode"]
+	if !ok {
+		t.Error("expected daimon/mode key in conv.Metadata")
+	} else if mode != "build" {
+		t.Errorf("expected daimon/mode = \"build\", got %q", mode)
+	}
+}
+
+// S4-1 / S5-1: a loaded conversation with daimon/mode="plan" in metadata must
+// set a.currentMode to "plan" before buildSystemPrompt runs, so the plan system
+// prompt is injected into the turn's system prompt.
+func TestProcessMessage_LoadedConvWithPlanMode_UsesPlanSystemPrompt(t *testing.T) {
+	prov := &mockProvider{
+		responses: []provider.ChatResponse{{Content: "ok"}},
+	}
+	// Pre-seed the store with a conv that has plan mode in metadata.
+	st := &mockStore{
+		conv: &store.Conversation{
+			ID:        "conv_ch2_u2",
+			ChannelID: "ch2",
+			Metadata:  map[string]string{"daimon/mode": "plan"},
+		},
+	}
+	ch := &mockChannel{}
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch,
+		prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "ch2",
+		SenderID:  "u2",
+		Content:   content.TextBlock("analyze this"),
+	})
+
+	// Verify the plan mode system prompt was injected (visible in the request
+	// the provider received).
+	prov.mu.Lock()
+	lastReq := prov.lastReq
+	prov.mu.Unlock()
+
+	if !strings.Contains(lastReq.SystemPrompt, "PLAN mode") {
+		t.Errorf("expected plan mode system prompt in provider request, got: %q", lastReq.SystemPrompt)
+	}
+}
+
+// S11-2: after loadMode reconciles from conv metadata, modeSnapshot() must
+// return a snapshot matching the stored mode.
+func TestProcessMessage_LoadModeCalledBeforeSnapshot(t *testing.T) {
+	prov := &mockProvider{
+		responses: []provider.ChatResponse{{Content: "ok"}},
+	}
+	st := &mockStore{
+		conv: &store.Conversation{
+			ID:        "conv_ch3_u3",
+			ChannelID: "ch3",
+			Metadata:  map[string]string{"daimon/mode": "review"},
+		},
+	}
+	ch := &mockChannel{}
+	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, ch,
+		prov, st, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "ch3",
+		SenderID:  "u3",
+		Content:   content.TextBlock("review this"),
+	})
+
+	// After processMessage, a.currentMode should reflect the conv's stored mode.
+	snap := ag.modeSnapshot()
+	if snap.Name != "review" {
+		t.Errorf("expected modeSnapshot to reflect loaded mode \"review\", got %q", snap.Name)
+	}
+}
