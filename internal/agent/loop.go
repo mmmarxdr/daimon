@@ -186,7 +186,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	// convID encode the same identity.
 	convID := msg.ConversationID
 	if convID == "" {
-		convID = "conv_" + userScope(msg.ChannelID, msg.SenderID)
+		// WU7 (REQ-1): /resume can override the active conv for this (channel, sender).
+		// Check for an explicit override before falling back to the default derivation.
+		if override, ok := a.activeConv.Get(cancelKey{ChannelID: msg.ChannelID, SenderID: msg.SenderID}); ok {
+			convID = override
+		} else {
+			convID = "conv_" + userScope(msg.ChannelID, msg.SenderID)
+		}
 	}
 	scope := strings.TrimPrefix(convID, "conv_")
 
