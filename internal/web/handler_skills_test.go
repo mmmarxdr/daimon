@@ -1088,10 +1088,10 @@ type listSkillsWithStatusResp struct {
 	Skills []skillWithStatus `json:"skills"`
 }
 
-// TestHandleListSkills_CommandStatus_Registered verifies that an executable skill
+// TestHandleListSkills_CommandStatus_Active verifies that an executable skill
 // whose normalized name is present in the command registry with source="skill"
-// gets command_status="registered".
-func TestHandleListSkills_CommandStatus_Registered(t *testing.T) {
+// gets command_status="active" (spec REQ-13).
+func TestHandleListSkills_CommandStatus_Active(t *testing.T) {
 	uss := &fakeUserSkillStore{
 		skills: []store.UserSkill{
 			{ID: "1", Name: "researcher", Executable: true, Source: "user", Version: 1},
@@ -1119,14 +1119,15 @@ func TestHandleListSkills_CommandStatus_Registered(t *testing.T) {
 	if len(resp.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
 	}
-	if resp.Skills[0].CommandStatus != "registered" {
-		t.Errorf("expected command_status=registered for mounted skill, got %q", resp.Skills[0].CommandStatus)
+	if resp.Skills[0].CommandStatus != "active" {
+		t.Errorf("expected command_status=active for mounted skill, got %q", resp.Skills[0].CommandStatus)
 	}
 }
 
-// TestHandleListSkills_CommandStatus_Collision verifies that an executable skill
-// whose normalized name is taken by a builtin or cron command gets command_status="collision".
-func TestHandleListSkills_CommandStatus_Collision(t *testing.T) {
+// TestHandleListSkills_CommandStatus_ShadowedByBuiltin verifies that an executable skill
+// whose normalized name is taken by a builtin or cron command gets
+// command_status="shadowed_by_builtin" (spec REQ-13).
+func TestHandleListSkills_CommandStatus_ShadowedByBuiltin(t *testing.T) {
 	uss := &fakeUserSkillStore{
 		skills: []store.UserSkill{
 			{ID: "1", Name: "ping", Executable: true, Source: "user", Version: 1},
@@ -1155,14 +1156,15 @@ func TestHandleListSkills_CommandStatus_Collision(t *testing.T) {
 	if len(resp.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
 	}
-	if resp.Skills[0].CommandStatus != "collision" {
-		t.Errorf("expected command_status=collision for shadowed skill, got %q", resp.Skills[0].CommandStatus)
+	if resp.Skills[0].CommandStatus != "shadowed_by_builtin" {
+		t.Errorf("expected command_status=shadowed_by_builtin for shadowed skill, got %q", resp.Skills[0].CommandStatus)
 	}
 }
 
-// TestHandleListSkills_CommandStatus_Unmounted verifies that an executable skill
-// whose normalized name is not in the command registry at all gets command_status="unmounted".
-func TestHandleListSkills_CommandStatus_Unmounted(t *testing.T) {
+// TestHandleListSkills_CommandStatus_NotRegistered verifies that an executable skill
+// whose normalized name is not in the command registry at all gets an empty
+// command_status (spec REQ-13: omit via omitempty when not registered).
+func TestHandleListSkills_CommandStatus_NotRegistered(t *testing.T) {
 	uss := &fakeUserSkillStore{
 		skills: []store.UserSkill{
 			{ID: "1", Name: "my-researcher", Executable: true, Source: "user", Version: 1},
@@ -1191,8 +1193,8 @@ func TestHandleListSkills_CommandStatus_Unmounted(t *testing.T) {
 	if len(resp.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
 	}
-	if resp.Skills[0].CommandStatus != "unmounted" {
-		t.Errorf("expected command_status=unmounted for unregistered skill, got %q", resp.Skills[0].CommandStatus)
+	if resp.Skills[0].CommandStatus != "" {
+		t.Errorf("expected empty command_status for unregistered skill (omitempty per REQ-13), got %q", resp.Skills[0].CommandStatus)
 	}
 }
 

@@ -48,9 +48,12 @@ type listSkillsResp struct {
 }
 
 // commandStatusForSkill derives the command_status value for an executable skill
-// given a snapshot of registered commands from a CommandProvider. Non-executable
-// skills return "". The normalized name (hyphen → underscore) is used for lookup,
-// matching the auto-mount normalization rule (design D3).
+// given a snapshot of registered commands from a CommandProvider. The normalized
+// name (hyphen → underscore) is used for lookup, matching the auto-mount
+// normalization rule (design D3). Values are normative per spec REQ-13:
+// "active" when the skill owns the registered command, "shadowed_by_builtin"
+// when a builtin or cron entry holds the slot, "" otherwise (non-executable or
+// not registered at snapshot time — JSON-omitted via omitempty).
 func commandStatusForSkill(sk store.UserSkill, cmds []agent.CommandInfo) string {
 	if !sk.Executable {
 		return ""
@@ -59,12 +62,12 @@ func commandStatusForSkill(sk store.UserSkill, cmds []agent.CommandInfo) string 
 	for _, c := range cmds {
 		if c.Name == normalized {
 			if c.Source == agent.SourceSkill {
-				return "registered"
+				return "active"
 			}
-			return "collision"
+			return "shadowed_by_builtin"
 		}
 	}
-	return "unmounted"
+	return ""
 }
 
 // enrichSkills wraps a slice of UserSkill entries with command_status values,
