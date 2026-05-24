@@ -373,6 +373,10 @@ func New(
 	reg.Register("model", "Swap the active LLM model or list available models. Usage: /model [<model_name>]", func(cc CommandContext) error {
 		return a.cmdModel(cc)
 	}, SourceBuiltin)
+	// mode-system PR3: /mode command (REQ-1, REQ-2, REQ-3, REQ-10, REQ-12).
+	reg.Register("mode", "Switch or list operational modes. Usage: /mode [<plan|build|review>]", func(cc CommandContext) error {
+		return a.cmdMode(cc)
+	}, SourceBuiltin)
 	return a
 }
 
