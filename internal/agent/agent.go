@@ -359,6 +359,10 @@ func New(
 	reg.Register("export", "Export conversation: /export [markdown|json]", func(cc CommandContext) error {
 		return a.cmdExport(cc)
 	}, SourceBuiltin)
+	// model-hot-swap PR5: /model command (REQ-2, REQ-6, REQ-7, REQ-9).
+	reg.Register("model", "Swap the active LLM model or list available models. Usage: /model [<model_name>]", func(cc CommandContext) error {
+		return a.cmdModel(cc)
+	}, SourceBuiltin)
 	return a
 }
 
