@@ -100,6 +100,11 @@ type Agent struct {
 	provider      provider.Provider
 	providerCreds config.ProviderCredentials // stored at construction for PR2 thinking-config re-apply
 
+	// newProviderFn is the factory used by SetProvider to construct a replacement
+	// provider from a config. Defaults to provider.NewFromConfig; overridable in
+	// tests to avoid real API calls.
+	newProviderFn func(config.ProviderConfig) (provider.Provider, error)
+
 	store       store.Store
 	outputStore store.OutputStore // for auto-indexing tool outputs
 	auditorFn   func() audit.Auditor
@@ -297,6 +302,7 @@ func New(
 		shellCwd:        newCwdOverrides(),
 		activeConv:      newConvOverrides(),
 		channelName:     ch.Name(),
+		newProviderFn:   provider.NewFromConfig,
 	}
 	// Wire the legacy truncation function now that the agent struct is fully built.
 	// This lets ContextManager.legacyManage delegate to the existing legacyTruncate method.
