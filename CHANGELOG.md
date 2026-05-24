@@ -17,6 +17,14 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ### New
 
+- **`/model` built-in**: Swaps the active LLM model at runtime without restarting
+  the agent. `/model` (no args) lists available models for the current provider and
+  marks the active one with `*`. `/model <name>` swaps to the named model — the
+  provider is rebuilt atomically under a write lock; in-flight turns are rejected
+  with a clear message and a pointer to `/cancel`. Cross-provider swaps are not
+  supported (session-only; no config.yaml write). Reachable via REST:
+  `POST /api/commands/run` with `allow_destructive: true`. (PR5, REQ-2, REQ-6, REQ-7,
+  REQ-9, REQ-11; change model-hot-swap #3 of 8)
 - **`/cancel` built-in**: Cancels the in-progress LLM turn for the
   (channel, sender) that sent the command. Idempotent — replies neutral when no
   turn is active. (PR2, REQ-6, REQ-7)
