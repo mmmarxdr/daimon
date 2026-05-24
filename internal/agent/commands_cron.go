@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +25,35 @@ func (a *Agent) WithCronCommands(scheduler cron.SchedulerIface, cronStore store.
 
 // registerCronCommands registers cron-specific slash commands on the registry.
 // scheduler and cronStore are captured in closures; CommandContext is not expanded.
+//
+// Uses RegisterIfFree (not Register) so builtins of the same name take precedence
+// per REQ-14 (builtin > cron > skill). Collisions are logged and skipped, not silently
+// overwritten — this matters for the deprecated /cancel alias, which would otherwise
+// clobber the upcoming /cancel builtin (PR2) due to registration order.
 func registerCronCommands(reg *CommandRegistry, scheduler cron.SchedulerIface, cronStore store.CronStore) {
-	reg.Register("tasks", "List active scheduled tasks", makeCmdTasks(scheduler))
-	reg.Register("cancel", "Cancel a scheduled task: /cancel <task-id>", makeCmdCancel(cronStore, scheduler))
-	reg.Register("cancel-confirm", "Confirm task cancellation: /cancel-confirm <task-id>", makeCmdCancelConfirm(cronStore, scheduler))
-	reg.Register("schedule", "Schedule a new task: /schedule <min> <hour> <day> <month> <weekday> <prompt>", makeCmdSchedule(cronStore, scheduler))
-	reg.Register("history", "Show task run history: /history <id> [limit]", makeCmdHistory(cronStore))
+	entries := []struct {
+		name    string
+		desc    string
+		handler CommandHandler
+	}{
+		{"tasks", "List active scheduled tasks", makeCmdTasks(scheduler)},
+		{"task-cancel", "Cancel a scheduled task: /task-cancel <task-id>", makeCmdCancel(cronStore, scheduler)},
+		{"task-cancel-confirm", "Confirm task cancellation: /task-cancel-confirm <task-id>", makeCmdCancelConfirm(cronStore, scheduler)},
+		{"schedule", "Schedule a new task: /schedule <min> <hour> <day> <month> <weekday> <prompt>", makeCmdSchedule(cronStore, scheduler)},
+		{"history", "Show task run history: /history <id> [limit]", makeCmdHistory(cronStore)},
+		// Deprecated aliases — route old names to a notice handler. Will be removed in V2.
+		{"cancel", "DEPRECATED: renamed to /task-cancel", makeCmdDeprecatedCancel()},
+		{"cancel-confirm", "DEPRECATED: renamed to /task-cancel-confirm", makeCmdDeprecatedCancelConfirm()},
+	}
+	for _, e := range entries {
+		ok, err := reg.RegisterIfFree(e.name, e.desc, e.handler, SourceCron)
+		switch {
+		case err != nil:
+			slog.Warn("cron command registration failed", "name", e.name, "err", err)
+		case !ok:
+			slog.Warn("cron command name conflicts with existing entry — skipped", "name", e.name)
+		}
+	}
 }
 
 // resolveJobID finds a CronJob by exact ID or unambiguous prefix.
@@ -119,13 +143,13 @@ func makeCmdTasks(scheduler cron.SchedulerIface) CommandHandler {
 }
 
 // --------------------------------------------------------------------------
-// /cancel — show task details and prompt for confirmation
+// /task-cancel — show task details and prompt for confirmation
 // --------------------------------------------------------------------------
 
 func makeCmdCancel(cronStore store.CronStore, _ cron.SchedulerIface) CommandHandler {
 	return func(cc CommandContext) error {
 		if strings.TrimSpace(cc.Args) == "" {
-			cc.Reply("Usage: /cancel <task-id>")
+			cc.Reply("Usage: /task-cancel <task-id>")
 			return nil
 		}
 		jobs, err := cronStore.ListJobs(cc.Ctx)
@@ -142,7 +166,7 @@ func makeCmdCancel(cronStore store.CronStore, _ cron.SchedulerIface) CommandHand
 			prompt = prompt[:97] + "..."
 		}
 		cc.Reply(fmt.Sprintf(
-			"Task %s:\n  Schedule: %s\n  Prompt: %s\n\nTo confirm cancellation, type:\n  /cancel-confirm %s",
+			"Task %s:\n  Schedule: %s\n  Prompt: %s\n\nTo confirm cancellation, type:\n  /task-cancel-confirm %s",
 			shortID(job.ID), job.Schedule, prompt, shortID(job.ID),
 		))
 		return nil
@@ -150,13 +174,35 @@ func makeCmdCancel(cronStore store.CronStore, _ cron.SchedulerIface) CommandHand
 }
 
 // --------------------------------------------------------------------------
-// /cancel-confirm — actually remove the task
+// Deprecated alias handlers — reply with rename notice (WU2, tasks decision #1)
+// --------------------------------------------------------------------------
+
+// makeCmdDeprecatedCancel returns a handler for the old /cancel name that
+// informs the user of the rename. Will be removed in V2.
+func makeCmdDeprecatedCancel() CommandHandler {
+	return func(cc CommandContext) error {
+		cc.Reply("/cancel has been renamed to /task-cancel. Please use /task-cancel <task-id> instead. This alias will be removed in V2.")
+		return nil
+	}
+}
+
+// makeCmdDeprecatedCancelConfirm returns a handler for the old /cancel-confirm
+// name that informs the user of the rename. Will be removed in V2.
+func makeCmdDeprecatedCancelConfirm() CommandHandler {
+	return func(cc CommandContext) error {
+		cc.Reply("/cancel-confirm has been renamed to /task-cancel-confirm. Please use /task-cancel-confirm <task-id> instead. This alias will be removed in V2.")
+		return nil
+	}
+}
+
+// --------------------------------------------------------------------------
+// /task-cancel-confirm — actually remove the task
 // --------------------------------------------------------------------------
 
 func makeCmdCancelConfirm(cronStore store.CronStore, scheduler cron.SchedulerIface) CommandHandler {
 	return func(cc CommandContext) error {
 		if strings.TrimSpace(cc.Args) == "" {
-			cc.Reply("Usage: /cancel-confirm <task-id>")
+			cc.Reply("Usage: /task-cancel-confirm <task-id>")
 			return nil
 		}
 		jobs, err := cronStore.ListJobs(cc.Ctx)

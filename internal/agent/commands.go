@@ -6,12 +6,24 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"daimon/internal/channel"
 	"daimon/internal/config"
 	"daimon/internal/content"
 	"daimon/internal/store"
+)
+
+// Command source constants — the authoritative string values used in the registry,
+// GET /api/commands responses, and UnregisterAllBySource calls.
+const (
+	// SourceBuiltin marks commands registered by registerBuiltinCommands at agent init.
+	SourceBuiltin = "builtin"
+	// SourceCron marks commands registered by registerCronCommands via WithCronCommands.
+	SourceCron = "cron"
+	// SourceSkill marks commands auto-mounted from ExecutableSkillDef via ReplaceExecutableSkills.
+	SourceSkill = "skill"
 )
 
 // CommandContext carries everything a command handler needs to operate.
@@ -36,10 +48,31 @@ type CommandHandler func(cc CommandContext) error
 type commandEntry struct {
 	handler CommandHandler
 	desc    string
+	source  string // SourceBuiltin | SourceCron | SourceSkill
+}
+
+// CommandEntryInfo is the exported view of a registry entry, used by
+// EntriesWithSource and by the REST handler layer (GET /api/commands).
+type CommandEntryInfo struct {
+	Name   string
+	Desc   string
+	Source string
 }
 
 // CommandRegistry holds registered slash commands.
+//
+// Concurrency: mu protects commands and all derived reads/writes.
+// Lock acquisition order when nesting with agent-level locks:
+//
+//	toolsMu (agent.go) MUST be acquired BEFORE commandsMu.
+//	commandsMu MUST NOT be acquired while holding a lock tied to the
+//	agent goroutine's inbox processing.
 type CommandRegistry struct {
+	// mu is an RWMutex because Lookup happens on every incoming message
+	// (read-heavy) while Register/RegisterIfFree/UnregisterAllBySource
+	// happen rarely (boot-time or hot-reload). RWMutex gives correct
+	// concurrent semantics with lower contention than a plain Mutex.
+	mu       sync.RWMutex
 	commands map[string]commandEntry
 }
 
@@ -48,13 +81,63 @@ func NewCommandRegistry() *CommandRegistry {
 	return &CommandRegistry{commands: make(map[string]commandEntry)}
 }
 
-// Register adds a command. Name is stored lowercase.
-func (r *CommandRegistry) Register(name, desc string, handler CommandHandler) {
-	r.commands[strings.ToLower(name)] = commandEntry{handler: handler, desc: desc}
+// Register adds or overwrites a command. Name is stored lowercase.
+// Intended for built-in registration only (silent overwrite semantics are
+// acceptable at startup when ordering is deterministic). Cron and skill
+// callers must use RegisterIfFree instead.
+func (r *CommandRegistry) Register(name, desc string, handler CommandHandler, source string) {
+	key := strings.ToLower(name)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.commands[key] = commandEntry{handler: handler, desc: desc, source: source}
+}
+
+// RegisterIfFree registers a command only if the name is not already taken.
+// Returns (true, nil) on success, (false, nil) when the name is already
+// registered (the caller decides whether to log or skip — not an error).
+// Returns (false, err) only for invalid name format.
+func (r *CommandRegistry) RegisterIfFree(name, desc string, handler CommandHandler, source string) (bool, error) {
+	key := strings.ToLower(name)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.registerIfFreeLocked(key, desc, handler, source)
+}
+
+// registerIfFreeLocked is the lock-free variant for callers that already
+// hold r.mu (e.g. hot-reload under commandsMu). Must be called with mu held.
+func (r *CommandRegistry) registerIfFreeLocked(name, desc string, handler CommandHandler, source string) (bool, error) {
+	if _, exists := r.commands[name]; exists {
+		return false, nil
+	}
+	r.commands[name] = commandEntry{handler: handler, desc: desc, source: source}
+	return true, nil
+}
+
+// UnregisterAllBySource atomically removes all entries whose source matches
+// the given string. Returns the number of entries removed. Safe to call
+// concurrently with Lookup and RegisterIfFree.
+func (r *CommandRegistry) UnregisterAllBySource(source string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.unregisterAllBySourceLocked(source)
+}
+
+// unregisterAllBySourceLocked is the lock-free variant. Must be called with mu held.
+func (r *CommandRegistry) unregisterAllBySourceLocked(source string) int {
+	n := 0
+	for name, e := range r.commands {
+		if e.source == source {
+			delete(r.commands, name)
+			n++
+		}
+	}
+	return n
 }
 
 // Lookup returns the handler for a command name (case-insensitive).
 func (r *CommandRegistry) Lookup(name string) (CommandHandler, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	e, ok := r.commands[strings.ToLower(name)]
 	if !ok {
 		return nil, false
@@ -64,6 +147,8 @@ func (r *CommandRegistry) Lookup(name string) (CommandHandler, bool) {
 
 // Entries returns a map of command name → description.
 func (r *CommandRegistry) Entries() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	m := make(map[string]string, len(r.commands))
 	for name, e := range r.commands {
 		m[name] = e.desc
@@ -71,8 +156,28 @@ func (r *CommandRegistry) Entries() map[string]string {
 	return m
 }
 
+// EntriesWithSource returns a slice of CommandEntryInfo containing name,
+// description, and source for every registered command. The slice is a
+// snapshot — callers may mutate it freely. Used by GET /api/commands and
+// the grouped /help output.
+func (r *CommandRegistry) EntriesWithSource() []CommandEntryInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]CommandEntryInfo, 0, len(r.commands))
+	for name, e := range r.commands {
+		out = append(out, CommandEntryInfo{
+			Name:   name,
+			Desc:   e.desc,
+			Source: e.source,
+		})
+	}
+	return out
+}
+
 // Names returns sorted command names.
 func (r *CommandRegistry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.commands))
 	for name := range r.commands {
 		names = append(names, name)
@@ -239,12 +344,12 @@ func cmdRetry(cc CommandContext) error {
 
 // registerBuiltinCommands registers the built-in slash commands on the registry.
 func registerBuiltinCommands(reg *CommandRegistry) {
-	reg.Register("ping", "Check if the agent is alive", cmdPing)
-	reg.Register("help", "List available commands", cmdHelp)
-	reg.Register("reset", "Clear conversation history", cmdReset)
-	reg.Register("retry", "Re-send last message for a new response", cmdRetry)
-	reg.Register("status", "Show agent status", cmdStatus)
-	reg.Register("whoami", "Show your identity", cmdWhoami)
+	reg.Register("ping", "Check if the agent is alive", cmdPing, SourceBuiltin)
+	reg.Register("help", "List available commands", cmdHelp, SourceBuiltin)
+	reg.Register("reset", "Clear conversation history", cmdReset, SourceBuiltin)
+	reg.Register("retry", "Re-send last message for a new response", cmdRetry, SourceBuiltin)
+	reg.Register("status", "Show agent status", cmdStatus, SourceBuiltin)
+	reg.Register("whoami", "Show your identity", cmdWhoami, SourceBuiltin)
 }
 
 // cmdCompact implements the /compact command: force-compacts the current

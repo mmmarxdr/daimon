@@ -37,7 +37,7 @@ func TestCommandRegistry_RegisterAndLookup(t *testing.T) {
 	reg.Register("foo", "does foo", func(cc CommandContext) error {
 		called = true
 		return nil
-	})
+	}, SourceBuiltin)
 
 	h, ok := reg.Lookup("foo")
 	if !ok {
@@ -58,9 +58,9 @@ func TestCommandRegistry_RegisterAndLookup(t *testing.T) {
 
 func TestCommandRegistry_Entries(t *testing.T) {
 	reg := NewCommandRegistry()
-	reg.Register("alpha", "desc alpha", func(cc CommandContext) error { return nil })
-	reg.Register("beta", "desc beta", func(cc CommandContext) error { return nil })
-	reg.Register("gamma", "desc gamma", func(cc CommandContext) error { return nil })
+	reg.Register("alpha", "desc alpha", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("beta", "desc beta", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("gamma", "desc gamma", func(cc CommandContext) error { return nil }, SourceBuiltin)
 
 	entries := reg.Entries()
 	if len(entries) != 3 {
@@ -79,9 +79,9 @@ func TestCommandRegistry_Entries(t *testing.T) {
 
 func TestCommandRegistry_Names(t *testing.T) {
 	reg := NewCommandRegistry()
-	reg.Register("charlie", "c", func(cc CommandContext) error { return nil })
-	reg.Register("alpha", "a", func(cc CommandContext) error { return nil })
-	reg.Register("bravo", "b", func(cc CommandContext) error { return nil })
+	reg.Register("charlie", "c", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("alpha", "a", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("bravo", "b", func(cc CommandContext) error { return nil }, SourceBuiltin)
 
 	names := reg.Names()
 	if len(names) != 3 {
@@ -100,11 +100,11 @@ func TestCommandRegistry_DuplicateOverwrite(t *testing.T) {
 	reg.Register("foo", "first", func(cc CommandContext) error {
 		which = "first"
 		return nil
-	})
+	}, SourceBuiltin)
 	reg.Register("foo", "second", func(cc CommandContext) error {
 		which = "second"
 		return nil
-	})
+	}, SourceBuiltin)
 
 	h, ok := reg.Lookup("foo")
 	if !ok {
@@ -239,9 +239,9 @@ func TestCmdPing(t *testing.T) {
 func TestCmdHelp(t *testing.T) {
 	cr := &capturedReply{}
 	reg := NewCommandRegistry()
-	reg.Register("alpha", "first command", func(cc CommandContext) error { return nil })
-	reg.Register("beta", "second command", func(cc CommandContext) error { return nil })
-	reg.Register("gamma", "third command", func(cc CommandContext) error { return nil })
+	reg.Register("alpha", "first command", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("beta", "second command", func(cc CommandContext) error { return nil }, SourceBuiltin)
+	reg.Register("gamma", "third command", func(cc CommandContext) error { return nil }, SourceBuiltin)
 
 	cc := CommandContext{
 		Ctx:      context.Background(),

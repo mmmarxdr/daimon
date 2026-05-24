@@ -285,7 +285,7 @@ func TestCmdTasks_Empty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4.3 — /cancel and /cancel-confirm tests
+// T4.3 — /task-cancel and /task-cancel-confirm tests (WU2: renamed from /cancel)
 // ---------------------------------------------------------------------------
 
 func TestCmdCancel_ValidID(t *testing.T) {
@@ -305,15 +305,15 @@ func TestCmdCancel_ValidID(t *testing.T) {
 		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
 	}
 	reply := cr.messages[0]
-	// Should contain job details + confirmation prompt
+	// Should contain job details + confirmation prompt using NEW name
 	if !strings.Contains(reply, "cccccccc") {
 		t.Errorf("expected short ID 'cccccccc' in reply, got:\n%s", reply)
 	}
 	if !strings.Contains(reply, "0 9 * * *") {
 		t.Errorf("expected schedule in reply, got:\n%s", reply)
 	}
-	if !strings.Contains(reply, "/cancel-confirm") {
-		t.Errorf("expected '/cancel-confirm' prompt in reply, got:\n%s", reply)
+	if !strings.Contains(reply, "/task-cancel-confirm") {
+		t.Errorf("expected '/task-cancel-confirm' prompt in reply, got:\n%s", reply)
 	}
 }
 
@@ -332,7 +332,7 @@ func TestCmdCancel_NoArgs(t *testing.T) {
 	if len(cr.messages) != 1 {
 		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
 	}
-	if !strings.Contains(cr.messages[0], "Usage: /cancel") {
+	if !strings.Contains(cr.messages[0], "Usage: /task-cancel") {
 		t.Errorf("expected usage message, got %q", cr.messages[0])
 	}
 }
@@ -570,5 +570,174 @@ func TestCmdHistory_CustomLimit(t *testing.T) {
 	// Should see "5 runs" in the header — ListResults is called with limit 5
 	if !strings.Contains(cr.messages[0], "5 runs") {
 		t.Errorf("expected '5 runs' in reply, got:\n%s", cr.messages[0])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WU2: Cron rename tests — /task-cancel, deprecated aliases
+// ---------------------------------------------------------------------------
+
+// TestCronRename_NewTaskCancelName_RegisteredInRegistry verifies that
+// /task-cancel and /task-cancel-confirm are registered, not the old names.
+func TestCronRename_NewTaskCancelName_RegisteredInRegistry(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+	registerCronCommands(reg, sched, cronSt)
+
+	// New names must exist.
+	if _, ok := reg.Lookup("task-cancel"); !ok {
+		t.Error("expected 'task-cancel' to be registered")
+	}
+	if _, ok := reg.Lookup("task-cancel-confirm"); !ok {
+		t.Error("expected 'task-cancel-confirm' to be registered")
+	}
+}
+
+// TestCronRename_OldCancelName_RegisteredAsAlias_RepliesWithRenameNotice verifies
+// that the old /cancel name is registered as a deprecated alias and its handler
+// returns a rename notice.
+func TestCronRename_OldCancelName_RegisteredAsAlias_RepliesWithRenameNotice(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+	registerCronCommands(reg, sched, cronSt)
+
+	// Old alias must still exist.
+	h, ok := reg.Lookup("cancel")
+	if !ok {
+		t.Fatal("expected deprecated '/cancel' alias to be registered")
+	}
+
+	cr := &capturedReply{}
+	cc := CommandContext{Reply: cr.reply}
+	if err := h(cc); err != nil {
+		t.Fatalf("unexpected error from deprecated alias handler: %v", err)
+	}
+	if len(cr.messages) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
+	}
+	// Must contain rename notice with task-cancel and some indication it's renamed/deprecated.
+	if !strings.Contains(cr.messages[0], "task-cancel") {
+		t.Errorf("expected rename notice containing 'task-cancel', got: %q", cr.messages[0])
+	}
+	if !strings.Contains(cr.messages[0], "renamed") {
+		t.Errorf("expected 'renamed' in reply, got: %q", cr.messages[0])
+	}
+}
+
+// TestCronRename_OldCancelConfirmName_RegisteredAsAlias_RepliesWithRenameNotice verifies
+// the same for /cancel-confirm.
+func TestCronRename_OldCancelConfirmName_RegisteredAsAlias_RepliesWithRenameNotice(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+	registerCronCommands(reg, sched, cronSt)
+
+	h, ok := reg.Lookup("cancel-confirm")
+	if !ok {
+		t.Fatal("expected deprecated '/cancel-confirm' alias to be registered")
+	}
+
+	cr := &capturedReply{}
+	cc := CommandContext{Reply: cr.reply}
+	if err := h(cc); err != nil {
+		t.Fatalf("unexpected error from deprecated alias handler: %v", err)
+	}
+	if len(cr.messages) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
+	}
+	if !strings.Contains(cr.messages[0], "task-cancel-confirm") {
+		t.Errorf("expected rename notice containing 'task-cancel-confirm', got: %q", cr.messages[0])
+	}
+}
+
+// TestCronRename_TaskCancelHandler_FunctionIdentical verifies that /task-cancel
+// behaves identically to the former /cancel (shows task details, prompts confirm).
+func TestCronRename_TaskCancelHandler_FunctionIdentical(t *testing.T) {
+	job := makeTestJob("aabbccdd-0000-0000-0000-000000000099", "0 9 * * *", "test task for rename")
+	cronSt := &mockCronStoreAgent{jobs: []store.CronJob{job}}
+
+	cr := &capturedReply{}
+	cc := makeCronCC(cr, cronSt, nil)
+	cc.Args = "aabbccdd"
+
+	handler := makeCmdCancel(cronSt, &mockScheduler{})
+	if err := handler(cc); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cr.messages) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
+	}
+	reply := cr.messages[0]
+	if !strings.Contains(reply, "aabbccdd") {
+		t.Errorf("expected task ID in reply, got:\n%s", reply)
+	}
+	if !strings.Contains(reply, "/task-cancel-confirm") {
+		t.Errorf("expected /task-cancel-confirm in confirmation prompt, got:\n%s", reply)
+	}
+}
+
+// TestCronRegister_SourceTaggedAsCron verifies that all cron commands
+// are registered with SourceCron source tag.
+func TestCronRegister_SourceTaggedAsCron(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+	registerCronCommands(reg, sched, cronSt)
+
+	entries := reg.EntriesWithSource()
+	for _, e := range entries {
+		if e.Source != SourceCron {
+			t.Errorf("expected all cron entries to have source=%q, got %q for %q", SourceCron, e.Source, e.Name)
+		}
+	}
+}
+
+// TestCronRegister_UsesRegisterIfFree_NotRegister verifies that registerCronCommands
+// uses RegisterIfFree (not Register), so a pre-existing builtin with the same name
+// is NOT silently overwritten by cron registration.
+//
+// This protects REQ-14 (precedence builtin > cron > skill) and the latent collision
+// where the deprecated /cancel alias would clobber the upcoming /cancel builtin in
+// PR2 because WithCronCommands runs after registerBuiltinCommands.
+func TestCronRegister_UsesRegisterIfFree_NotRegister(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+
+	// Pre-register a sentinel builtin under the deprecated cron alias name.
+	// If registerCronCommands uses Register (overwrite), the sentinel is clobbered.
+	// If it uses RegisterIfFree (skip-on-collision), the sentinel survives.
+	sentinelCalled := false
+	reg.Register("cancel", "sentinel builtin", func(_ CommandContext) error {
+		sentinelCalled = true
+		return nil
+	}, SourceBuiltin)
+
+	registerCronCommands(reg, sched, cronSt)
+
+	h, ok := reg.Lookup("cancel")
+	if !ok {
+		t.Fatal("expected /cancel to be registered after cron registration")
+	}
+	if err := h(CommandContext{}); err != nil {
+		t.Fatalf("unexpected error invoking handler: %v", err)
+	}
+	if !sentinelCalled {
+		t.Fatal("registerCronCommands overwrote the pre-existing builtin /cancel — must use RegisterIfFree, not Register")
+	}
+
+	// The entry's source must still be SourceBuiltin (the builtin survived collision).
+	var cancelSource string
+	for _, e := range reg.EntriesWithSource() {
+		if e.Name == "cancel" {
+			cancelSource = e.Source
+			break
+		}
+	}
+	if cancelSource != SourceBuiltin {
+		t.Errorf("expected /cancel source to remain %q (builtin survived collision), got %q", SourceBuiltin, cancelSource)
 	}
 }
