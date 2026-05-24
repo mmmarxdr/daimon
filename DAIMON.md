@@ -884,6 +884,48 @@ Session-only (no config.yaml write). Files: `internal/agent/set_provider.go`,
 
 ---
 
+## 12b-2. NEW CAPABILITIES (mode-system, 2026-05-24)
+
+### mode-system
+
+Hardcoded 3-mode system (`plan` / `build` / `review`) controlled by the `/mode` slash command.
+Each mode is a `(SystemPrompt, ToolAllowlist)` tuple defined in `internal/agent/modes.go`.
+
+| Mode     | Tool allowlist                              | Behavior                                                                     |
+| -------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| `plan`   | Read, Grep, Glob, web, mem*\*, codegraph*\* | Read-only analysis and proposals; model directed to STOP before implementing |
+| `build`  | `nil` (all tools)                           | Default; all tools available; implements, refactors, executes                |
+| `review` | plan allowlist + Bash                       | Diff and audit; read-only execution; model directed not to modify files      |
+
+**Behavioral contract:**
+
+- Mode is per-conversation, persisted in `conv.Metadata["daimon/mode"]` (survives restart).
+- `build` is the default — new conversations and convs without a stored mode use `build`.
+- Mode snapshot is taken once at turn start (`modeSnapshot()`); mid-turn swap is rejected.
+- `buildSystemPrompt` appends `mode.SystemPrompt` after `config.Personality` (build mode appends nothing).
+- `buildToolDefs` filters via `filterAllowedTools(defs, mode.ToolAllowlist)` — nil = all pass, `[]string{}` = block all.
+- Execution gate at `loop.go:~697` double-checks every tool call against the snapshot allowlist (defense in depth).
+
+**`/mode` slash command** (builtin, destructive gate):
+
+- `/mode` — lists all 3 modes; marks the current mode with `*`.
+- `/mode <name>` — swaps to `plan`, `build`, or `review`; emits `mode.changed` telemetry frame.
+- Mid-turn swap rejected: `"A turn is currently in progress. Try again in a moment, or use /cancel first."`
+- Unknown name rejected: `"unknown mode %q. Use /mode with no args to list available modes."`
+- Reachable via REST: `POST /api/commands/run` with `{"name":"mode","args":"plan","allow_destructive":true}`.
+
+**REST reconnect contract (AD-13):**
+
+`GET /api/conversations/{id}` now includes `"metadata": {"daimon/mode": "..."}` so the frontend
+can render the correct mode badge after a WebSocket reconnect without waiting for a live
+`mode.changed` telemetry frame. `omitempty` keeps the wire lean for convs without metadata.
+
+Files: `internal/agent/modes.go`, `internal/agent/set_mode.go`, `internal/agent/commands_mode.go`,
+`internal/agent/agent.go` (+modeMu, +currentMode, +register /mode), `internal/agent/loop.go` (+gate),
+`internal/agent/context.go` (+mode param), `internal/web/handler_conversations.go` (+Metadata field).
+
+---
+
 ## 12b (prev). NEW CAPABILITIES (provider-model-selection-refactor, 2026-04-19)
 
 ### provider-model-discovery

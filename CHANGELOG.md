@@ -17,6 +17,16 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ### New
 
+- **`/mode` built-in**: Switches the agent between three operational modes at
+  runtime. `/mode` (no args) lists all modes and marks the active one with `*`.
+  `/mode <name>` swaps to `plan`, `build`, or `review`. Each mode pairs a system
+  prompt with a tool allowlist — `plan` and `review` are read-only; `build` (default)
+  has full tool access. Mode is persisted in `conv.Metadata["daimon/mode"]` and
+  survives process restart. Emits a `mode.changed` telemetry frame on success.
+  Mid-turn swap is rejected with a pointer to `/cancel`. Registered as a destructive
+  command (`allow_destructive: true` required via REST). Conversation REST payload
+  now includes `metadata` field for frontend reconnect (REQ-13).
+  (PR3/3 of mode-system #4 of 8, REQ-1..3, REQ-10, REQ-12..14)
 - **`/model` built-in**: Swaps the active LLM model at runtime without restarting
   the agent. `/model` (no args) lists available models for the current provider and
   marks the active one with `*`. `/model <name>` swaps to the named model — the
