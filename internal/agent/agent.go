@@ -85,16 +85,16 @@ func (a *Agent) startPruningLoop(ctx context.Context) {
 }
 
 type Agent struct {
-	config          config.AgentConfig
-	mediaCfg        config.MediaConfig // media cleanup configuration
-	limits          config.LimitsConfig
-	filterCfg       config.FilterConfig
-	ctxModeCfg      config.ContextModeConfig // context-mode configuration
-	channel         channel.Channel
-	provider        provider.Provider
-	store           store.Store
-	outputStore     store.OutputStore // for auto-indexing tool outputs
-	auditorFn       func() audit.Auditor
+	config      config.AgentConfig
+	mediaCfg    config.MediaConfig // media cleanup configuration
+	limits      config.LimitsConfig
+	filterCfg   config.FilterConfig
+	ctxModeCfg  config.ContextModeConfig // context-mode configuration
+	channel     channel.Channel
+	provider    provider.Provider
+	store       store.Store
+	outputStore store.OutputStore // for auto-indexing tool outputs
+	auditorFn   func() audit.Auditor
 
 	// subMgr manages spawned child agents (nil when no executable skills loaded).
 	subMgr *SubagentManager
@@ -112,12 +112,12 @@ type Agent struct {
 	// processMessage hot path acquires RLock once at the top and again for
 	// each tool invocation — both are <100ns and not measurable next to LLM
 	// calls or tool execution.
-	toolsMu         sync.RWMutex
-	tools           map[string]tool.Tool
+	toolsMu sync.RWMutex
+	tools   map[string]tool.Tool
 	// mcpToolNames tracks which tool names came from each MCP server, so
 	// UnregisterMCPServer can remove just that server's tools without
 	// touching native tools or other MCPs.
-	mcpToolNames    map[string][]string
+	mcpToolNames map[string][]string
 	// mcpClients holds the live MCPCaller for each hot-added server so we
 	// can Close() it on Unregister or process exit. Boot-time servers are
 	// owned by the boot Manager (not tracked here) — only hot-adds.
@@ -147,8 +147,8 @@ type Agent struct {
 	ragRetrievalConf rag.RAGRetrievalConf // neighbor expansion + score thresholds
 
 	// HyDE fields — zero/nil when HyDE is disabled.
-	ragHydeConf      config.RAGHydeConf
-	ragHypothesisFn  func(context.Context, string) (string, error)
+	ragHydeConf     config.RAGHydeConf
+	ragHypothesisFn func(context.Context, string) (string, error)
 
 	// Metrics recorder — nil means no-op (NoopRecorder equivalent).
 	ragMetrics metrics.Recorder
@@ -300,7 +300,7 @@ func New(
 	// Register the /compact command now that the agent struct is fully built.
 	reg.Register("compact", "Force-compact conversation context", func(cc CommandContext) error {
 		return a.cmdCompact(cc)
-	})
+	}, SourceBuiltin)
 	return a
 }
 
