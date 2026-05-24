@@ -249,7 +249,7 @@ func (cm *ContextManager) summarizeMessages(ctx context.Context, messages []prov
 		req.Model = cm.cfg.SummaryModel
 	}
 
-	resp, err := cm.prov.Chat(summarizeCtx, req)
+	resp, err := cm.providerFn().Chat(summarizeCtx, req)
 	if err != nil {
 		return "", fmt.Errorf("summarization LLM call failed: %w", err)
 	}

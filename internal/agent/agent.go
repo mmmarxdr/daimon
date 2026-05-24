@@ -268,7 +268,16 @@ func New(
 			ctxCfg.Strategy = "none"
 		}
 	}
-	contextMgr := NewContextManager(ctxCfg, prov, nil)
+	// providerSnapshotFn is a temporary closure used during construction to pass
+	// the provider accessor to sub-components. After the agent struct is built,
+	// sub-components should use a.providerSnapshot() via the same closure shape.
+	// We use a pointer indirection: after `a` is allocated below, the closure
+	// will read a.provider under a.providerMu on each call.
+	// However, at construction time `a` does not yet exist, so we first build a
+	// simple static closure pointing at prov, then replace contextMgr/enricher
+	// with the live-snapshot closure after `a` is built.
+	staticProvFn := func() provider.Provider { return prov }
+	contextMgr := NewContextManager(ctxCfg, staticProvFn, nil)
 
 	// Register compact command as a closure so it can access the agent after construction.
 	// legacyFn will be wired after the agent struct is built (needs `a` to call legacyTruncate).
@@ -293,7 +302,7 @@ func New(
 		skillIndex:      skillIndex,
 		sem:             make(chan struct{}, maxConcurrent),
 		stream:          enableStream,
-		enricher:        NewEnricher(prov, st, cfg),
+		enricher:        NewEnricher(staticProvFn, st, cfg),
 		embeddingWorker: embWorker,
 		indexWorker:     idxWorker,
 		contextMgr:      contextMgr,
@@ -304,6 +313,16 @@ func New(
 		channelName:     ch.Name(),
 		newProviderFn:   provider.NewFromConfig,
 	}
+	// Re-wire sub-components to use the live-snapshot closure now that `a` exists.
+	// The staticProvFn used at construction read the original `prov` by value.
+	// The live closure calls a.providerSnapshot() under providerMu.RLock, so sub-
+	// components see the updated provider after a SetProvider swap (REQ-3, REQ-4).
+	liveProvFn := func() provider.Provider { return a.providerSnapshot() }
+	if a.enricher != nil {
+		a.enricher.providerFn = liveProvFn
+	}
+	a.contextMgr.providerFn = liveProvFn
+
 	// Wire the legacy truncation function now that the agent struct is fully built.
 	// This lets ContextManager.legacyManage delegate to the existing legacyTruncate method.
 	// The closure preserves the original guard: only truncate when over HistoryLength.
