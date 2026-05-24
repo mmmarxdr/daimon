@@ -205,8 +205,17 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			ID:        convID,
 			ChannelID: msg.ChannelID,
 			CreatedAt: time.Now(),
+			Metadata:  map[string]string{"daimon/mode": "build"}, // AD-9: explicit init (REQ-5)
 		}
 	}
+
+	// AD-8: reconcile a.currentMode with conv.Metadata["daimon/mode"] so the
+	// per-turn snapshot reflects the conversation's persisted mode. Defaults to
+	// "build" if key is absent, empty, or contains an unrecognised value.
+	a.loadMode(conv)
+	// AD-3: capture mode snapshot ONCE per turn, before buildSystemPrompt and
+	// buildToolDefs. Both functions receive this snapshot as a parameter (REQ-11).
+	modeSnap := a.modeSnapshot()
 
 	// REQ-10, WU8: compute subagent attribution once; reused by every bus emit
 	// in this turn (TurnStarted/TurnCompleted/Tool*/TokensUsage) and forwarded
@@ -332,8 +341,8 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 
-	systemPrompt := a.buildSystemPrompt(memories, ragResults, conv.CompactedSummary)
-	toolDefs := a.buildToolDefs()
+	systemPrompt := a.buildSystemPrompt(memories, ragResults, conv.CompactedSummary, modeSnap)
+	toolDefs := a.buildToolDefs(modeSnap)
 	conv.Messages = a.contextMgr.Manage(ctx, systemPrompt, toolDefs, conv.Messages)
 
 	// MaxIterations=0 (default) means "no hard cap" — the turn is bounded

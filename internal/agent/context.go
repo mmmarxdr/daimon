@@ -13,14 +13,27 @@ import (
 )
 
 // buildSystemPrompt assembles the full system prompt string from personality,
-// security directive, autoload skill prose, skill index, memory section,
-// optional compacted-session summary (when the user resumes an old conv),
-// and (optionally) a RAG section with relevant document chunks.
-func (a *Agent) buildSystemPrompt(memories []store.MemoryEntry, ragResults []rag.SearchResult, compactedSummary string) string {
+// optional mode system prompt, security directive, autoload skill prose, skill
+// index, memory section, optional compacted-session summary (when the user
+// resumes an old conv), and (optionally) a RAG section with relevant document
+// chunks.
+//
+// mode is the per-turn snapshot captured by modeSnapshot() (AD-3). It is
+// passed as a parameter — NOT read from a.currentMode — so that both
+// buildSystemPrompt and buildToolDefs see the same consistent snapshot for the
+// entire turn (REQ-11). mode.SystemPrompt is appended after a.config.Personality
+// and before the compactedSummary block; empty string = no injection (build mode).
+func (a *Agent) buildSystemPrompt(memories []store.MemoryEntry, ragResults []rag.SearchResult, compactedSummary string, mode ModeDefinition) string {
 	sysPrompt := a.config.Personality
 
-	// Compacted session summary first — sets the stage for what was already
-	// done before the model sees the live conversation messages.
+	// Mode system prompt injected immediately after personality (REQ-6, AD-3).
+	// build mode has an empty SystemPrompt so this is a no-op in the common case.
+	if mode.SystemPrompt != "" {
+		sysPrompt += "\n\n" + mode.SystemPrompt
+	}
+
+	// Compacted session summary — sets the stage for what was already done
+	// before the model sees the live conversation messages.
 	if compactedSummary != "" {
 		sysPrompt += "\n\n## Previous session summary\n" +
 			"You're resuming a conversation that was summarised after a period of inactivity.\n" +
@@ -98,12 +111,23 @@ func buildRAGSection(results []rag.SearchResult, maxTokens int) string {
 	return sb.String()
 }
 
-// buildToolDefs returns a ToolDefinition slice built from the agent's registered tools.
+// buildToolDefs returns a ToolDefinition slice built from the agent's registered
+// tools, filtered by the mode's tool allowlist (REQ-7, AD-5).
+//
+// mode is the per-turn snapshot captured by modeSnapshot() (AD-3). Passing it
+// as a parameter guarantees that buildSystemPrompt and buildToolDefs always
+// use the same snapshot for the entire turn (REQ-11).
+//
+// Allowlist semantics (from filterAllowedTools / AD-5):
+//
+//	nil         → all tools pass (build mode, AllowAllTools)
+//	[]string{}  → no tools pass
+//	non-empty   → only listed tools pass
+//
 // RLock so the dashboard's RegisterMCPServer hot-add can mutate the map
 // concurrently without races.
-func (a *Agent) buildToolDefs() []provider.ToolDefinition {
+func (a *Agent) buildToolDefs(mode ModeDefinition) []provider.ToolDefinition {
 	a.toolsMu.RLock()
-	defer a.toolsMu.RUnlock()
 	defs := make([]provider.ToolDefinition, 0, len(a.tools))
 	for _, t := range a.tools {
 		defs = append(defs, provider.ToolDefinition{
@@ -112,17 +136,19 @@ func (a *Agent) buildToolDefs() []provider.ToolDefinition {
 			InputSchema: t.Schema(),
 		})
 	}
-	return defs
+	a.toolsMu.RUnlock()
+	return filterAllowedTools(defs, mode.ToolAllowlist)
 }
 
 func (a *Agent) buildContext(
 	conv *store.Conversation,
 	memories []store.MemoryEntry,
+	mode ModeDefinition,
 ) provider.ChatRequest {
 	return provider.ChatRequest{
-		SystemPrompt: a.buildSystemPrompt(memories, nil, conv.CompactedSummary),
+		SystemPrompt: a.buildSystemPrompt(memories, nil, conv.CompactedSummary, mode),
 		Messages:     conv.Messages,
-		Tools:        a.buildToolDefs(),
+		Tools:        a.buildToolDefs(mode),
 		MaxTokens:    a.config.MaxTokensPerTurn,
 		Temperature:  0.0,
 	}

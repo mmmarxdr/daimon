@@ -354,7 +354,7 @@ func TestAgent_Shutdown_PropagatesError(t *testing.T) {
 func TestBuildContext_NoMemories(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, &mockChannel{}, &mockProvider{}, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 	conv := &store.Conversation{}
-	req := ag.buildContext(conv, []store.MemoryEntry{})
+	req := ag.buildContext(conv, []store.MemoryEntry{}, defaultModeForTests())
 	if strings.Contains(req.SystemPrompt, "## Relevant Context:") {
 		t.Error("system prompt should NOT contain '## Relevant Context:' when no memories")
 	}
@@ -367,7 +367,7 @@ func TestBuildContext_WithMemories(t *testing.T) {
 		{Content: "User likes Go"},
 		{Content: "Prefers short answers"},
 	}
-	req := ag.buildContext(conv, memories)
+	req := ag.buildContext(conv, memories, defaultModeForTests())
 	if !strings.Contains(req.SystemPrompt, "## Relevant Context:") {
 		t.Error("system prompt should contain '## Relevant Context:'")
 	}
@@ -387,7 +387,7 @@ func TestBuildContext_ToolsIncluded(t *testing.T) {
 		map[string]tool.Tool{"tool_a": toolA, "tool_b": toolB}, nil, skill.SkillIndex{}, 4, false)
 
 	conv := &store.Conversation{}
-	req := ag.buildContext(conv, nil)
+	req := ag.buildContext(conv, nil, defaultModeForTests())
 
 	if len(req.Tools) != 2 {
 		t.Errorf("expected 2 tools in ChatRequest, got %d", len(req.Tools))
@@ -404,7 +404,7 @@ func TestBuildContext_ToolsIncluded(t *testing.T) {
 func TestBuildContext_NoTools(t *testing.T) {
 	ag := New(defaultCfg(), defaultLimits(), config.FilterConfig{}, &mockChannel{}, &mockProvider{}, &mockStore{}, audit.NoopAuditor{}, nil, nil, skill.SkillIndex{}, 4, false)
 	conv := &store.Conversation{}
-	req := ag.buildContext(conv, nil)
+	req := ag.buildContext(conv, nil, defaultModeForTests())
 	if req.Tools == nil {
 		t.Error("Tools slice should not be nil even with no tools registered")
 	}

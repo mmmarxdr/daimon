@@ -424,8 +424,8 @@ func (a *Agent) cmdCompact(cc CommandContext) error {
 
 	// Build system prompt and tool defs for token estimation.
 	var memories []store.MemoryEntry // skip memory search for /compact
-	systemPrompt := a.buildSystemPrompt(memories, nil, "")
-	toolDefs := a.buildToolDefs()
+	systemPrompt := a.buildSystemPrompt(memories, nil, "", a.modeSnapshot())
+	toolDefs := a.buildToolDefs(a.modeSnapshot())
 
 	// Count tokens before compaction.
 	before := EstimateMessagesTokens(conv.Messages)
