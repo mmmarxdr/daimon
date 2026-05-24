@@ -20,11 +20,12 @@ type apiMessage struct {
 
 // apiConversation is the wire shape for a full conversation sent to the frontend.
 type apiConversation struct {
-	ID        string       `json:"id"`
-	ChannelID string       `json:"channel_id"`
-	Messages  []apiMessage `json:"messages"`
-	CreatedAt string       `json:"created_at"`
-	UpdatedAt string       `json:"updated_at"`
+	ID        string            `json:"id"`
+	ChannelID string            `json:"channel_id"`
+	Messages  []apiMessage      `json:"messages"`
+	Metadata  map[string]string `json:"metadata,omitempty"` // AD-13: reconnect contract (REQ-13)
+	CreatedAt string            `json:"created_at"`
+	UpdatedAt string            `json:"updated_at"`
 }
 
 func toAPIConversation(c *store.Conversation) apiConversation {
@@ -39,6 +40,7 @@ func toAPIConversation(c *store.Conversation) apiConversation {
 		ID:        c.ID,
 		ChannelID: c.ChannelID,
 		Messages:  msgs,
+		Metadata:  c.Metadata, // AD-13: pass through entire metadata map
 		CreatedAt: c.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: c.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}
