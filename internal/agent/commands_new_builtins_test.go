@@ -619,3 +619,166 @@ func (l *listableStore) LoadConversation(ctx context.Context, id string) (*store
 	}
 	return nil, store.ErrNotFound
 }
+
+// ---------------------------------------------------------------------------
+// byIDStore — store.Store mock that resolves LoadConversation by exact ID
+// against a map of conversations. Used by W-2 regression tests to prove
+// that /save, /fork, and /export honor the activeConv override.
+// ---------------------------------------------------------------------------
+
+type byIDStore struct {
+	mockStore
+	convs     map[string]*store.Conversation
+	lastSaved *store.Conversation
+}
+
+func newByIDStore(convs ...store.Conversation) *byIDStore {
+	m := make(map[string]*store.Conversation, len(convs))
+	for i := range convs {
+		c := convs[i]
+		m[c.ID] = &c
+	}
+	return &byIDStore{convs: m}
+}
+
+func (b *byIDStore) LoadConversation(_ context.Context, id string) (*store.Conversation, error) {
+	c, ok := b.convs[id]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	cp := *c
+	cp.Messages = append([]provider.ChatMessage(nil), c.Messages...)
+	return &cp, nil
+}
+
+func (b *byIDStore) SaveConversation(_ context.Context, c store.Conversation) error {
+	saved := c
+	b.lastSaved = &saved
+	if b.convs == nil {
+		b.convs = map[string]*store.Conversation{}
+	}
+	b.convs[c.ID] = &saved
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// W-2 regression tests: /save, /fork, /export MUST honor activeConv override
+// after /resume <convID> has switched the active conversation.
+// REQ-1 + REQ-2/3/4 interaction — see verify-report-pr3 W-2.
+// ---------------------------------------------------------------------------
+
+// TestCmdSave_HonorsActiveConvOverride verifies that after /resume conv-B,
+// /save snapshots conv-B (the override), not the default-derived conv.
+func TestCmdSave_HonorsActiveConvOverride(t *testing.T) {
+	defaultConv := store.Conversation{
+		ID:        "conv_chan:42:user:7",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("default-only")},
+		},
+	}
+	overrideConv := store.Conversation{
+		ID:        "conv-override",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("override-1")},
+			{Role: "assistant", Content: content.TextBlock("override-2")},
+		},
+	}
+	st := newByIDStore(defaultConv, overrideConv)
+	ag := makeAgentWithStore(t, st)
+	ag.activeConv.Set(cancelKey{ChannelID: "chan:42", SenderID: "user:7"}, overrideConv.ID)
+
+	cr := &capturedReply{}
+	cc := makeAgentCC(ag, cr, st, "")
+	if err := ag.cmdSave(cc); err != nil {
+		t.Fatalf("cmdSave: %v", err)
+	}
+	if st.lastSaved == nil {
+		t.Fatal("expected snapshot to be persisted")
+	}
+	if st.lastSaved.ParentConvID != overrideConv.ID {
+		t.Errorf("snapshot ParentConvID = %q, want %q (the activeConv override)", st.lastSaved.ParentConvID, overrideConv.ID)
+	}
+	if got, want := len(st.lastSaved.Messages), len(overrideConv.Messages); got != want {
+		t.Errorf("snapshot Messages count = %d, want %d (from override conv)", got, want)
+	}
+}
+
+// TestCmdFork_HonorsActiveConvOverride verifies that after /resume conv-B,
+// /fork branches conv-B (the override), not the default-derived conv.
+func TestCmdFork_HonorsActiveConvOverride(t *testing.T) {
+	defaultConv := store.Conversation{
+		ID:        "conv_chan:42:user:7",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("default-only")},
+		},
+	}
+	overrideConv := store.Conversation{
+		ID:        "conv-override",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("u1")},
+			{Role: "assistant", Content: content.TextBlock("a1")},
+			{Role: "user", Content: content.TextBlock("u2")},
+		},
+	}
+	st := newByIDStore(defaultConv, overrideConv)
+	ag := makeAgentWithStore(t, st)
+	ag.activeConv.Set(cancelKey{ChannelID: "chan:42", SenderID: "user:7"}, overrideConv.ID)
+
+	cr := &capturedReply{}
+	cc := makeAgentCC(ag, cr, st, "")
+	if err := ag.cmdFork(cc); err != nil {
+		t.Fatalf("cmdFork: %v", err)
+	}
+	if st.lastSaved == nil {
+		t.Fatal("expected fork to be persisted")
+	}
+	if st.lastSaved.ParentConvID != overrideConv.ID {
+		t.Errorf("fork ParentConvID = %q, want %q (the activeConv override)", st.lastSaved.ParentConvID, overrideConv.ID)
+	}
+	// Override has 3 msgs with the last being a user turn → fork copies all 3.
+	if got, want := len(st.lastSaved.Messages), 3; got != want {
+		t.Errorf("fork Messages count = %d, want %d (from override conv up to last user turn)", got, want)
+	}
+}
+
+// TestCmdExport_HonorsActiveConvOverride verifies that after /resume conv-B,
+// /export renders conv-B's messages (the override), not the default-derived conv.
+func TestCmdExport_HonorsActiveConvOverride(t *testing.T) {
+	defaultConv := store.Conversation{
+		ID:        "conv_chan:42:user:7",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("DEFAULT-MARKER")},
+		},
+	}
+	overrideConv := store.Conversation{
+		ID:        "conv-override",
+		ChannelID: "chan:42",
+		Messages: []provider.ChatMessage{
+			{Role: "user", Content: content.TextBlock("OVERRIDE-MARKER")},
+		},
+	}
+	st := newByIDStore(defaultConv, overrideConv)
+	ag := makeAgentWithStore(t, st)
+	ag.activeConv.Set(cancelKey{ChannelID: "chan:42", SenderID: "user:7"}, overrideConv.ID)
+
+	cr := &capturedReply{}
+	cc := makeAgentCC(ag, cr, st, "")
+	if err := ag.cmdExport(cc); err != nil {
+		t.Fatalf("cmdExport: %v", err)
+	}
+	if len(cr.messages) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
+	}
+	reply := cr.messages[0]
+	if !strings.Contains(reply, "OVERRIDE-MARKER") {
+		t.Errorf("export reply must include override conversation content, got: %q", reply)
+	}
+	if strings.Contains(reply, "DEFAULT-MARKER") {
+		t.Errorf("export reply MUST NOT include default conversation content after /resume, got: %q", reply)
+	}
+}

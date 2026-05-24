@@ -65,6 +65,19 @@ func (co *convOverrides) Reset(k cancelKey) {
 	delete(co.overrides, k)
 }
 
+// effectiveConvID returns the convID that command handlers should target for
+// (channelID, senderID): the /resume override if set, else the default
+// userScope-derived convID. Mirrors the resolution order used in
+// processMessage (loop.go) so meta-commands stay consistent with the
+// active-conversation invariant after /resume.
+func (a *Agent) effectiveConvID(channelID, senderID string) string {
+	key := cancelKey{ChannelID: channelID, SenderID: senderID}
+	if override, ok := a.activeConv.Get(key); ok {
+		return override
+	}
+	return "conv_" + userScope(channelID, senderID)
+}
+
 // ---------------------------------------------------------------------------
 // Destructive command table (REQ-17, Decision #12)
 //
@@ -255,7 +268,7 @@ func (a *Agent) cmdResume(cc CommandContext) error {
 // Creates a lightweight named snapshot of the current conversation by copying
 // it with a new UUID and storing metadata["snapshot_name"].
 func (a *Agent) cmdSave(cc CommandContext) error {
-	convID := "conv_" + userScope(cc.ChannelID, cc.SenderID)
+	convID := a.effectiveConvID(cc.ChannelID, cc.SenderID)
 	src, err := cc.Store.LoadConversation(cc.Ctx, convID)
 	if err != nil {
 		cc.Reply(fmt.Sprintf("save: failed to load conversation: %v", err))
@@ -303,7 +316,7 @@ func (a *Agent) cmdSave(cc CommandContext) error {
 // and including the last user-role message. The fork becomes the active conv.
 func (a *Agent) cmdFork(cc CommandContext) error {
 	key := cancelKey{ChannelID: cc.ChannelID, SenderID: cc.SenderID}
-	convID := "conv_" + userScope(cc.ChannelID, cc.SenderID)
+	convID := a.effectiveConvID(cc.ChannelID, cc.SenderID)
 	src, err := cc.Store.LoadConversation(cc.Ctx, convID)
 	if err != nil {
 		cc.Reply(fmt.Sprintf("fork: failed to load conversation: %v", err))
@@ -362,7 +375,7 @@ type exportMessage struct {
 //
 // Renders the current conversation as markdown (default) or JSON via cc.Reply.
 func (a *Agent) cmdExport(cc CommandContext) error {
-	convID := "conv_" + userScope(cc.ChannelID, cc.SenderID)
+	convID := a.effectiveConvID(cc.ChannelID, cc.SenderID)
 	conv, err := cc.Store.LoadConversation(cc.Ctx, convID)
 	if err != nil {
 		cc.Reply(fmt.Sprintf("export: failed to load conversation: %v", err))
