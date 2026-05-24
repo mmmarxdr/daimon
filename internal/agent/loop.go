@@ -157,6 +157,26 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 
+	// Per-turn cancellation context (WU4, REQ-7).
+	// Wrap ctx with a WithCancel AFTER the slash-command early-return block so
+	// that /cancel itself does NOT register a turn (it dispatches above and
+	// returns). The defer cleans up both the registry entry and the cancel func.
+	turnKey := cancelKey{ChannelID: msg.ChannelID, SenderID: msg.SenderID}
+	turnCtx, turnCancel := context.WithCancel(ctx)
+	if err := a.cancels.Register(turnKey, turnCancel); err != nil {
+		// Collision: a turn for this (channel, sender) is already running.
+		// Defensive: log warn and drop this turn rather than double-registering.
+		slog.Warn("cancel registry collision; dropping new turn",
+			"channel", msg.ChannelID, "sender", msg.SenderID, "error", err)
+		turnCancel()
+		return
+	}
+	defer func() {
+		a.cancels.Unregister(turnKey)
+		turnCancel() // no-op if already cancelled
+	}()
+	ctx = turnCtx // all code below uses the per-turn cancellable context
+
 	// Resolve convID: explicit ConversationID on the incoming message
 	// (populated by the web channel when `?conversation_id=` was sent on
 	// the WS upgrade) overrides the userScope derivation. The scope used

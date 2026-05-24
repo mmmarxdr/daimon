@@ -15,6 +15,16 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
   notice and will be removed in V2. The rename frees `/cancel` for use as the
   upcoming built-in turn-cancellation command. (PR #19, REQ-8)
 
+### New
+
+- **`/cancel` built-in**: Cancels the in-progress LLM turn for the
+  (channel, sender) that sent the command. Idempotent — replies neutral when no
+  turn is active. (PR2, REQ-6, REQ-7)
+- **`/cd` built-in**: Sets a per-(channel, sender) shell working-directory override.
+  No-arg or `~` clears the override. Sandbox root and `..` traversal are rejected
+  before mutation. Shell-tool integration lands in WU6 (PR3) — the override exists
+  in process memory ahead of the wiring. (PR2, REQ-5, REQ-23)
+
 ---
 
 ## [v0.11.1] — New-chat escape hatch

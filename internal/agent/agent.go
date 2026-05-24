@@ -134,6 +134,8 @@ type Agent struct {
 	consolidator    *Consolidator    // background memory consolidation; nil when disabled
 	contextMgr      *ContextManager  // smart context management; nil when disabled
 	commands        *CommandRegistry
+	cancels         *cancelRegistry // per-(channel,sender) turn cancel funcs (WU4, REQ-6, REQ-7)
+	shellCwd        *cwdOverrides   // per-(channel,sender) shell working-dir overrides (WU5, REQ-5)
 	startedAt       time.Time
 	inbox           chan channel.IncomingMessage
 	channelName     string
@@ -282,6 +284,8 @@ func New(
 		indexWorker:     idxWorker,
 		contextMgr:      contextMgr,
 		commands:        reg,
+		cancels:         newCancelRegistry(),
+		shellCwd:        newCwdOverrides(),
 		channelName:     ch.Name(),
 	}
 	// Wire the legacy truncation function now that the agent struct is fully built.
@@ -297,9 +301,15 @@ func New(
 		}
 	}
 
-	// Register the /compact command now that the agent struct is fully built.
+	// Register method-bound commands that require agent access.
 	reg.Register("compact", "Force-compact conversation context", func(cc CommandContext) error {
 		return a.cmdCompact(cc)
+	}, SourceBuiltin)
+	reg.Register("cancel", "Cancel in-progress LLM turn", func(cc CommandContext) error {
+		return a.cmdCancel(cc)
+	}, SourceBuiltin)
+	reg.Register("cd", "Set shell working directory: /cd <path> (or /cd to reset)", func(cc CommandContext) error {
+		return a.cmdCd(cc)
 	}, SourceBuiltin)
 	return a
 }
