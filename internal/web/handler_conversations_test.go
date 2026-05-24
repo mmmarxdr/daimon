@@ -399,3 +399,78 @@ func TestHandleDeleteConversation_noWebStore_returns501(t *testing.T) {
 		t.Fatalf("expected 501, got %d", w.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 10 (AD-13 / REQ-13): apiConversation.Metadata field round-trip
+// ---------------------------------------------------------------------------
+
+// TestHandleGetConversation_MetadataRoundTrips_S13_1 verifies that a conversation
+// with metadata["daimon/mode"]="review" returns that metadata in the REST payload
+// so the frontend can reconstruct mode after WebSocket reconnect (REQ-13, S13-1).
+func TestHandleGetConversation_MetadataRoundTrips_S13_1(t *testing.T) {
+	conv := store.Conversation{
+		ID:        "meta-conv",
+		ChannelID: "ch-meta",
+		Metadata:  map[string]string{"daimon/mode": "review"},
+	}
+	fs := &fakeWebStore{conversations: []store.Conversation{conv}}
+	srv := newTestServerWithStore(t, fs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/meta-conv", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	metadata, ok := resp["metadata"]
+	if !ok {
+		t.Fatal("expected 'metadata' field in response but it was absent")
+	}
+	metaMap, ok := metadata.(map[string]any)
+	if !ok {
+		t.Fatalf("expected metadata to be a map, got %T", metadata)
+	}
+	if metaMap["daimon/mode"] != "review" {
+		t.Errorf("expected metadata[\"daimon/mode\"]=\"review\", got %q", metaMap["daimon/mode"])
+	}
+}
+
+// TestHandleGetConversation_NoMetadata_S13_2 verifies that a conversation WITHOUT
+// mode metadata round-trips cleanly — the metadata field is either absent or an
+// empty object (omitempty semantics from AD-13).
+func TestHandleGetConversation_NoMetadata_S13_2(t *testing.T) {
+	conv := store.Conversation{
+		ID:        "no-meta-conv",
+		ChannelID: "ch-no-meta",
+		// Metadata intentionally nil
+	}
+	fs := &fakeWebStore{conversations: []store.Conversation{conv}}
+	srv := newTestServerWithStore(t, fs)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/conversations/no-meta-conv", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Parsing must succeed — no error expected even without metadata.
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	// If metadata is present, it should be nil or empty (omitempty).
+	if meta, exists := resp["metadata"]; exists && meta != nil {
+		if metaMap, ok := meta.(map[string]any); ok && len(metaMap) > 0 {
+			t.Errorf("expected empty/absent metadata for conv without metadata, got: %v", metaMap)
+		}
+	}
+}
