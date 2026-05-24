@@ -22,19 +22,21 @@ type enrichJob struct {
 // Enricher asynchronously generates LLM-based concept tags for new memory entries.
 // It runs a single worker goroutine draining a bounded channel.
 type Enricher struct {
-	store    store.Store
-	provider provider.Provider
-	model    string        // resolved enrichment model (cheap)
-	ch       chan enrichJob // buffered channel, capacity 5
-	limiter  *rateLimiter  // sliding-window rate limiter
-	wg       sync.WaitGroup
-	stopOnce sync.Once
+	store      store.Store
+	providerFn func() provider.Provider // accessor closure; always reads the live provider
+	model      string                   // resolved enrichment model (cheap)
+	ch         chan enrichJob           // buffered channel, capacity 5
+	limiter    *rateLimiter             // sliding-window rate limiter
+	wg         sync.WaitGroup
+	stopOnce   sync.Once
 }
 
 // NewEnricher creates a new Enricher and starts its worker goroutine.
 // Returns nil if cfg.EnrichMemory is false.
-// The caller must call Stop() when done and ensure run() is started via a goroutine.
-func NewEnricher(prov provider.Provider, st store.Store, cfg config.AgentConfig) *Enricher {
+// providerFn is called on every enrichment job to read the live provider after
+// a SetProvider swap. The caller must call Stop() when done and ensure run() is
+// started via a goroutine.
+func NewEnricher(providerFn func() provider.Provider, st store.Store, cfg config.AgentConfig) *Enricher {
 	if !cfg.EnrichMemory {
 		return nil
 	}
@@ -45,11 +47,11 @@ func NewEnricher(prov provider.Provider, st store.Store, cfg config.AgentConfig)
 	}
 
 	return &Enricher{
-		store:    st,
-		provider: prov,
-		model:    resolveEnrichModel(prov, cfg.EnrichModel),
-		ch:       make(chan enrichJob, 5),
-		limiter:  newRateLimiter(ratePerMin, time.Minute),
+		store:      st,
+		providerFn: providerFn,
+		model:      resolveEnrichModel(providerFn(), cfg.EnrichModel),
+		ch:         make(chan enrichJob, 5),
+		limiter:    newRateLimiter(ratePerMin, time.Minute),
 	}
 }
 
@@ -114,7 +116,7 @@ func (e *Enricher) processJob(ctx context.Context, job enrichJob) {
 		MaxTokens: 50,
 	}
 
-	resp, err := e.provider.Chat(jobCtx, req)
+	resp, err := e.providerFn().Chat(jobCtx, req)
 	if err != nil {
 		slog.Warn("enricher: LLM call failed", "entry_id", job.entry.ID, "error", err)
 		return

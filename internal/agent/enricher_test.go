@@ -158,7 +158,7 @@ func TestEnricher_HappyPath(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	if e == nil {
 		t.Fatal("expected non-nil Enricher when EnrichMemory=true")
 	}
@@ -218,7 +218,7 @@ func TestEnricher_DisabledWhenFalse(t *testing.T) {
 	st := &enrichMockStore{}
 	cfg := config.AgentConfig{EnrichMemory: false}
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	if e != nil {
 		t.Error("expected nil Enricher when EnrichMemory=false")
 	}
@@ -234,7 +234,7 @@ func TestEnricher_ChannelFull(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	e.Start(ctx)
 
 	// Fill the channel past capacity (cap=5) — all should return immediately.
@@ -274,7 +274,7 @@ func TestEnricher_RateLimitExceeded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	defer e.Stop()
 	e.Start(ctx)
 
@@ -306,7 +306,7 @@ func TestEnricher_LLMTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	defer e.Stop()
 	e.Start(ctx)
 
@@ -335,7 +335,7 @@ func TestEnricher_EmptyLLMResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	defer e.Stop()
 	e.Start(ctx)
 
@@ -359,7 +359,7 @@ func TestEnricher_WhitespaceOnlyLLMResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	defer e.Stop()
 	e.Start(ctx)
 
@@ -381,7 +381,7 @@ func TestEnricher_Shutdown(t *testing.T) {
 	cfg := enrichTestCfg()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	e := NewEnricher(prov, st, cfg)
+	e := NewEnricher(func() provider.Provider { return prov }, st, cfg)
 	e.Start(ctx)
 
 	// Give the goroutine time to start.

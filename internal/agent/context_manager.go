@@ -29,32 +29,36 @@ type LegacyTruncateFn func(ctx context.Context, messages []provider.ChatMessage)
 type ContextManager struct {
 	mu               sync.Mutex
 	cfg              config.ContextConfig
-	prov             provider.Provider  // for summarization calls
-	bus              notify.Bus         // optional, for compaction events
-	resolvedMaxToks  int                // resolved context window size
-	lastCompactTurn  int                // hysteresis: last turn that compacted
-	postCompactUsage int                // token count right after last compaction
-	currentTurn      int                // incremented on every Manage call
-	legacyFn         LegacyTruncateFn   // optional: called when strategy == "legacy"
+	providerFn       func() provider.Provider // accessor closure; reads live provider after SetProvider swap
+	bus              notify.Bus               // optional, for compaction events
+	resolvedMaxToks  int                      // resolved context window size; fixed at construction
+	lastCompactTurn  int                      // hysteresis: last turn that compacted
+	postCompactUsage int                      // token count right after last compaction
+	currentTurn      int                      // incremented on every Manage call
+	legacyFn         LegacyTruncateFn         // optional: called when strategy == "legacy"
 }
 
 // NewContextManager creates a new ContextManager, applying config defaults and
 // resolving the context window size.
 //
+// providerFn is called to read the live provider; it may be called multiple times.
+// resolvedMaxToks is computed once at construction by calling providerFn() — context
+// window size is assumed stable within a provider type and does not change on swap.
+//
 // For strategies "none" and "legacy", model detection is skipped to avoid
 // unnecessary provider API calls at construction time.
-func NewContextManager(cfg config.ContextConfig, prov provider.Provider, bus notify.Bus) *ContextManager {
+func NewContextManager(cfg config.ContextConfig, providerFn func() provider.Provider, bus notify.Bus) *ContextManager {
 	cfg.ApplyContextDefaults()
 	// Skip expensive model-list detection for non-smart strategies.
 	var maxToks int
 	if cfg.Strategy == "smart" || cfg.Strategy == "" {
-		maxToks = resolveContextSize(prov, cfg)
+		maxToks = resolveContextSize(providerFn(), cfg)
 	} else {
 		maxToks = cfg.FallbackCtxSize
 	}
 	return &ContextManager{
 		cfg:             cfg,
-		prov:            prov,
+		providerFn:      providerFn,
 		bus:             bus,
 		resolvedMaxToks: maxToks,
 	}

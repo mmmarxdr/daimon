@@ -19,15 +19,15 @@ type cmMockProvider struct {
 	model string
 }
 
-func (m *cmMockProvider) Name() string                                              { return m.name }
-func (m *cmMockProvider) Model() string                                             { return m.model }
+func (m *cmMockProvider) Name() string  { return m.name }
+func (m *cmMockProvider) Model() string { return m.model }
 func (m *cmMockProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
 	return &provider.ChatResponse{}, nil
 }
-func (m *cmMockProvider) SupportsTools() bool                             { return false }
-func (m *cmMockProvider) SupportsMultimodal() bool                        { return false }
-func (m *cmMockProvider) SupportsAudio() bool                             { return false }
-func (m *cmMockProvider) HealthCheck(_ context.Context) (string, error)   { return "ok", nil }
+func (m *cmMockProvider) SupportsTools() bool                           { return false }
+func (m *cmMockProvider) SupportsMultimodal() bool                      { return false }
+func (m *cmMockProvider) SupportsAudio() bool                           { return false }
+func (m *cmMockProvider) HealthCheck(_ context.Context) (string, error) { return "ok", nil }
 
 // cmMockModelLister embeds cmMockProvider and also implements ModelLister.
 type cmMockModelLister struct {
@@ -40,13 +40,19 @@ func (m *cmMockModelLister) ListModels(_ context.Context) ([]provider.ModelInfo,
 	return m.models, m.err
 }
 
+// staticFn wraps a bare provider.Provider in a func() provider.Provider closure,
+// as required by the updated NewContextManager signature.
+func staticFn(p provider.Provider) func() provider.Provider {
+	return func() provider.Provider { return p }
+}
+
 // --- T2.1 tests ---
 
 func TestNewContextManager_AppliesDefaults(t *testing.T) {
 	cfg := config.ContextConfig{} // all zero — defaults should be filled
 	prov := &cmMockProvider{name: "test", model: "test-model"}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm == nil {
 		t.Fatal("expected non-nil ContextManager")
@@ -70,7 +76,7 @@ func TestResolveContextSize_UserOverride(t *testing.T) {
 	cfg := config.ContextConfig{MaxTokens: 50000}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm.MaxTokens() != 50000 {
 		t.Errorf("MaxTokens() = %d, want 50000", cm.MaxTokens())
@@ -90,7 +96,7 @@ func TestResolveContextSize_AutoDetectSuccess(t *testing.T) {
 		},
 	}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm.MaxTokens() != 128000 {
 		t.Errorf("MaxTokens() = %d, want 128000", cm.MaxTokens())
@@ -104,10 +110,10 @@ func TestResolveContextSize_AutoDetectFailure_UsesFallback(t *testing.T) {
 	}
 	prov := &cmMockModelLister{
 		cmMockProvider: cmMockProvider{name: "test", model: "some-model"},
-		err:          context.DeadlineExceeded,
+		err:            context.DeadlineExceeded,
 	}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm.MaxTokens() != 64000 {
 		t.Errorf("MaxTokens() = %d, want fallback 64000", cm.MaxTokens())
@@ -126,7 +132,7 @@ func TestResolveContextSize_AutoDetectModelNotFound_UsesFallback(t *testing.T) {
 		},
 	}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm.MaxTokens() != 32000 {
 		t.Errorf("MaxTokens() = %d, want fallback 32000", cm.MaxTokens())
@@ -140,7 +146,7 @@ func TestResolveContextSize_NoModelLister_UsesFallback(t *testing.T) {
 	}
 	prov := &cmMockProvider{name: "test", model: "some-model"}
 
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	if cm.MaxTokens() != 16000 {
 		t.Errorf("MaxTokens() = %d, want fallback 16000", cm.MaxTokens())
@@ -150,7 +156,7 @@ func TestResolveContextSize_NoModelLister_UsesFallback(t *testing.T) {
 func TestUsage_BreakdownAccuracy(t *testing.T) {
 	cfg := config.ContextConfig{MaxTokens: 100000}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	systemPrompt := "You are a helpful assistant."
 	messages := []provider.ChatMessage{
@@ -186,7 +192,7 @@ func TestUsage_ZeroMaxTokens_NoPanic(t *testing.T) {
 	// resolvedMaxToks = 0 when no fallback set and no override — should not divide by zero
 	cfg := config.ContextConfig{MaxTokens: 0, FallbackCtxSize: 1} // fallback=1 so resolved > 0 post-default
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 	// Just ensure no panic
 	_ = cm.Usage(10, nil)
 }
@@ -230,7 +236,7 @@ func TestManage_StrategyNone_AlwaysUnchanged(t *testing.T) {
 		Strategy:  "none",
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// Even with messages that would exceed threshold, strategy "none" is unchanged.
 	msgs := largeMessages(10, 200) // 200 tokens each × 10 = 2000 tokens > 1000 max
@@ -252,7 +258,7 @@ func TestManage_BelowThreshold_NoCompaction(t *testing.T) {
 		CooldownTurns:    3,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// Small messages — well below threshold.
 	msgs := makeMessages(3)
@@ -274,7 +280,7 @@ func TestManage_AtThreshold_CompactionTriggered(t *testing.T) {
 		CooldownTurns:    3,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// 600 tokens of messages > 50% of 1000 → trigger
 	msgs := largeMessages(3, 200) // 3 × 200 tokens ≈ 600 tokens (plus overhead)
@@ -291,12 +297,12 @@ func TestManage_AtThreshold_CompactionTriggered(t *testing.T) {
 func TestManage_CooldownActive_BelowHardMax_Skipped(t *testing.T) {
 	cfg := config.ContextConfig{
 		MaxTokens:        10000, // large window: hard max = 10000 tokens
-		CompactThreshold: 0.1,  // threshold = 1000 tokens
+		CompactThreshold: 0.1,   // threshold = 1000 tokens
 		Strategy:         "smart",
 		CooldownTurns:    5,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// Trigger first compaction: 4 messages × ~300 tokens = ~1200 tokens > 1000 threshold.
 	// And 1200 << 10000 (well below hard max).
@@ -324,7 +330,7 @@ func TestManage_CooldownExpired_CompactionTriggered(t *testing.T) {
 		CooldownTurns:    2,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	msgs := largeMessages(2, 100)
 
@@ -353,7 +359,7 @@ func TestManage_AboveHardMax_OverridesCooldown(t *testing.T) {
 		CooldownTurns:    100, // very long cooldown
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// First compaction to start cooldown.
 	msgs := largeMessages(2, 50) // ~100+ tokens > 50% threshold
@@ -376,7 +382,7 @@ func TestManage_StrategyLegacy_CallsLegacyPath(t *testing.T) {
 		Strategy:  "legacy",
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	msgs := makeMessages(3)
 	result := cm.Manage(context.Background(), "sys", nil, msgs)
@@ -395,7 +401,7 @@ func TestForceCompact_BypassesThresholdAndCooldown(t *testing.T) {
 		CooldownTurns:    1000,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	// Manually put in a "recent" compaction to activate cooldown.
 	cm.lastCompactTurn = 1
@@ -417,7 +423,7 @@ func TestManage_TurnIncrements(t *testing.T) {
 		Strategy:  "smart",
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	msgs := makeMessages(1)
 
@@ -436,7 +442,7 @@ func TestNewContextManager_WithBus(t *testing.T) {
 	cfg := config.ContextConfig{}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
 	var bus notify.Bus // nil interface
-	cm := NewContextManager(cfg, prov, bus)
+	cm := NewContextManager(cfg, staticFn(prov), bus)
 	if cm == nil {
 		t.Fatal("expected non-nil ContextManager")
 	}
@@ -466,7 +472,7 @@ func makeCompactingCM(bus notify.Bus, notify_ *bool) *ContextManager {
 		Notify:           notify_,
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	return NewContextManager(cfg, prov, bus)
+	return NewContextManager(cfg, staticFn(prov), bus)
 }
 
 func boolPtr(b bool) *bool { return &b }
@@ -552,7 +558,7 @@ func makeSmartCM(maxTokens int, threshold float64, protectedTurns int, summaryTe
 		cmMockProvider: cmMockProvider{name: "test", model: "test-model"},
 		summaryText:    summaryText,
 	}
-	return NewContextManager(cfg, prov, nil)
+	return NewContextManager(cfg, staticFn(prov), nil)
 }
 
 func TestContextManager_Integration_SmartCompaction_ReducesMessages(t *testing.T) {
@@ -636,7 +642,7 @@ func TestContextManager_Integration_LegacyStrategy_TruncatesByCount(t *testing.T
 		Strategy:  "legacy",
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	histLen := 5
 	// Wire a legacyFn that truncates to histLen
@@ -662,7 +668,7 @@ func TestContextManager_Integration_NoneStrategy_AlwaysUnchanged(t *testing.T) {
 		Strategy:  "none",
 	}
 	prov := &cmMockProvider{name: "test", model: "test-model"}
-	cm := NewContextManager(cfg, prov, nil)
+	cm := NewContextManager(cfg, staticFn(prov), nil)
 
 	msgs := largeMessages(20, 200) // huge messages — far exceed any threshold
 	result := cm.Manage(context.Background(), "sys", nil, msgs)
