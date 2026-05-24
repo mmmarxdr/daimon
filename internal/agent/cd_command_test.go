@@ -185,6 +185,44 @@ func TestCmdCd_DotDotTraversal_Rejected(t *testing.T) {
 	}
 }
 
+// TestCmdCd_AbsoluteDotDotPath_RejectedBySandbox verifies the edge case where
+// an absolute path with embedded ".." cleans to a real path outside the sandbox
+// (filepath.Clean removes the "..", so the cleaned form contains no ".." literal).
+// REQ-23 must still reject it via the sandbox HasPrefix guard.
+func TestCmdCd_AbsoluteDotDotPath_RejectedBySandbox(t *testing.T) {
+	sandbox := t.TempDir()
+	outside := t.TempDir() // real, existing dir outside the sandbox
+
+	ag := makeTestAgent(t)
+	ag.shellCwd.WithSandboxRoot(sandbox)
+	cr := &capturedReply{}
+
+	// Build an absolute traversal path: <sandbox>/../<basename of outside>
+	// After filepath.Clean this becomes the parent of sandbox + basename(outside),
+	// which is NOT necessarily `outside` itself — so we craft a path that DOES
+	// resolve to the outside dir via traversal through the sandbox's parent.
+	// Concrete: sandbox/.. → parent dir; sandbox/../<outside-basename> → resolves
+	// to a sibling of sandbox iff that sibling exists. We use `outside` directly
+	// joined with /.. /.. to reach a known-real location and verify rejection.
+	traversal := sandbox + "/../" + filepath.Base(outside)
+
+	if err := ag.cmdCd(makeCdCC(ag, cr, traversal)); err != nil {
+		t.Fatalf("cmdCd: %v", err)
+	}
+
+	if len(cr.messages) != 1 {
+		t.Fatalf("expected 1 reply, got %d", len(cr.messages))
+	}
+	if !strings.HasPrefix(cr.messages[0], "cd:") {
+		t.Errorf("expected 'cd:' error prefix, got: %q", cr.messages[0])
+	}
+
+	key := cancelKey{ChannelID: "chan:42", SenderID: "user:7"}
+	if _, ok := ag.shellCwd.Get(key); ok {
+		t.Error("expected no override after absolute-dotdot rejection")
+	}
+}
+
 // TestCmdCd_DoesNotCallLLM verifies that /cd never triggers an LLM call.
 func TestCmdCd_DoesNotCallLLM(t *testing.T) {
 	prov := &mockProvider{}
