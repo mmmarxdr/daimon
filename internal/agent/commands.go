@@ -59,6 +59,29 @@ type CommandEntryInfo struct {
 	Source string
 }
 
+// CommandInfo is the public REST view of a registered command.
+// Returned by Agent.Commands() and serialized in GET /api/commands responses.
+type CommandInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Destructive bool   `json:"destructive"`
+}
+
+// RunCommandRequest is the body of POST /api/commands/run.
+type RunCommandRequest struct {
+	Name             string `json:"name"`
+	Args             string `json:"args"`
+	ChannelID        string `json:"channel_id"`
+	SenderID         string `json:"sender_id"`
+	AllowDestructive bool   `json:"allow_destructive"`
+}
+
+// CommandResult is the response for a successful POST /api/commands/run.
+type CommandResult struct {
+	Reply string `json:"reply"`
+}
+
 // CommandRegistry holds registered slash commands.
 //
 // Concurrency: mu protects commands and all derived reads/writes.

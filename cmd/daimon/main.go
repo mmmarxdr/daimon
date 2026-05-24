@@ -640,6 +640,7 @@ func main() {
 			Config:           cfg,
 			ConfigPath:       resolvedCfgPath,
 			MCPService:       mcpSvc,
+			CommandProvider:  ag, // REST command endpoints (REQ-13, REQ-15-REST)
 			ProviderRegistry: provRegistry,
 			Tools:            toolsRegistry,
 			StartedAt:        time.Now(),

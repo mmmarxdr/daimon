@@ -412,6 +412,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		ConfigPath:       resolvedCfgPath,
 		MCPService:       mcpSvc,
 		Agent:            ag, // hot-reload target for /api/mcp + skill installs
+		CommandProvider:  ag, // REST command endpoints (REQ-13, REQ-15-REST, REQ-16, REQ-17, REQ-21)
 		ProviderRegistry: provRegistry,
 		Tools:            toolsRegistry,
 		StartedAt:        time.Now(),
