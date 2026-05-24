@@ -6,6 +6,17 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ---
 
+## [Unreleased]
+
+### Breaking
+
+- **Cron command rename**: `/cancel` → `/task-cancel` and `/cancel-confirm` →
+  `/task-cancel-confirm`. The old names still resolve but reply with a deprecation
+  notice and will be removed in V2. The rename frees `/cancel` for use as the
+  upcoming built-in turn-cancellation command. (PR #19, REQ-8)
+
+---
+
 ## [v0.11.1] — New-chat escape hatch
 
 **Release date**: 2026-05-01
@@ -179,7 +190,7 @@ no hand-edited YAML required.
   hot-swap the running auditor without a restart; `/logs` picks up the new
   stream on the next connection.
 - **LogsPage** redesigned in Liminal with level filters, pulsing connection
-  dot, and a banner that explains *why* streaming is unavailable when audit
+  dot, and a banner that explains _why_ streaming is unavailable when audit
   is off or pointed at a non-streaming backend.
 - **ToolsPage** redesigned in Liminal — last page on the migration list.
 - **Empty states** — Conversations, Memory, and Knowledge greet first-run
@@ -190,7 +201,7 @@ no hand-edited YAML required.
 
 - `audit.enabled` now defaults to `true` and `audit.type` defaults to
   `sqlite`. The setup wizard provisions sqlite. Existing configs with an
-  explicit `enabled: false` are honored — the *bool migration preserves
+  explicit `enabled: false` are honored — the \*bool migration preserves
   opt-out.
 - `PUT /api/config` accepts the `audit` subtree (previously dropped).
   When any audit field is patched, the server hot-swaps the auditor.
@@ -296,7 +307,7 @@ no hand-edited YAML required.
   conversation history and persists them as memory entries.
 - **Cross-scope memory access** for the admin user (project + personal).
 - **Actionable tool timeout copy** — when a tool exceeds its budget the
-  agent surfaces *why* and offers a retry hint instead of a stack trace.
+  agent surfaces _why_ and offers a retry hint instead of a stack trace.
 - **Process-group kill on timeout** — child processes spawned by tools
   no longer leak when the wrapper times out.
 - **Turn deadline** — total turn time is enforced in addition to
@@ -322,7 +333,7 @@ no hand-edited YAML required.
 - **`search_output` tool by default** — the agent can grep its own
   recent tool outputs without re-running them.
 - **Truncation byte counts** surfaced in tool output so the agent knows
-  *how much* was cut, not just *that* it was cut. Shell limit raised
+  _how much_ was cut, not just _that_ it was cut. Shell limit raised
   10K → 64K, HTTP 512K → 2MB.
 - **Gemini and Ollama reasoning streaming** — the providers now stream
   thinking tokens alongside content, matching Anthropic's behavior.
@@ -353,25 +364,27 @@ It is a breaking change for all users. No backward compatibility is provided.
 
 ### Breaking changes
 
-| What changed | Old | New |
-|-------------|-----|-----|
-| Binary name | `microagent` | `daimon` |
-| Config directory | `~/.microagent/` | `~/.daimon/` |
-| Database filename | `microagent.db` | `daimon.db` |
-| Web token env var | `MICROAGENT_WEB_TOKEN` | `DAIMON_WEB_TOKEN` |
-| Jina API key env var | `MICROAGENT_JINA_API_KEY` | `DAIMON_JINA_API_KEY` |
-| Secret key env var | `MICROAGENT_SECRET_KEY` | `DAIMON_SECRET_KEY` |
-| Go module path | `module microagent` | `module daimon` |
-| GitHub repository | `github.com/mmmarxdr/micro-claw` | `github.com/mmmarxdr/daimon` |
+| What changed         | Old                              | New                          |
+| -------------------- | -------------------------------- | ---------------------------- |
+| Binary name          | `microagent`                     | `daimon`                     |
+| Config directory     | `~/.microagent/`                 | `~/.daimon/`                 |
+| Database filename    | `microagent.db`                  | `daimon.db`                  |
+| Web token env var    | `MICROAGENT_WEB_TOKEN`           | `DAIMON_WEB_TOKEN`           |
+| Jina API key env var | `MICROAGENT_JINA_API_KEY`        | `DAIMON_JINA_API_KEY`        |
+| Secret key env var   | `MICROAGENT_SECRET_KEY`          | `DAIMON_SECRET_KEY`          |
+| Go module path       | `module microagent`              | `module daimon`              |
+| GitHub repository    | `github.com/mmmarxdr/micro-claw` | `github.com/mmmarxdr/daimon` |
 
 ### Migration steps (manual — no automatic migration)
 
 1. **Move config directory:**
+
    ```bash
    mv ~/.microagent ~/.daimon
    ```
 
 2. **Rename the database file:**
+
    ```bash
    mv ~/.daimon/data/microagent.db ~/.daimon/data/daimon.db
    ```
@@ -397,4 +410,4 @@ It is a breaking change for all users. No backward compatibility is provided.
 
 ---
 
-*Older pre-0.4.0 entries are not documented here (pre-public-release history).*
+_Older pre-0.4.0 entries are not documented here (pre-public-release history)._

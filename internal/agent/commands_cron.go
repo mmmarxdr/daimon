@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -24,15 +25,35 @@ func (a *Agent) WithCronCommands(scheduler cron.SchedulerIface, cronStore store.
 
 // registerCronCommands registers cron-specific slash commands on the registry.
 // scheduler and cronStore are captured in closures; CommandContext is not expanded.
+//
+// Uses RegisterIfFree (not Register) so builtins of the same name take precedence
+// per REQ-14 (builtin > cron > skill). Collisions are logged and skipped, not silently
+// overwritten — this matters for the deprecated /cancel alias, which would otherwise
+// clobber the upcoming /cancel builtin (PR2) due to registration order.
 func registerCronCommands(reg *CommandRegistry, scheduler cron.SchedulerIface, cronStore store.CronStore) {
-	reg.Register("tasks", "List active scheduled tasks", makeCmdTasks(scheduler), SourceCron)
-	reg.Register("task-cancel", "Cancel a scheduled task: /task-cancel <task-id>", makeCmdCancel(cronStore, scheduler), SourceCron)
-	reg.Register("task-cancel-confirm", "Confirm task cancellation: /task-cancel-confirm <task-id>", makeCmdCancelConfirm(cronStore, scheduler), SourceCron)
-	reg.Register("schedule", "Schedule a new task: /schedule <min> <hour> <day> <month> <weekday> <prompt>", makeCmdSchedule(cronStore, scheduler), SourceCron)
-	reg.Register("history", "Show task run history: /history <id> [limit]", makeCmdHistory(cronStore), SourceCron)
-	// Deprecated aliases — route old names to a notice handler. Will be removed in V2.
-	reg.Register("cancel", "DEPRECATED: renamed to /task-cancel", makeCmdDeprecatedCancel(), SourceCron)
-	reg.Register("cancel-confirm", "DEPRECATED: renamed to /task-cancel-confirm", makeCmdDeprecatedCancelConfirm(), SourceCron)
+	entries := []struct {
+		name    string
+		desc    string
+		handler CommandHandler
+	}{
+		{"tasks", "List active scheduled tasks", makeCmdTasks(scheduler)},
+		{"task-cancel", "Cancel a scheduled task: /task-cancel <task-id>", makeCmdCancel(cronStore, scheduler)},
+		{"task-cancel-confirm", "Confirm task cancellation: /task-cancel-confirm <task-id>", makeCmdCancelConfirm(cronStore, scheduler)},
+		{"schedule", "Schedule a new task: /schedule <min> <hour> <day> <month> <weekday> <prompt>", makeCmdSchedule(cronStore, scheduler)},
+		{"history", "Show task run history: /history <id> [limit]", makeCmdHistory(cronStore)},
+		// Deprecated aliases — route old names to a notice handler. Will be removed in V2.
+		{"cancel", "DEPRECATED: renamed to /task-cancel", makeCmdDeprecatedCancel()},
+		{"cancel-confirm", "DEPRECATED: renamed to /task-cancel-confirm", makeCmdDeprecatedCancelConfirm()},
+	}
+	for _, e := range entries {
+		ok, err := reg.RegisterIfFree(e.name, e.desc, e.handler, SourceCron)
+		switch {
+		case err != nil:
+			slog.Warn("cron command registration failed", "name", e.name, "err", err)
+		case !ok:
+			slog.Warn("cron command name conflicts with existing entry — skipped", "name", e.name)
+		}
+	}
 }
 
 // resolveJobID finds a CronJob by exact ID or unambiguous prefix.

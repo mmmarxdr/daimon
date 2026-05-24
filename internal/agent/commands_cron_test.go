@@ -694,3 +694,50 @@ func TestCronRegister_SourceTaggedAsCron(t *testing.T) {
 		}
 	}
 }
+
+// TestCronRegister_UsesRegisterIfFree_NotRegister verifies that registerCronCommands
+// uses RegisterIfFree (not Register), so a pre-existing builtin with the same name
+// is NOT silently overwritten by cron registration.
+//
+// This protects REQ-14 (precedence builtin > cron > skill) and the latent collision
+// where the deprecated /cancel alias would clobber the upcoming /cancel builtin in
+// PR2 because WithCronCommands runs after registerBuiltinCommands.
+func TestCronRegister_UsesRegisterIfFree_NotRegister(t *testing.T) {
+	reg := NewCommandRegistry()
+	cronSt := &mockCronStoreAgent{}
+	sched := &mockScheduler{}
+
+	// Pre-register a sentinel builtin under the deprecated cron alias name.
+	// If registerCronCommands uses Register (overwrite), the sentinel is clobbered.
+	// If it uses RegisterIfFree (skip-on-collision), the sentinel survives.
+	sentinelCalled := false
+	reg.Register("cancel", "sentinel builtin", func(_ CommandContext) error {
+		sentinelCalled = true
+		return nil
+	}, SourceBuiltin)
+
+	registerCronCommands(reg, sched, cronSt)
+
+	h, ok := reg.Lookup("cancel")
+	if !ok {
+		t.Fatal("expected /cancel to be registered after cron registration")
+	}
+	if err := h(CommandContext{}); err != nil {
+		t.Fatalf("unexpected error invoking handler: %v", err)
+	}
+	if !sentinelCalled {
+		t.Fatal("registerCronCommands overwrote the pre-existing builtin /cancel — must use RegisterIfFree, not Register")
+	}
+
+	// The entry's source must still be SourceBuiltin (the builtin survived collision).
+	var cancelSource string
+	for _, e := range reg.EntriesWithSource() {
+		if e.Name == "cancel" {
+			cancelSource = e.Source
+			break
+		}
+	}
+	if cancelSource != SourceBuiltin {
+		t.Errorf("expected /cancel source to remain %q (builtin survived collision), got %q", SourceBuiltin, cancelSource)
+	}
+}
