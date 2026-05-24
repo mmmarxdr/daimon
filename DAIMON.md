@@ -79,16 +79,16 @@ These principles override any convenience shortcut. If a decision conflicts with
 
 ### Component Responsibilities
 
-| Component | Responsibility | Knows about |
-|-----------|---------------|-------------|
-| `main.go` | Wire everything, start agent | Config, Registry, all concrete types |
-| `Agent Loop` | Orchestrate message → LLM → tools → response cycle | Interfaces only: Channel, Provider, Tool, Store |
-| `Channel` | Receive user messages, send agent responses | Nothing — it's a dumb pipe |
-| `Provider` | Translate ChatRequest into LLM API calls, parse responses | Its own API format only |
-| `Tool` | Execute a specific capability, return results | Its own domain only |
-| `Store` | Persist and retrieve conversations + memory | Its own storage backend |
-| `Registry` | Hold references to all available components by name | Interfaces + factory functions |
-| `Config` | Parse YAML, resolve env vars, validate | Nothing — pure data |
+| Component    | Responsibility                                            | Knows about                                     |
+| ------------ | --------------------------------------------------------- | ----------------------------------------------- |
+| `main.go`    | Wire everything, start agent                              | Config, Registry, all concrete types            |
+| `Agent Loop` | Orchestrate message → LLM → tools → response cycle        | Interfaces only: Channel, Provider, Tool, Store |
+| `Channel`    | Receive user messages, send agent responses               | Nothing — it's a dumb pipe                      |
+| `Provider`   | Translate ChatRequest into LLM API calls, parse responses | Its own API format only                         |
+| `Tool`       | Execute a specific capability, return results             | Its own domain only                             |
+| `Store`      | Persist and retrieve conversations + memory               | Its own storage backend                         |
+| `Registry`   | Hold references to all available components by name       | Interfaces + factory functions                  |
+| `Config`     | Parse YAML, resolve env vars, validate                    | Nothing — pure data                             |
 
 ---
 
@@ -135,6 +135,7 @@ type Channel interface {
 ```
 
 **Rules for Channel implementations:**
+
 - `Start()` MUST return immediately. All blocking work goes in goroutines.
 - Goroutines MUST respect `ctx.Done()` for clean shutdown.
 - Channels MUST NOT import or reference the agent loop, provider, or any other component.
@@ -192,6 +193,7 @@ type Provider interface {
 ```
 
 **Rules for Provider implementations:**
+
 - MUST handle HTTP errors, rate limits (429), and retries internally with exponential backoff.
 - MUST respect `ctx` for cancellation and timeouts.
 - MUST map between the internal ChatMessage format and the provider's API format (e.g., Anthropic's `messages` format vs. OpenAI's `chat/completions` format). The agent loop NEVER deals with provider-specific JSON.
@@ -224,6 +226,7 @@ type Tool interface {
 ```
 
 **Rules for Tool implementations:**
+
 - `Name()` MUST be snake_case and globally unique.
 - `Description()` should be concise but sufficient for the LLM to understand when and how to use the tool. This string goes directly into the system prompt context.
 - `Schema()` MUST return valid JSON Schema. The LLM uses this to generate correct parameters.
@@ -269,6 +272,7 @@ type Store interface {
 ```
 
 **Rules for Store implementations:**
+
 - FileStore (MVP): one JSON file per conversation under `~/.daimon/data/conversations/`, one `memory.json` file with all entries. SearchMemory does case-insensitive substring match.
 - Writes MUST be atomic (write to temp file → rename) to prevent corruption on crash.
 - MUST NOT load all conversations into memory. Load on demand, by ID.
@@ -317,16 +321,16 @@ If total estimated tokens exceed 80% of the model's context window, truncate con
 
 ### 5.3 Error Handling in the Loop
 
-| Error type | Handling |
-|-----------|---------|
+| Error type                             | Handling                                                                                                      |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Provider returns HTTP 429 (rate limit) | Provider handles retry internally. If exhausted, return error to user: "Rate limited, try again in X seconds" |
-| Provider returns HTTP 5xx | Retry up to 3 times with exponential backoff. Then error to user. |
-| Provider returns invalid JSON | Log raw response, return error to user: "Received invalid response from AI provider" |
-| Tool execution times out | Return ToolResult{IsError: true, Content: "Tool timed out after Xs"} — let the LLM decide next step |
-| Tool execution panics | Recover, return ToolResult{IsError: true, Content: "Tool crashed"} |
-| Max iterations reached | Stop loop, send partial response if any, append note: "(iteration limit reached)" |
-| Total timeout reached | Stop loop immediately, send whatever we have |
-| Store fails to save | Log error, DO NOT block the response to the user |
+| Provider returns HTTP 5xx              | Retry up to 3 times with exponential backoff. Then error to user.                                             |
+| Provider returns invalid JSON          | Log raw response, return error to user: "Received invalid response from AI provider"                          |
+| Tool execution times out               | Return ToolResult{IsError: true, Content: "Tool timed out after Xs"} — let the LLM decide next step           |
+| Tool execution panics                  | Recover, return ToolResult{IsError: true, Content: "Tool crashed"}                                            |
+| Max iterations reached                 | Stop loop, send partial response if any, append note: "(iteration limit reached)"                             |
+| Total timeout reached                  | Stop loop immediately, send whatever we have                                                                  |
+| Store fails to save                    | Log error, DO NOT block the response to the user                                                              |
 
 ### 5.4 Goroutine Model
 
@@ -397,12 +401,13 @@ daimon/
 
 ### 7.1 Go Dependencies (minimal)
 
-| Dependency | Purpose | Why not stdlib |
-|-----------|---------|----------------|
-| `gopkg.in/yaml.v3` | YAML config parsing | stdlib has no YAML support |
-| `github.com/google/uuid` | Generate conversation/memory IDs | stdlib has no UUID |
+| Dependency               | Purpose                          | Why not stdlib             |
+| ------------------------ | -------------------------------- | -------------------------- |
+| `gopkg.in/yaml.v3`       | YAML config parsing              | stdlib has no YAML support |
+| `github.com/google/uuid` | Generate conversation/memory IDs | stdlib has no UUID         |
 
 **That's it for MVP.** Everything else uses stdlib:
+
 - `net/http` for all HTTP clients (Anthropic API, Telegram API, HTTP tool)
 - `encoding/json` for all JSON marshaling
 - `os`, `os/exec` for shell and file tools
@@ -413,15 +418,15 @@ daimon/
 
 ### 7.2 Development Tools
 
-| Tool | Purpose | Command |
-|------|---------|---------|
-| `go build` | Compile binary | `go build -o daimon ./cmd/daimon` |
-| `go test` | Run tests | `go test ./...` |
-| `go vet` | Static analysis | `go vet ./...` |
-| `golangci-lint` | Linting | `golangci-lint run` |
-| `gofumpt` | Formatting (stricter gofmt) | `gofumpt -w .` |
-| `goreleaser` | Cross-compilation + release | Used for public releases only |
-| `dlv` | Debugger | `dlv debug ./cmd/daimon` |
+| Tool            | Purpose                     | Command                           |
+| --------------- | --------------------------- | --------------------------------- |
+| `go build`      | Compile binary              | `go build -o daimon ./cmd/daimon` |
+| `go test`       | Run tests                   | `go test ./...`                   |
+| `go vet`        | Static analysis             | `go vet ./...`                    |
+| `golangci-lint` | Linting                     | `golangci-lint run`               |
+| `gofumpt`       | Formatting (stricter gofmt) | `gofumpt -w .`                    |
+| `goreleaser`    | Cross-compilation + release | Used for public releases only     |
+| `dlv`           | Debugger                    | `dlv debug ./cmd/daimon`          |
 
 ### 7.3 Build & Cross-Compilation
 
@@ -461,21 +466,21 @@ agent:
     You are a concise, helpful personal assistant.
     You respond in Spanish unless spoken to in another language.
     You prefer short, actionable answers over lengthy explanations.
-  max_iterations: 10          # max tool-use cycles per user message
-  max_tokens_per_turn: 4096   # max tokens per LLM call
-  history_length: 20          # messages to keep in context window
-  memory_results: 5           # max memory entries to inject into context
+  max_iterations: 10 # max tool-use cycles per user message
+  max_tokens_per_turn: 4096 # max tokens per LLM call
+  history_length: 20 # messages to keep in context window
+  memory_results: 5 # max memory entries to inject into context
 
 provider:
-  type: anthropic              # anthropic | openai | ollama
+  type: anthropic # anthropic | openai | ollama
   model: claude-sonnet-4-5-20250929
   api_key: ${ANTHROPIC_API_KEY}
-  base_url: ""                 # override for proxies or custom endpoints
+  base_url: "" # override for proxies or custom endpoints
   timeout: 60s
   max_retries: 3
 
 channel:
-  type: cli                    # cli | telegram | discord
+  type: cli # cli | telegram | discord
   # Telegram-specific (when type: telegram)
   # token: ${TELEGRAM_BOT_TOKEN}
   # allowed_users: [123456789]  # whitelist of Telegram user IDs
@@ -494,26 +499,26 @@ tools:
       - echo
       - date
       - pwd
-    allow_all: false           # DANGER: set true to allow any command via `sh -c` (no whitelist, no metachar check)
+    allow_all: false # DANGER: set true to allow any command via `sh -c` (no whitelist, no metachar check)
     working_dir: "~"
   file:
     enabled: true
-    base_path: "~/workspace"   # root for all file operations (sandboxed)
-    max_file_size: "1MB"       # refuse to read/write files larger than this
+    base_path: "~/workspace" # root for all file operations (sandboxed)
+    max_file_size: "1MB" # refuse to read/write files larger than this
   http:
     enabled: true
     timeout: 15s
     max_response_size: "2MB"
-    blocked_domains: []        # domains to never fetch
+    blocked_domains: [] # domains to never fetch
 
 store:
-  type: file                   # file | sqlite
+  type: file # file | sqlite
   path: "~/.daimon/data"
 
 logging:
-  level: info                  # debug | info | warn | error
-  format: text                 # text | json
-  file: ""                     # empty = stderr only
+  level: info # debug | info | warn | error
+  format: text # text | json
+  file: "" # empty = stderr only
 
 limits:
   tool_timeout: 30s
@@ -521,17 +526,17 @@ limits:
 
 conversations:
   prune:
-    enabled: true                 # soft-delete pruner goroutine (SQLite only)
-    retention_days: 30            # 1..3650 — physical-delete age. Clamped.
-    interval_hours: 6             # 1..168 — ticker period. Clamped.
+    enabled: true # soft-delete pruner goroutine (SQLite only)
+    retention_days: 30 # 1..3650 — physical-delete age. Clamped.
+    interval_hours: 6 # 1..168 — ticker period. Clamped.
 
 ai:
   title_generation:
-    enabled: true                 # async LLM title after turn 3 + first user msg ≥20 runes
-    model: ""                     # empty = provider default; follow-up adds per-provider cheap-tier override
-    worker_count: 2               # 1..8
-    queue_size: 32                # 4..256 — pending-job cap, drops on full
-    call_timeout_ms: 30000        # 1000..120000 — per-job provider timeout
+    enabled: true # async LLM title after turn 3 + first user msg ≥20 runes
+    model: "" # empty = provider default; follow-up adds per-provider cheap-tier override
+    worker_count: 2 # 1..8
+    queue_size: 32 # 4..256 — pending-job cap, drops on full
+    call_timeout_ms: 30000 # 1000..120000 — per-job provider timeout
 ```
 
 ### Config Resolution Rules
@@ -568,7 +573,10 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
   "input_schema": {
     "type": "object",
     "properties": {
-      "command": { "type": "string", "description": "The command to execute (e.g., 'ls -la /tmp')" }
+      "command": {
+        "type": "string",
+        "description": "The command to execute (e.g., 'ls -la /tmp')"
+      }
     },
     "required": ["command"]
   }
@@ -576,6 +584,7 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
 ```
 
 **Behavior:**
+
 - Parse command string, extract the base command (first token).
 - Check against whitelist. If not allowed, return `ToolResult{IsError: true, Content: "Command 'X' is not in the allowed list"}`.
 - Execute with `os/exec.CommandContext()` using the tool timeout from config.
@@ -607,8 +616,14 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
   "input_schema": {
     "type": "object",
     "properties": {
-      "path": { "type": "string", "description": "Relative file path to write" },
-      "content": { "type": "string", "description": "Content to write to the file" }
+      "path": {
+        "type": "string",
+        "description": "Relative file path to write"
+      },
+      "content": {
+        "type": "string",
+        "description": "Content to write to the file"
+      }
     },
     "required": ["path", "content"]
   }
@@ -624,7 +639,10 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
   "input_schema": {
     "type": "object",
     "properties": {
-      "path": { "type": "string", "description": "Relative directory path to list (default: '.')" }
+      "path": {
+        "type": "string",
+        "description": "Relative directory path to list (default: '.')"
+      }
     }
   }
 }
@@ -640,8 +658,15 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
     "type": "object",
     "properties": {
       "url": { "type": "string", "description": "The URL to fetch" },
-      "method": { "type": "string", "enum": ["GET", "POST"], "description": "HTTP method (default: GET)" },
-      "body": { "type": "string", "description": "Request body for POST requests" },
+      "method": {
+        "type": "string",
+        "enum": ["GET", "POST"],
+        "description": "HTTP method (default: GET)"
+      },
+      "body": {
+        "type": "string",
+        "description": "Request body for POST requests"
+      },
       "headers": {
         "type": "object",
         "additionalProperties": { "type": "string" },
@@ -654,6 +679,7 @@ Clients reconnect to `wss://host/ws/chat?conversation_id=<conv_id>` to resume a 
 ```
 
 **Security for all file tools:**
+
 - ALL paths are resolved relative to `base_path` from config. Path traversal (`../`) beyond base_path MUST be rejected.
 - Validate with `filepath.Rel()` after cleaning. If the resolved path escapes the base, return error.
 
@@ -665,27 +691,27 @@ These are issues known from OpenClaw, Nanobot, and general agent development. Da
 
 ### 10.1 Addressed in MVP
 
-| Problem | How Daimon handles it |
-|---------|--------------------------|
-| **Unbounded token costs** | `max_iterations` + `max_tokens_per_turn` limits per message |
-| **Shell injection** | Whitelist model. Commands parsed, base command checked before execution |
-| **Path traversal in file tools** | All paths sandboxed under `base_path`, traversal beyond it rejected |
-| **Infinite agent loop** | Hard cap on iterations + total timeout |
-| **Tool crash takes down agent** | Recover from panics in tool execution, return error result to LLM |
-| **Large file reads blow up memory** | `max_file_size` config, refuse to read files above threshold |
-| **Large HTTP responses blow up memory** | `max_response_size` config, truncate |
-| **Secrets in config files** | `${ENV_VAR}` resolution, secrets never stored in YAML directly |
+| Problem                                 | How Daimon handles it                                                   |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| **Unbounded token costs**               | `max_iterations` + `max_tokens_per_turn` limits per message             |
+| **Shell injection**                     | Whitelist model. Commands parsed, base command checked before execution |
+| **Path traversal in file tools**        | All paths sandboxed under `base_path`, traversal beyond it rejected     |
+| **Infinite agent loop**                 | Hard cap on iterations + total timeout                                  |
+| **Tool crash takes down agent**         | Recover from panics in tool execution, return error result to LLM       |
+| **Large file reads blow up memory**     | `max_file_size` config, refuse to read files above threshold            |
+| **Large HTTP responses blow up memory** | `max_response_size` config, truncate                                    |
+| **Secrets in config files**             | `${ENV_VAR}` resolution, secrets never stored in YAML directly          |
 
 ### 10.2 Deferred (Post-MVP)
 
-| Problem | Phase | Notes |
-|---------|-------|-------|
-| **Prompt injection via tool results** | 3 | Malicious content in fetched URLs or files could hijack the agent. Mitigation: output sanitization, content length limits, optional sandboxing |
-| **Multi-user isolation** | 4 | MVP is single-user. Multi-user needs separate agent instances with isolated stores |
-| **Concurrent message processing** | 4 | MVP processes one message at a time. Queuing needed for high-throughput channels |
-| **Context window overflow** | 3 | MVP uses simple truncation. Better: summarization of old messages |
-| **Memory relevance decay** | 5 | MVP uses keyword search. Better: embeddings + vector similarity |
-| **Tool output hallucination** | 3 | LLM may misinterpret tool results. Mitigation: structured output validation |
+| Problem                               | Phase | Notes                                                                                                                                          |
+| ------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Prompt injection via tool results** | 3     | Malicious content in fetched URLs or files could hijack the agent. Mitigation: output sanitization, content length limits, optional sandboxing |
+| **Multi-user isolation**              | 4     | MVP is single-user. Multi-user needs separate agent instances with isolated stores                                                             |
+| **Concurrent message processing**     | 4     | MVP processes one message at a time. Queuing needed for high-throughput channels                                                               |
+| **Context window overflow**           | 3     | MVP uses simple truncation. Better: summarization of old messages                                                                              |
+| **Memory relevance decay**            | 5     | MVP uses keyword search. Better: embeddings + vector similarity                                                                                |
+| **Tool output hallucination**         | 3     | LLM may misinterpret tool results. Mitigation: structured output validation                                                                    |
 
 ---
 
@@ -808,6 +834,7 @@ Internal `ChatRequest` → Anthropic request body:
 ### 12.4 Response Parsing
 
 The response `content` array may contain mixed blocks:
+
 - `{"type": "text", "text": "..."}` — collect as response text
 - `{"type": "tool_use", "id": "...", "name": "...", "input": {...}}` — collect as tool calls
 
@@ -833,7 +860,31 @@ When sending tool results back, they go as `role: "user"` messages with `tool_re
 
 ---
 
-## 12b. NEW CAPABILITIES (provider-model-selection-refactor, 2026-04-19)
+## 12b. NEW CAPABILITIES (model-hot-swap, 2026-05-24)
+
+### model-hot-swap
+
+Runtime model swap without agent restart. `Agent.SetProvider(ctx, modelName string) error`
+atomically swaps the active LLM model within the current provider type. Thread-safe under
+`providerMu sync.RWMutex`. Rejects swaps when a turn is in flight (`ErrTurnInProgress`).
+Pre-validates via `provider.ModelLister` with a 5 s timeout (`ErrValidationTimeout`).
+Requires `provider.ConfigurableProvider` (`ErrProviderNotConfigurable`). All sub-components
+(`Enricher`, `ContextManager`, `Consolidator`, `Curator`, `Compactor`) receive a live
+`func() provider.Provider` closure so they always call the post-swap provider.
+
+**`/model` slash command** (builtin, destructive gate):
+
+- `/model` — lists current model and all available models, current marked with `*`.
+- `/model <name>` — swaps to the named model; maps all 4 error sentinels to user-readable replies.
+- Cross-provider syntax (`provider:model`) rejected with a clear message.
+- Reachable via REST: `POST /api/commands/run` with `{"name":"model","args":"<name>","allow_destructive":true}`.
+
+Session-only (no config.yaml write). Files: `internal/agent/set_provider.go`,
+`internal/agent/commands_model.go`.
+
+---
+
+## 12b (prev). NEW CAPABILITIES (provider-model-selection-refactor, 2026-04-19)
 
 ### provider-model-discovery
 
@@ -885,6 +936,7 @@ academic PDFs and LaTeX-generated documents.
 from an old chunker bug. Idempotent and safe.
 
 **Retrieval stages**:
+
 1. BM25 (FTS5) keyword search — always active.
 2. Cosine reranking — active when `rag.embedding.enabled: true`.
 3. HyDE pass — active when `rag.hyde.enabled: true`. Generates a hypothetical
@@ -927,15 +979,15 @@ corresponding endpoints (as `daimon web` demonstrated before the fix).
 
 ## 13. PHASE ROADMAP
 
-| Phase | Focus | Key deliverables |
-|-------|-------|-----------------|
-| **1 — MVP** | Core agent loop + single channel + single provider | Working CLI agent with shell, file, and HTTP tools. Conversation persistence. <50MB idle. |
-| **2 — Multi-channel** | Telegram, Discord, webhook input | Channel router, per-channel session isolation, reconnection logic |
-| **3 — Multi-provider** | OpenAI, Ollama (local models), provider fallback chain | Streaming support (SSE), provider health checks |
-| **4a — MCP Support** | MCP client via `mark3labs/mcp-go`, `MCPToolAdapter` wrapping remote tools into `tool.Tool` interface | Stdio + HTTP transports, config-driven server list, zero changes to agent loop |
-| **4b — Markdown Skills** | Load behavioral instructions + dynamic shell-backed tools from `.md` skill files | Prompt injection layer + optional `tool` YAML block per file |
-| **4c — Heartbeat/Cron** | `HeartbeatChannel` virtual channel, inbox refactor to share across channels | Proactive scheduled tasks, multi-channel inbox unblocks Phase 2 router |
-| **5 — Production** | SQLite store (with AES-256-GCM encrypted secrets table + embedded setup wizard on first launch), embeddings, multi-agent, observability, Docker | Token cost tracking, dashboards, deployment automation, secure key management |
+| Phase                    | Focus                                                                                                                                           | Key deliverables                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **1 — MVP**              | Core agent loop + single channel + single provider                                                                                              | Working CLI agent with shell, file, and HTTP tools. Conversation persistence. <50MB idle. |
+| **2 — Multi-channel**    | Telegram, Discord, webhook input                                                                                                                | Channel router, per-channel session isolation, reconnection logic                         |
+| **3 — Multi-provider**   | OpenAI, Ollama (local models), provider fallback chain                                                                                          | Streaming support (SSE), provider health checks                                           |
+| **4a — MCP Support**     | MCP client via `mark3labs/mcp-go`, `MCPToolAdapter` wrapping remote tools into `tool.Tool` interface                                            | Stdio + HTTP transports, config-driven server list, zero changes to agent loop            |
+| **4b — Markdown Skills** | Load behavioral instructions + dynamic shell-backed tools from `.md` skill files                                                                | Prompt injection layer + optional `tool` YAML block per file                              |
+| **4c — Heartbeat/Cron**  | `HeartbeatChannel` virtual channel, inbox refactor to share across channels                                                                     | Proactive scheduled tasks, multi-channel inbox unblocks Phase 2 router                    |
+| **5 — Production**       | SQLite store (with AES-256-GCM encrypted secrets table + embedded setup wizard on first launch), embeddings, multi-agent, observability, Docker | Token cost tracking, dashboards, deployment automation, secure key management             |
 
 ---
 

@@ -101,6 +101,7 @@ var destructiveCommands = map[string]bool{
 	"schedule":            true,
 	"retry":               true,
 	"compact":             true,
+	"model":               true,
 }
 
 // IsDestructiveCommand reports whether name is in the destructive-command set.
