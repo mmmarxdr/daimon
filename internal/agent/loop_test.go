@@ -141,12 +141,18 @@ func (m *mockStore) LoadConversation(ctx context.Context, id string) (*store.Con
 	if m.conv == nil {
 		return nil, store.ErrNotFound
 	}
-	// Return a deep copy to avoid shared-slice races when multiple
-	// processMessage goroutines load the same conversation concurrently
-	// (mirrors real store behavior where each load returns independent data).
+	// Return a deep copy to avoid shared-slice/map races when multiple
+	// goroutines load the same conversation concurrently (mirrors real store
+	// behavior where each load returns independent data).
 	cp := *m.conv
 	cp.Messages = make([]provider.ChatMessage, len(m.conv.Messages))
 	copy(cp.Messages, m.conv.Messages)
+	if m.conv.Metadata != nil {
+		cp.Metadata = make(map[string]string, len(m.conv.Metadata))
+		for k, v := range m.conv.Metadata {
+			cp.Metadata[k] = v
+		}
+	}
 	return &cp, nil
 }
 

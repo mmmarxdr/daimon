@@ -905,6 +905,7 @@ Each mode is a `(SystemPrompt, ToolAllowlist)` tuple defined in `internal/agent/
 - `buildSystemPrompt` appends `mode.SystemPrompt` after `config.Personality` (build mode appends nothing).
 - `buildToolDefs` filters via `filterAllowedTools(defs, mode.ToolAllowlist)` — nil = all pass, `[]string{}` = block all.
 - Execution gate at `loop.go:~697` double-checks every tool call against the snapshot allowlist (defense in depth).
+- **Memory and RAG are unaffected by mode** — `buildSystemPrompt` injects memory context and RAG results regardless of the active mode's tool allowlist. The allowlist only controls which tools are visible to the LLM; it does not suppress memory or RAG injection.
 
 **`/mode` slash command** (builtin, destructive gate):
 

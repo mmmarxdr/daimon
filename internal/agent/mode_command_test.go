@@ -143,6 +143,10 @@ func TestCmdMode_S1_1_NoArg_ListsAllModes_BuildCurrent(t *testing.T) {
 	if !strings.Contains(reply, "Use /mode <name> to switch.") {
 		t.Errorf("reply missing usage line: %q", reply)
 	}
+	// REQ-9: memory/RAG note (W-3)
+	if !strings.Contains(reply, "Note: memory and RAG remain active in all modes.") {
+		t.Errorf("reply missing REQ-9 memory/RAG note: %q", reply)
+	}
 }
 
 // ---------------------------------------------------------------------------
