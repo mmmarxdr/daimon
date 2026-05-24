@@ -205,8 +205,17 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			ID:        convID,
 			ChannelID: msg.ChannelID,
 			CreatedAt: time.Now(),
+			Metadata:  map[string]string{"daimon/mode": "build"}, // AD-9: explicit init (REQ-5)
 		}
 	}
+
+	// AD-8: reconcile a.currentMode with conv.Metadata["daimon/mode"] so the
+	// per-turn snapshot reflects the conversation's persisted mode. Defaults to
+	// "build" if key is absent, empty, or contains an unrecognised value.
+	a.loadMode(conv)
+	// AD-3: capture mode snapshot ONCE per turn, before buildSystemPrompt and
+	// buildToolDefs. Both functions receive this snapshot as a parameter (REQ-11).
+	modeSnap := a.modeSnapshot()
 
 	// REQ-10, WU8: compute subagent attribution once; reused by every bus emit
 	// in this turn (TurnStarted/TurnCompleted/Tool*/TokensUsage) and forwarded
@@ -332,8 +341,8 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 
-	systemPrompt := a.buildSystemPrompt(memories, ragResults, conv.CompactedSummary)
-	toolDefs := a.buildToolDefs()
+	systemPrompt := a.buildSystemPrompt(memories, ragResults, conv.CompactedSummary, modeSnap)
+	toolDefs := a.buildToolDefs(modeSnap)
 	conv.Messages = a.contextMgr.Manage(ctx, systemPrompt, toolDefs, conv.Messages)
 
 	// MaxIterations=0 (default) means "no hard cap" — the turn is bounded
@@ -694,60 +703,76 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				}
 			}
 
-			a.toolsMu.RLock()
-			t, ok := a.tools[tc.Name]
-			a.toolsMu.RUnlock()
-
 			var result tool.ToolResult
 			toolStart := time.Now()
 			skippedByPreApply := false
-			if !ok {
-				result = tool.ToolResult{IsError: true, Content: fmt.Sprintf("Tool %s not found", tc.Name)}
-			} else {
-				// Task 1: PreApply hook - call before tool execution when context_mode is enabled
-				// If PreApply returns (result, true), skip execution and use the result directly
-				if a.ctxModeCfg.Mode != config.ContextModeOff {
-					if preResult, shouldSkip := filter.PreApply(loopCtx, tc.Name, tc.Input, a.ctxModeCfg); shouldSkip {
-						result = preResult
-						skippedByPreApply = true
-						slog.Debug("tool execution skipped by PreApply", "tool", tc.Name)
-					}
-				}
 
-				// Only execute if not skipped by PreApply
-				if !skippedByPreApply {
-					// Validate the LLM-generated input against the tool's JSON schema
-					// before executing. This catches malformed JSON and missing required
-					// fields early, avoiding panics or confusing errors inside tools.
-					if validErr := validateToolInput(tc.Input, t.Schema()); validErr != nil {
-						slog.Warn("tool input validation failed", "tool", tc.Name, "error", validErr)
-						result = tool.ToolResult{IsError: true, Content: "invalid tool input: " + validErr.Error()}
-					} else {
-						toolTimeout := a.limits.ToolTimeout
-						if toolTimeout == 0 {
-							toolTimeout = 30 * time.Second
+			// AD-6: mode allowlist execution gate — checked BEFORE the tools-map
+			// lookup so a disallowed tool returns the mode error, not "not found".
+			// modeSnap is the per-turn snapshot captured at processMessage start
+			// (AD-3); re-using it here guarantees the gate and buildToolDefs use
+			// the same tuple (REQ-11 consistency).
+			// Exact error wording is contract-locked per AD-11 — tests assert it.
+			// All post-result handling below (filter.Apply, audit, auto-index, bus
+			// emit, conv.Messages append) runs for blocked tools too (AD-6).
+			if !isToolAllowed(tc.Name, modeSnap.ToolAllowlist) {
+				result = tool.ToolResult{
+					IsError: true,
+					Content: fmt.Sprintf("tool '%s' not allowed in mode '%s'", tc.Name, modeSnap.Name),
+				}
+			} else {
+				a.toolsMu.RLock()
+				t, ok := a.tools[tc.Name]
+				a.toolsMu.RUnlock()
+
+				if !ok {
+					result = tool.ToolResult{IsError: true, Content: fmt.Sprintf("Tool %s not found", tc.Name)}
+				} else {
+					// Task 1: PreApply hook - call before tool execution when context_mode is enabled
+					// If PreApply returns (result, true), skip execution and use the result directly
+					if a.ctxModeCfg.Mode != config.ContextModeOff {
+						if preResult, shouldSkip := filter.PreApply(loopCtx, tc.Name, tc.Input, a.ctxModeCfg); shouldSkip {
+							result = preResult
+							skippedByPreApply = true
+							slog.Debug("tool execution skipped by PreApply", "tool", tc.Name)
 						}
-						toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
-						toolCtx = tool.WithScope(toolCtx, scope)
-						toolCtx = tool.WithConvID(toolCtx, conv.ID)
-						// WU6: inject per-(channel,sender) effective cwd so the shell
-						// tool uses the /cd override rather than the static config cwd.
-						// Only inject when an override is actually set — keep ctx clean
-						// when no override exists so the shell tool falls back to config.
-						if effectiveCwd, hasCwd := a.shellCwd.Get(cancelKey{ChannelID: msg.ChannelID, SenderID: msg.SenderID}); hasCwd {
-							toolCtx = tool.WithEffectiveCwd(toolCtx, effectiveCwd)
-						}
-						result, err = executeWithRecover(toolCtx, t, tc.Input)
-						tCancel()
-						if err != nil {
-							result = tool.ToolResult{
-								IsError: true,
-								Content: formatToolError(tc.Name, toolTimeout, err),
+					}
+
+					// Only execute if not skipped by PreApply
+					if !skippedByPreApply {
+						// Validate the LLM-generated input against the tool's JSON schema
+						// before executing. This catches malformed JSON and missing required
+						// fields early, avoiding panics or confusing errors inside tools.
+						if validErr := validateToolInput(tc.Input, t.Schema()); validErr != nil {
+							slog.Warn("tool input validation failed", "tool", tc.Name, "error", validErr)
+							result = tool.ToolResult{IsError: true, Content: "invalid tool input: " + validErr.Error()}
+						} else {
+							toolTimeout := a.limits.ToolTimeout
+							if toolTimeout == 0 {
+								toolTimeout = 30 * time.Second
+							}
+							toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
+							toolCtx = tool.WithScope(toolCtx, scope)
+							toolCtx = tool.WithConvID(toolCtx, conv.ID)
+							// WU6: inject per-(channel,sender) effective cwd so the shell
+							// tool uses the /cd override rather than the static config cwd.
+							// Only inject when an override is actually set — keep ctx clean
+							// when no override exists so the shell tool falls back to config.
+							if effectiveCwd, hasCwd := a.shellCwd.Get(cancelKey{ChannelID: msg.ChannelID, SenderID: msg.SenderID}); hasCwd {
+								toolCtx = tool.WithEffectiveCwd(toolCtx, effectiveCwd)
+							}
+							result, err = executeWithRecover(toolCtx, t, tc.Input)
+							tCancel()
+							if err != nil {
+								result = tool.ToolResult{
+									IsError: true,
+									Content: formatToolError(tc.Name, toolTimeout, err),
+								}
 							}
 						}
 					}
 				}
-			}
+			} // end isToolAllowed gate else-branch (AD-6)
 
 			var filterMetrics filter.Metrics
 			if !result.IsError {

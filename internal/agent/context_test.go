@@ -32,7 +32,7 @@ func TestAgent_buildContext(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 
-	req := a.buildContext(conv, nil)
+	req := a.buildContext(conv, nil, defaultModeForTests())
 
 	// Verify the key security directive phrases are present in the system prompt.
 	securityPhrases := []string{
@@ -440,7 +440,7 @@ func TestBuildContext_MemoryBudgetCap_IntegratedViaBuildContext(t *testing.T) {
 		{Content: "memory alpha"},
 		{Content: "memory beta"},
 	}
-	req := a.buildContext(conv, memories)
+	req := a.buildContext(conv, memories, defaultModeForTests())
 	if !strings.Contains(req.SystemPrompt, "memory alpha") {
 		t.Error("expected 'memory alpha' in system prompt")
 	}
@@ -464,7 +464,7 @@ func TestBuildSystemPrompt_IncludesPersonality(t *testing.T) {
 		tools:  map[string]tool.Tool{},
 		skills: nil,
 	}
-	got := a.buildSystemPrompt(nil, nil, "")
+	got := a.buildSystemPrompt(nil, nil, "", defaultModeForTests())
 	if !strings.Contains(got, "You are a helpful assistant.") {
 		t.Errorf("expected personality in system prompt, got: %q", got)
 	}
@@ -482,7 +482,7 @@ func TestBuildSystemPrompt_IncludesMemorySection(t *testing.T) {
 	memories := []store.MemoryEntry{
 		{Content: "remember this important fact"},
 	}
-	got := a.buildSystemPrompt(memories, nil, "")
+	got := a.buildSystemPrompt(memories, nil, "", defaultModeForTests())
 	if !strings.Contains(got, "remember this important fact") {
 		t.Errorf("expected memory content in system prompt, got: %q", got)
 	}
@@ -499,11 +499,11 @@ func TestBuildSystemPrompt_NoMemorySectionWhenEmpty(t *testing.T) {
 		tools:  map[string]tool.Tool{},
 		skills: nil,
 	}
-	got := a.buildSystemPrompt(nil, nil, "")
+	got := a.buildSystemPrompt(nil, nil, "", defaultModeForTests())
 	if strings.Contains(got, "## Relevant Context:") {
 		t.Errorf("should not include memory section when memories is nil, got: %q", got)
 	}
-	got2 := a.buildSystemPrompt([]store.MemoryEntry{}, nil, "")
+	got2 := a.buildSystemPrompt([]store.MemoryEntry{}, nil, "", defaultModeForTests())
 	if strings.Contains(got2, "## Relevant Context:") {
 		t.Errorf("should not include memory section when memories is empty, got: %q", got2)
 	}
@@ -520,7 +520,7 @@ func TestBuildToolDefs_ReturnsOneEntryPerTool(t *testing.T) {
 		},
 		skills: nil,
 	}
-	defs := a.buildToolDefs()
+	defs := a.buildToolDefs(defaultModeForTests())
 	if len(defs) != 2 {
 		t.Errorf("expected 2 tool definitions, got %d", len(defs))
 	}
@@ -542,7 +542,7 @@ func TestBuildToolDefs_EmptyWhenNoTools(t *testing.T) {
 		tools:  map[string]tool.Tool{},
 		skills: nil,
 	}
-	defs := a.buildToolDefs()
+	defs := a.buildToolDefs(defaultModeForTests())
 	if len(defs) != 0 {
 		t.Errorf("expected 0 tool definitions for empty tools map, got %d", len(defs))
 	}
@@ -572,11 +572,11 @@ func TestBuildContext_EqualsAssemblingBothMethods(t *testing.T) {
 	}
 
 	// Build via the combined buildContext method.
-	req := a.buildContext(conv, memories)
+	req := a.buildContext(conv, memories, defaultModeForTests())
 
 	// Build manually via the two extracted methods.
-	wantSystemPrompt := a.buildSystemPrompt(memories, nil, "")
-	wantTools := a.buildToolDefs()
+	wantSystemPrompt := a.buildSystemPrompt(memories, nil, "", defaultModeForTests())
+	wantTools := a.buildToolDefs(defaultModeForTests())
 
 	if req.SystemPrompt != wantSystemPrompt {
 		t.Errorf("SystemPrompt mismatch.\nbuildContext: %q\nbuildSystemPrompt: %q", req.SystemPrompt, wantSystemPrompt)
@@ -588,5 +588,134 @@ func TestBuildContext_EqualsAssemblingBothMethods(t *testing.T) {
 		if td.Name != wantTools[i].Name {
 			t.Errorf("Tools[%d].Name mismatch: %q vs %q", i, td.Name, wantTools[i].Name)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mode-aware buildSystemPrompt + buildToolDefs scenarios (REQ-6, REQ-7, REQ-9)
+// ---------------------------------------------------------------------------
+
+// S6-1: plan prompt appended after personality (REQ-6).
+func TestBuildSystemPrompt_PlanModePromptAppendedAfterPersonality(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality: "You are Daimon.",
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	planMode, err := LookupMode("plan")
+	if err != nil {
+		t.Fatalf("LookupMode(plan) unexpected error: %v", err)
+	}
+	got := a.buildSystemPrompt(nil, nil, "", planMode)
+	personalityIdx := strings.Index(got, "You are Daimon.")
+	if personalityIdx == -1 {
+		t.Fatalf("personality not found in system prompt: %q", got)
+	}
+	modePromptIdx := strings.Index(got, "PLAN mode")
+	if modePromptIdx == -1 {
+		t.Fatalf("plan mode prompt not found in system prompt: %q", got)
+	}
+	if modePromptIdx <= personalityIdx {
+		t.Errorf("expected plan mode prompt after personality: personalityIdx=%d modePromptIdx=%d", personalityIdx, modePromptIdx)
+	}
+}
+
+// S6-2: build mode does not inject extra prompt text (REQ-6).
+func TestBuildSystemPrompt_BuildModeNoExtraPrompt(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality: "You are Daimon.",
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	buildMode, err := LookupMode("build")
+	if err != nil {
+		t.Fatalf("LookupMode(build) unexpected error: %v", err)
+	}
+	withMode := a.buildSystemPrompt(nil, nil, "", buildMode)
+	withDefault := a.buildSystemPrompt(nil, nil, "", defaultModeForTests())
+	if withMode != withDefault {
+		t.Errorf("build mode should produce identical output to no-mode default:\nwithMode=%q\nwithDefault=%q", withMode, withDefault)
+	}
+}
+
+// S7-1: plan mode filters out Edit/Write/Bash tools (REQ-7).
+func TestBuildToolDefs_PlanModeFiltersDisallowedTools(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{},
+		tools: map[string]tool.Tool{
+			"Read":  &mockTool{name: "Read"},
+			"Edit":  &mockTool{name: "Edit"},
+			"Write": &mockTool{name: "Write"},
+			"Bash":  &mockTool{name: "Bash"},
+		},
+		skills: nil,
+	}
+	planMode, err := LookupMode("plan")
+	if err != nil {
+		t.Fatalf("LookupMode(plan) unexpected error: %v", err)
+	}
+	defs := a.buildToolDefs(planMode)
+	nameSet := make(map[string]bool, len(defs))
+	for _, d := range defs {
+		nameSet[d.Name] = true
+	}
+	if nameSet["Edit"] {
+		t.Error("plan mode: Edit should be filtered out")
+	}
+	if nameSet["Write"] {
+		t.Error("plan mode: Write should be filtered out")
+	}
+	if nameSet["Bash"] {
+		t.Error("plan mode: Bash should be filtered out")
+	}
+	if !nameSet["Read"] {
+		t.Error("plan mode: Read should be allowed through")
+	}
+}
+
+// S7-2: build mode (nil allowlist) passes all tools (REQ-7).
+func TestBuildToolDefs_BuildModePassesAllTools(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{},
+		tools: map[string]tool.Tool{
+			"Read":  &mockTool{name: "Read"},
+			"Edit":  &mockTool{name: "Edit"},
+			"Write": &mockTool{name: "Write"},
+			"Bash":  &mockTool{name: "Bash"},
+		},
+		skills: nil,
+	}
+	buildMode, err := LookupMode("build")
+	if err != nil {
+		t.Fatalf("LookupMode(build) unexpected error: %v", err)
+	}
+	defs := a.buildToolDefs(buildMode)
+	if len(defs) != 4 {
+		t.Errorf("build mode: expected all 4 tools, got %d", len(defs))
+	}
+}
+
+// S7-3: empty allowlist blocks all tools (REQ-7).
+func TestBuildToolDefs_EmptyAllowlistBlocksAllTools(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{},
+		tools: map[string]tool.Tool{
+			"Read": &mockTool{name: "Read"},
+			"Edit": &mockTool{name: "Edit"},
+		},
+		skills: nil,
+	}
+	emptyAllowlistMode := ModeDefinition{
+		Name:          "none",
+		SystemPrompt:  "",
+		ToolAllowlist: []string{}, // empty, not nil
+	}
+	defs := a.buildToolDefs(emptyAllowlistMode)
+	if len(defs) != 0 {
+		t.Errorf("empty allowlist: expected 0 tools, got %d: %v", len(defs), defs)
 	}
 }
