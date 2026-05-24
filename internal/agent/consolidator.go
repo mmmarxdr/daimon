@@ -24,20 +24,22 @@ import (
 //
 // NewConsolidator returns nil when consolidation is disabled — callers must nil-check.
 type Consolidator struct {
-	prov      provider.Provider
-	store     store.Store
-	enricher  *Enricher        // may be nil
-	embWorker *EmbeddingWorker // may be nil
-	model     string           // cheap model for consolidation prompts
-	cfg       config.ConsolidationConfig
-	wg        sync.WaitGroup
-	cancel    context.CancelFunc
+	providerFn func() provider.Provider // accessor closure; always reads the live provider
+	store      store.Store
+	enricher   *Enricher        // may be nil
+	embWorker  *EmbeddingWorker // may be nil
+	model      string           // cheap model for consolidation prompts
+	cfg        config.ConsolidationConfig
+	wg         sync.WaitGroup
+	cancel     context.CancelFunc
 }
 
 // NewConsolidator constructs a Consolidator.
 // Returns nil if cfg.Enabled is false.
+// providerFn is called on every consolidation job to read the live provider after
+// a SetProvider swap.
 func NewConsolidator(
-	prov provider.Provider,
+	providerFn func() provider.Provider,
 	st store.Store,
 	enricher *Enricher,
 	embWorker *EmbeddingWorker,
@@ -59,12 +61,12 @@ func NewConsolidator(
 	}
 
 	return &Consolidator{
-		prov:      prov,
-		store:     st,
-		enricher:  enricher,
-		embWorker: embWorker,
-		model:     resolveEnrichModel(prov, ""),
-		cfg:       cfg,
+		providerFn: providerFn,
+		store:      st,
+		enricher:   enricher,
+		embWorker:  embWorker,
+		model:      resolveEnrichModel(providerFn(), ""),
+		cfg:        cfg,
 	}
 }
 
@@ -215,7 +217,7 @@ func (c *Consolidator) consolidateTopic(ctx context.Context, scope, topic string
 		MaxTokens: 500,
 	}
 
-	resp, err := c.prov.Chat(llmCtx, req)
+	resp, err := c.providerFn().Chat(llmCtx, req)
 	if err != nil {
 		return 0, 0, fmt.Errorf("LLM consolidation failed: %w", err)
 	}

@@ -63,7 +63,7 @@ var validClusters = map[string]bool{
 // NewCurator returns nil when curation is disabled — callers must guard with
 // a nil check before calling Curate.
 type Curator struct {
-	prov        provider.Provider
+	providerFn  func() provider.Provider // accessor closure; always reads the live provider
 	store       store.Store
 	enricher    *Enricher        // may be nil — async tag enrichment
 	embWorker   *EmbeddingWorker // may be nil — async embedding
@@ -75,8 +75,10 @@ type Curator struct {
 
 // NewCurator constructs a Curator.
 // Returns nil if curationCfg.Enabled is false.
+// providerFn is called on every classification job to read the live provider after
+// a SetProvider swap.
 func NewCurator(
-	prov provider.Provider,
+	providerFn func() provider.Provider,
 	st store.Store,
 	enricher *Enricher,
 	embWorker *EmbeddingWorker,
@@ -108,13 +110,13 @@ func NewCurator(
 	fillerRe := regexp.MustCompile(`(?i)^(ok|sure|done|understood|got it|great|thanks|thank you|hello|hi|hey|yes|no|yep|nope|okay)[.!?]?\s*$`)
 
 	return &Curator{
-		prov:        prov,
+		providerFn:  providerFn,
 		store:       st,
 		enricher:    enricher,
 		embWorker:   embWorker,
 		curationCfg: curationCfg,
 		dedupCfg:    dedupCfg,
-		model:       resolveEnrichModel(prov, ""),
+		model:       resolveEnrichModel(providerFn(), ""),
 		fillerRe:    fillerRe,
 	}
 }
@@ -199,7 +201,7 @@ func (c *Curator) classify(ctx context.Context, userMsg, response string) (class
 		MaxTokens: 300,
 	}
 
-	resp, err := c.prov.Chat(classCtx, req)
+	resp, err := c.providerFn().Chat(classCtx, req)
 	if err != nil {
 		slog.Debug("curator: classify LLM call failed, using fallback", "error", err)
 		return c.fallbackClassification(response), err

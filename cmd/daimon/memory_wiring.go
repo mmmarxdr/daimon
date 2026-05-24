@@ -26,7 +26,7 @@ func wireSmartMemory(
 	// Wire Curator.
 	if memCfg.Curation.Enabled {
 		curator := agent.NewCurator(
-			prov, st,
+			func() provider.Provider { return prov }, st,
 			ag.Enricher(), ag.EmbeddingWorker(),
 			memCfg.Curation, memCfg.Deduplication,
 		)
@@ -42,7 +42,7 @@ func wireSmartMemory(
 	// Wire Consolidator.
 	if memCfg.Consolidation.Enabled {
 		consolidator := agent.NewConsolidator(
-			prov, st,
+			func() provider.Provider { return prov }, st,
 			ag.Enricher(), ag.EmbeddingWorker(),
 			memCfg.Consolidation,
 		)
