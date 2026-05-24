@@ -25,6 +25,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"daimon/internal/audit"
@@ -603,5 +604,56 @@ func TestLoadMode_ReadOnly_DoesNotWriteToConv(t *testing.T) {
 	// Also verify conv itself was not mutated.
 	if conv.Metadata["daimon/mode"] != "" {
 		t.Errorf("loadMode must NOT write to conv.Metadata; got %q", conv.Metadata["daimon/mode"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S-1 (REQ-15): concurrent SetMode calls — full persist-then-cache path
+// ---------------------------------------------------------------------------
+
+// TestSetMode_ConcurrentCalls_NoRace spins N goroutines calling SetMode with
+// rotating valid mode names concurrently with N goroutines reading modeSnapshot.
+// This exercises the FULL SetMode path (LoadConversation → persist → update
+// cache) under the race detector, matching REQ-15's normative wording exactly.
+//
+// The agent is constructed with a mockStore so SaveConversation succeeds.
+// Final state must be one of the three valid mode names.
+func TestSetMode_ConcurrentCalls_NoRace(t *testing.T) {
+	st := &mockStore{}
+	a := buildAgentForSetMode(t, st)
+
+	const goroutines = 50
+	modes := []string{"plan", "build", "review"}
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 2)
+
+	// N goroutines call SetMode with rotating valid mode names.
+	for i := range goroutines {
+		go func(i int) {
+			defer wg.Done()
+			name := modes[i%len(modes)]
+			// Ignore errors (ErrTurnInProgress not possible here; ErrInvalidMode
+			// not possible with valid names). Store errors are also ignored: the
+			// race detector is the signal, not return values.
+			_ = a.SetMode(context.Background(), "ch-race", "user-race", name)
+		}(i)
+	}
+
+	// N goroutines concurrently read modeSnapshot.
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			_ = a.modeSnapshot()
+		}()
+	}
+
+	wg.Wait()
+
+	// After all goroutines finish, the cache must hold a valid mode name.
+	snap := a.modeSnapshot()
+	valid := map[string]bool{"plan": true, "build": true, "review": true}
+	if !valid[snap.Name] {
+		t.Errorf("final modeSnapshot().Name = %q; want one of plan/build/review", snap.Name)
 	}
 }

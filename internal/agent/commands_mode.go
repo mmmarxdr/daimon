@@ -62,6 +62,7 @@ func (a *Agent) cmdModeList(cc CommandContext) error {
 		}
 	}
 	sb.WriteString("\nUse /mode <name> to switch.")
+	sb.WriteString("\nNote: memory and RAG remain active in all modes.")
 
 	cc.Reply(sb.String())
 	return nil

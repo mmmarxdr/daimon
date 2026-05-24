@@ -8,6 +8,7 @@ import (
 
 	"daimon/internal/config"
 	"daimon/internal/provider"
+	"daimon/internal/rag"
 	"daimon/internal/store"
 	"daimon/internal/tool"
 )
@@ -717,5 +718,95 @@ func TestBuildToolDefs_EmptyAllowlistBlocksAllTools(t *testing.T) {
 	defs := a.buildToolDefs(emptyAllowlistMode)
 	if len(defs) != 0 {
 		t.Errorf("empty allowlist: expected 0 tools, got %d: %v", len(defs), defs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S9-1: memory injection unaffected by plan mode (REQ-9)
+// ---------------------------------------------------------------------------
+
+// TestBuildSystemPrompt_PlanMode_MemoryInjectionUnaffected verifies that
+// non-nil memory entries still appear in the system prompt when the agent is
+// in plan mode (S9-1). The tool allowlist only affects buildToolDefs; it must
+// not suppress memory injection in buildSystemPrompt.
+func TestBuildSystemPrompt_PlanMode_MemoryInjectionUnaffected(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality:      "You are Daimon.",
+			MaxContextTokens: 10000,
+		},
+		tools:  map[string]tool.Tool{},
+		skills: nil,
+	}
+	planMode, err := LookupMode("plan")
+	if err != nil {
+		t.Fatalf("LookupMode(plan) unexpected error: %v", err)
+	}
+
+	memories := []store.MemoryEntry{
+		{Content: "Project uses Postgres 15."},
+		{Content: "Author prefers short functions."},
+	}
+
+	got := a.buildSystemPrompt(memories, nil, "", planMode)
+
+	// Memory section must be present.
+	if !strings.Contains(got, "## Relevant Context:") {
+		t.Errorf("S9-1: memory section header missing in plan mode; prompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Project uses Postgres 15.") {
+		t.Errorf("S9-1: first memory entry missing in plan mode; prompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Author prefers short functions.") {
+		t.Errorf("S9-1: second memory entry missing in plan mode; prompt:\n%s", got)
+	}
+	// Plan mode system prompt must also be present (guard against wrong mode).
+	if !strings.Contains(got, "PLAN mode") {
+		t.Errorf("S9-1: expected plan mode system prompt present; prompt:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S9-2: RAG injection unaffected by review mode (REQ-9)
+// ---------------------------------------------------------------------------
+
+// TestBuildSystemPrompt_ReviewMode_RAGInjectionUnaffected verifies that
+// non-nil RAG results still appear in the system prompt when the agent is in
+// review mode (S9-2). The tool allowlist must not affect RAG injection.
+func TestBuildSystemPrompt_ReviewMode_RAGInjectionUnaffected(t *testing.T) {
+	a := &Agent{
+		config: config.AgentConfig{
+			Personality:      "You are Daimon.",
+			MaxContextTokens: 10000,
+		},
+		tools:        map[string]tool.Tool{},
+		skills:       nil,
+		ragMaxTokens: 10000,
+	}
+	reviewMode, err := LookupMode("review")
+	if err != nil {
+		t.Fatalf("LookupMode(review) unexpected error: %v", err)
+	}
+
+	ragResults := []rag.SearchResult{
+		makeSearchResult("Architecture Guide", 0, "Use hexagonal architecture."),
+		makeSearchResult("Coding Standards", 1, "All exported functions must have docs."),
+	}
+
+	got := a.buildSystemPrompt(nil, ragResults, "", reviewMode)
+
+	// RAG section must be present.
+	if !strings.Contains(got, "## Relevant Documents:") {
+		t.Errorf("S9-2: RAG section header missing in review mode; prompt:\n%s", got)
+	}
+	if !strings.Contains(got, "Use hexagonal architecture.") {
+		t.Errorf("S9-2: first RAG result missing in review mode; prompt:\n%s", got)
+	}
+	if !strings.Contains(got, "All exported functions must have docs.") {
+		t.Errorf("S9-2: second RAG result missing in review mode; prompt:\n%s", got)
+	}
+	// Review mode system prompt must also be present (guard against wrong mode).
+	if !strings.Contains(got, "REVIEW mode") {
+		t.Errorf("S9-2: expected review mode system prompt present; prompt:\n%s", got)
 	}
 }
