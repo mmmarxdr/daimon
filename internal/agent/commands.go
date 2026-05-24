@@ -59,6 +59,29 @@ type CommandEntryInfo struct {
 	Source string
 }
 
+// CommandInfo is the public REST view of a registered command.
+// Returned by Agent.Commands() and serialized in GET /api/commands responses.
+type CommandInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+	Destructive bool   `json:"destructive"`
+}
+
+// RunCommandRequest is the body of POST /api/commands/run.
+type RunCommandRequest struct {
+	Name             string `json:"name"`
+	Args             string `json:"args"`
+	ChannelID        string `json:"channel_id"`
+	SenderID         string `json:"sender_id"`
+	AllowDestructive bool   `json:"allow_destructive"`
+}
+
+// CommandResult is the response for a successful POST /api/commands/run.
+type CommandResult struct {
+	Reply string `json:"reply"`
+}
+
 // CommandRegistry holds registered slash commands.
 //
 // Concurrency: mu protects commands and all derived reads/writes.
@@ -238,14 +261,49 @@ func cmdPing(cc CommandContext) error {
 	return nil
 }
 
-// cmdHelp lists all registered commands.
+// cmdHelp lists all registered commands grouped by source.
+// Output sections: "Built-in commands:", "Cron commands:", "Skill commands:".
+// Empty sections are omitted. Within each section commands are alphabetically ordered.
 func cmdHelp(cc CommandContext) error {
-	entries := cc.Registry.Entries()
-	names := cc.Registry.Names()
+	all := cc.Registry.EntriesWithSource()
+
+	// Bucket commands by source.
+	bySource := map[string][]CommandEntryInfo{
+		SourceBuiltin: {},
+		SourceCron:    {},
+		SourceSkill:   {},
+	}
+	for _, e := range all {
+		bySource[e.Source] = append(bySource[e.Source], e)
+	}
+
+	// Sort each bucket alphabetically.
+	for src := range bySource {
+		bucket := bySource[src]
+		sort.Slice(bucket, func(i, j int) bool {
+			return bucket[i].Name < bucket[j].Name
+		})
+		bySource[src] = bucket
+	}
+
 	var sb strings.Builder
-	sb.WriteString("Available commands:\n")
-	for _, name := range names {
-		sb.WriteString(fmt.Sprintf("  /%s — %s\n", name, entries[name]))
+	sections := []struct {
+		source  string
+		heading string
+	}{
+		{SourceBuiltin, "Built-in commands:"},
+		{SourceCron, "Cron commands:"},
+		{SourceSkill, "Skill commands:"},
+	}
+	for _, sec := range sections {
+		bucket := bySource[sec.source]
+		if len(bucket) == 0 {
+			continue
+		}
+		sb.WriteString(sec.heading + "\n")
+		for _, e := range bucket {
+			sb.WriteString(fmt.Sprintf("  /%s — %s\n", e.Name, e.Desc))
+		}
 	}
 	cc.Reply(sb.String())
 	return nil

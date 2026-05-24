@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"daimon/internal/agent"
@@ -33,9 +34,57 @@ type userSkillReq struct {
 	Version        int               `json:"version,omitempty"`
 }
 
+// skillWithCommandStatus wraps a UserSkill with the command_status field.
+// CommandStatus is populated for executable skills only; empty for non-executable.
+// Valid values: "registered", "collision", "unmounted", "" (non-executable).
+type skillWithCommandStatus struct {
+	store.UserSkill
+	CommandStatus string `json:"command_status,omitempty"`
+}
+
 // listSkillsResp is the envelope for GET /api/skills.
 type listSkillsResp struct {
-	Skills []store.UserSkill `json:"skills"`
+	Skills []skillWithCommandStatus `json:"skills"`
+}
+
+// commandStatusForSkill derives the command_status value for an executable skill
+// given a snapshot of registered commands from a CommandProvider. The normalized
+// name (hyphen → underscore) is used for lookup, matching the auto-mount
+// normalization rule (design D3). Values are normative per spec REQ-13:
+// "active" when the skill owns the registered command, "shadowed_by_builtin"
+// when a builtin or cron entry holds the slot, "" otherwise (non-executable or
+// not registered at snapshot time — JSON-omitted via omitempty).
+func commandStatusForSkill(sk store.UserSkill, cmds []agent.CommandInfo) string {
+	if !sk.Executable {
+		return ""
+	}
+	normalized := strings.ReplaceAll(sk.Name, "-", "_")
+	for _, c := range cmds {
+		if c.Name == normalized {
+			if c.Source == agent.SourceSkill {
+				return "active"
+			}
+			return "shadowed_by_builtin"
+		}
+	}
+	return ""
+}
+
+// enrichSkills wraps a slice of UserSkill entries with command_status values,
+// using a CommandProvider snapshot. When cp is nil, all statuses are empty.
+func enrichSkills(skills []store.UserSkill, cp CommandProvider) []skillWithCommandStatus {
+	out := make([]skillWithCommandStatus, 0, len(skills))
+	var cmds []agent.CommandInfo
+	if cp != nil {
+		cmds = cp.Commands()
+	}
+	for _, sk := range skills {
+		out = append(out, skillWithCommandStatus{
+			UserSkill:     sk,
+			CommandStatus: commandStatusForSkill(sk, cmds),
+		})
+	}
+	return out
 }
 
 // skillErrorResp is the single-error envelope (404, 403, 409, 500).
@@ -139,19 +188,19 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	switch sourceFilter {
 	case "curated":
 		// Return the bundled curated catalog directly — no DB needed.
-		out := make([]store.UserSkill, 0, len(s.deps.CuratedSkills))
+		raw := make([]store.UserSkill, 0, len(s.deps.CuratedSkills))
 		for _, sc := range s.deps.CuratedSkills {
-			out = append(out, curatedSkillToUserSkill(sc))
+			raw = append(raw, curatedSkillToUserSkill(sc))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: out}); err != nil {
+		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: enrichSkills(raw, s.deps.CommandProvider)}); err != nil {
 			slog.Warn("handleListSkills: encode error", "error", err)
 		}
 		return
 
 	case "user":
 		// DB rows only — current V1 behavior.
-		skills := make([]store.UserSkill, 0)
+		var raw []store.UserSkill
 		if s.deps.UserSkillStore != nil {
 			rows, err := s.deps.UserSkillStore.ListUserSkills(r.Context())
 			if err != nil {
@@ -161,12 +210,15 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, sk := range rows {
 				if sk.Source == "user" {
-					skills = append(skills, sk)
+					raw = append(raw, sk)
 				}
 			}
 		}
+		if raw == nil {
+			raw = []store.UserSkill{}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: skills}); err != nil {
+		if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: enrichSkills(raw, s.deps.CommandProvider)}); err != nil {
 			slog.Warn("handleListSkills: encode error", "error", err)
 		}
 		return
@@ -201,15 +253,15 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out := make([]store.UserSkill, 0, len(order))
+	merged := make([]store.UserSkill, 0, len(order))
 	for _, name := range order {
 		if e, ok := index[name]; ok {
-			out = append(out, e.sk)
+			merged = append(merged, e.sk)
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: out}); err != nil {
+	if err := json.NewEncoder(w).Encode(listSkillsResp{Skills: enrichSkills(merged, s.deps.CommandProvider)}); err != nil {
 		slog.Warn("handleListSkills: encode error", "error", err)
 	}
 }

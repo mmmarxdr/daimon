@@ -777,3 +777,54 @@ func (a *Agent) Shutdown() error {
 	}
 	return err
 }
+
+// Commands returns a snapshot of all registered commands for GET /api/commands.
+// Each entry includes the source tag and the destructive flag from IsDestructiveCommand.
+func (a *Agent) Commands() []CommandInfo {
+	if a.commands == nil {
+		return nil
+	}
+	entries := a.commands.EntriesWithSource()
+	out := make([]CommandInfo, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, CommandInfo{
+			Name:        e.Name,
+			Description: e.Desc,
+			Source:      e.Source,
+			Destructive: IsDestructiveCommand(e.Name),
+		})
+	}
+	return out
+}
+
+// RunCommand dispatches a registered command by name for POST /api/commands/run.
+// It builds a synthetic CommandContext with a buffer-backed Reply and returns
+// the collected reply text. Returns an error when the command is not found or
+// the handler returns an error.
+func (a *Agent) RunCommand(ctx context.Context, req RunCommandRequest) (CommandResult, error) {
+	h, ok := a.commands.Lookup(req.Name)
+	if !ok {
+		return CommandResult{}, fmt.Errorf("command not found: %s", req.Name)
+	}
+
+	var reply string
+	cc := CommandContext{
+		Ctx:          ctx,
+		ChannelID:    req.ChannelID,
+		SenderID:     req.SenderID,
+		Args:         req.Args,
+		Store:        a.store,
+		Config:       &a.config,
+		ProviderName: a.provider.Name(),
+		ChannelName:  a.channelName,
+		StartedAt:    a.startedAt,
+		Registry:     a.commands,
+		Reply: func(text string) {
+			reply = text
+		},
+	}
+	if err := h(cc); err != nil {
+		return CommandResult{}, err
+	}
+	return CommandResult{Reply: reply}, nil
+}

@@ -77,6 +77,16 @@ type SubagentProvider interface {
 	CancelSubagent(id string) error
 }
 
+// CommandProvider is the narrow interface the web layer uses to query and
+// dispatch agent slash commands via the REST endpoints.
+// The concrete *agent.Agent satisfies it; nil is a valid value (handlers return 503).
+type CommandProvider interface {
+	// Commands returns a snapshot of all registered commands.
+	Commands() []agent.CommandInfo
+	// RunCommand dispatches a command by name and returns the result.
+	RunCommand(ctx context.Context, req agent.RunCommandRequest) (agent.CommandResult, error)
+}
+
 // ServerDeps holds the dependencies for the web server.
 type ServerDeps struct {
 	Store            store.Store
@@ -110,6 +120,11 @@ type ServerDeps struct {
 	// UserSkillStore enables the /api/skills CRUD surface. Nil when the
 	// store backend does not support user-defined skills (e.g. FileStore).
 	UserSkillStore store.UserSkillStore
+
+	// CommandProvider exposes the agent's command registry for the REST
+	// command endpoints (GET /api/commands, POST /api/commands/run).
+	// Nil when no agent is wired; handlers return 503.
+	CommandProvider CommandProvider
 
 	// CuratedSkills is the pre-parsed bundled catalog loaded at boot from
 	// skill.CuratedFS. It is used by handleListSkills (?source=curated) and
@@ -369,6 +384,9 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /api/skills", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleCreateSkill)))
 	s.mux.Handle("PUT /api/skills/{name}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleUpdateSkill)))
 	s.mux.Handle("DELETE /api/skills/{name}", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleDeleteSkill)))
+	// Command registry and execution endpoints (REQ-13, REQ-15-REST, REQ-16, REQ-17, REQ-21).
+	s.mux.HandleFunc("GET /api/commands", s.handleListCommands)
+	s.mux.Handle("POST /api/commands/run", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleRunCommand)))
 	// Subagent visibility endpoints.
 	s.mux.HandleFunc("GET /api/subagents/active", s.handleSubagentsActive)
 	s.mux.Handle("POST /api/subagents/{id}/cancel", requireOriginIfCrossOrigin(ao, http.HandlerFunc(s.handleSubagentCancel)))
