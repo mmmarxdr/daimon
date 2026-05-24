@@ -12,7 +12,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -317,13 +316,4 @@ func (m *fakeManagerForSkill) Spawn(
 		mu:     sync.Mutex{},
 	}
 	return &SubagentHandle{rec: rec}, nil
-}
-
-// fakeSpawnToolForSkill wraps a fakeManagerForSkill so we can verify Execute is
-// called and inspect what JSON params were sent.
-type fakeSpawnToolForSkill struct {
-	mu            sync.Mutex
-	executeCalled bool
-	lastParams    json.RawMessage
-	manager       *fakeManagerForSkill
 }
