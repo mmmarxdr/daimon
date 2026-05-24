@@ -34,9 +34,10 @@ type userSkillReq struct {
 	Version        int               `json:"version,omitempty"`
 }
 
-// skillWithCommandStatus wraps a UserSkill with the command_status field.
-// CommandStatus is populated for executable skills only; empty for non-executable.
-// Valid values: "registered", "collision", "unmounted", "" (non-executable).
+// skillWithCommandStatus wraps a UserSkill with the command_status field
+// (spec REQ-13). Values: "active" (skill owns the registered command),
+// "shadowed_by_builtin" (builtin or cron holds the slot), "" (non-executable
+// or not registered at snapshot time — JSON-omitted via omitempty).
 type skillWithCommandStatus struct {
 	store.UserSkill
 	CommandStatus string `json:"command_status,omitempty"`
