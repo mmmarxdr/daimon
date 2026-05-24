@@ -136,6 +136,7 @@ type Agent struct {
 	commands        *CommandRegistry
 	cancels         *cancelRegistry // per-(channel,sender) turn cancel funcs (WU4, REQ-6, REQ-7)
 	shellCwd        *cwdOverrides   // per-(channel,sender) shell working-dir overrides (WU5, REQ-5)
+	activeConv      *convOverrides  // per-(channel,sender) active conv ID overrides (WU7, REQ-1)
 	startedAt       time.Time
 	inbox           chan channel.IncomingMessage
 	channelName     string
@@ -286,6 +287,7 @@ func New(
 		commands:        reg,
 		cancels:         newCancelRegistry(),
 		shellCwd:        newCwdOverrides(),
+		activeConv:      newConvOverrides(),
 		channelName:     ch.Name(),
 	}
 	// Wire the legacy truncation function now that the agent struct is fully built.
@@ -310,6 +312,19 @@ func New(
 	}, SourceBuiltin)
 	reg.Register("cd", "Set shell working directory: /cd <path> (or /cd to reset)", func(cc CommandContext) error {
 		return a.cmdCd(cc)
+	}, SourceBuiltin)
+	// WU7: new built-in commands (REQ-1..4).
+	reg.Register("resume", "List or switch active conversation: /resume [convID]", func(cc CommandContext) error {
+		return a.cmdResume(cc)
+	}, SourceBuiltin)
+	reg.Register("save", "Snapshot current conversation: /save [name]", func(cc CommandContext) error {
+		return a.cmdSave(cc)
+	}, SourceBuiltin)
+	reg.Register("fork", "Branch conversation at last user turn: /fork", func(cc CommandContext) error {
+		return a.cmdFork(cc)
+	}, SourceBuiltin)
+	reg.Register("export", "Export conversation: /export [markdown|json]", func(cc CommandContext) error {
+		return a.cmdExport(cc)
 	}, SourceBuiltin)
 	return a
 }

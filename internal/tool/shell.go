@@ -123,8 +123,14 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		cmd = exec.Command(baseCmd, parts[1:]...) //nolint:gosec // whitelist + metachar check enforced above
 	}
 	setProcessGroup(cmd)
-	if t.config.WorkingDir != "" {
-		wd := t.config.WorkingDir
+	// Determine the effective working directory: per-turn ctx override takes
+	// precedence over the static config value (WU6, REQ-5).
+	effectiveCwd := t.config.WorkingDir
+	if ctxCwd, ok := EffectiveCwdFromCtx(ctx); ok && ctxCwd != "" {
+		effectiveCwd = ctxCwd
+	}
+	if effectiveCwd != "" {
+		wd := effectiveCwd
 		if strings.HasPrefix(wd, "~") {
 			if usr, err := user.Current(); err == nil {
 				wd = strings.Replace(wd, "~", usr.HomeDir, 1)
