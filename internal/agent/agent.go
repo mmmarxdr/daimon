@@ -85,13 +85,21 @@ func (a *Agent) startPruningLoop(ctx context.Context) {
 }
 
 type Agent struct {
-	config      config.AgentConfig
-	mediaCfg    config.MediaConfig // media cleanup configuration
-	limits      config.LimitsConfig
-	filterCfg   config.FilterConfig
-	ctxModeCfg  config.ContextModeConfig // context-mode configuration
-	channel     channel.Channel
-	provider    provider.Provider
+	config     config.AgentConfig
+	mediaCfg   config.MediaConfig // media cleanup configuration
+	limits     config.LimitsConfig
+	filterCfg  config.FilterConfig
+	ctxModeCfg config.ContextModeConfig // context-mode configuration
+	channel    channel.Channel
+
+	// providerMu guards a.provider. Reads (including sub-components via
+	// providerSnapshot) take RLock; SetProvider (PR2) takes Lock.
+	// Mirror of toolsMu/skillsMu — see agent.go:109-114 for the pattern.
+	// Lock ordering: providerMu slots between commandsMu and cancels.mu.
+	providerMu    sync.RWMutex
+	provider      provider.Provider
+	providerCreds config.ProviderCredentials // stored at construction for PR2 thinking-config re-apply
+
 	store       store.Store
 	outputStore store.OutputStore // for auto-indexing tool outputs
 	auditorFn   func() audit.Auditor
@@ -326,6 +334,38 @@ func New(
 	reg.Register("export", "Export conversation: /export [markdown|json]", func(cc CommandContext) error {
 		return a.cmdExport(cc)
 	}, SourceBuiltin)
+	return a
+}
+
+// providerSnapshot returns the current provider under a short RLock.
+// The returned interface value reflects the live a.provider pointer: callers
+// MUST capture it into a local variable and use that local for the duration
+// of one logical operation (e.g. one turn in processMessage) to guarantee
+// consistency. Do NOT cache the result across goroutine-yielding operations.
+//
+// Sub-components (Enricher, ContextManager, etc.) receive this method as a
+// closure: func() provider.Provider { return a.providerSnapshot() }. This
+// keeps them agent-agnostic while still reading the live provider after a
+// SetProvider swap (PR2).
+func (a *Agent) providerSnapshot() provider.Provider {
+	a.providerMu.RLock()
+	defer a.providerMu.RUnlock()
+	return a.provider
+}
+
+// WithProviderCredentials stores the ProviderCredentials for the active
+// provider so that SetProvider (PR2) can re-apply thinking configuration
+// after rebuilding the provider via NewFromConfig.
+//
+// Rationale (AD-5): thinking config is wired POST-construction via
+// SetThinkingConfig — it is NOT part of ProviderConfig. The agent must
+// carry the original credentials to replicate what provider/registry.go
+// does at startup.
+//
+// Call this after New() and before Run(), typically in main.go / web_cmd.go
+// alongside the other WithX options.
+func (a *Agent) WithProviderCredentials(creds config.ProviderCredentials) *Agent {
+	a.providerCreds = creds
 	return a
 }
 
