@@ -376,11 +376,18 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	loopCtx, cancelLoop := context.WithTimeout(ctx, totalTimeout)
 	defer cancelLoop()
 
+	// REQ-11: capture the active provider ONCE per turn under RLock. A concurrent
+	// SetProvider (future PR2) may swap a.provider mid-turn; this local snapshot
+	// guarantees every Chat / streaming / cost lookup in this turn sees the same
+	// provider the turn started with. Sub-components reach this same snapshot via
+	// the providerFn closure (future PR3-PR4).
+	prov := a.providerSnapshot()
+
 	// Detect streaming capabilities once before the loop.
 	var streamingProv provider.StreamingProvider
 	var streamSender channel.StreamSender
 	if a.stream {
-		if sp, ok := a.provider.(provider.StreamingProvider); ok {
+		if sp, ok := prov.(provider.StreamingProvider); ok {
 			streamingProv = sp
 		}
 		if ss, ok := a.channel.(channel.StreamSender); ok {
@@ -396,7 +403,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	// Determine degradation once per turn, before the tool-call loop.
 	// A degraded turn means the current provider cannot handle media blocks
 	// in the user's message — we note it and prepend a notice to the final reply.
-	degraded := !a.provider.SupportsMultimodal() && msg.Content.HasMedia()
+	degraded := !prov.SupportsMultimodal() && msg.Content.HasMedia()
 	var degradedBlocks content.Blocks
 	if degraded {
 		degradedBlocks = msg.Content
@@ -408,7 +415,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				seen[string(b.Type)] = true
 			}
 		}
-		slog.Info("degradation", "provider_name", a.provider.Name(), "block_types", typesList)
+		slog.Info("degradation", "provider_name", prov.Name(), "block_types", typesList)
 	}
 
 	for i := 0; i < maxIters; i++ {
@@ -446,7 +453,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				subagentMeta, // REQ-10 WU8: computed once after conv loaded; nil for top-level
 			)
 		} else {
-			resp, err = a.provider.Chat(loopCtx, req)
+			resp, err = prov.Chat(loopCtx, req)
 		}
 
 		llmDuration := time.Since(llmStart)
@@ -511,14 +518,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		_ = a.auditorFn().Emit(ctx, audit.AuditEvent{
 			ID: uuid.New().String(), ScopeID: scope,
 			EventType: "llm_call", Timestamp: llmStart, DurationMs: llmDuration.Milliseconds(),
-			Model: a.provider.Model(), InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
+			Model: prov.Model(), InputTokens: resp.Usage.InputTokens, OutputTokens: resp.Usage.OutputTokens,
 			StopReason: resp.StopReason, Iteration: i,
 		})
 		// Persist cost to store.cost_records for the metrics endpoint and the
 		// `daimon costs` CLI. Independent from audit — metrics must work
 		// regardless of audit settings (audit is opt-in, metrics is core UX).
 		if cs, ok := a.store.(store.CostStore); ok {
-			modelName := a.provider.Model()
+			modelName := prov.Model()
 			inCost, outCost := audit.EstimateCostSplit(modelName, int64(resp.Usage.InputTokens), int64(resp.Usage.OutputTokens))
 			_ = cs.RecordCost(ctx, store.CostRecord{
 				ID:              uuid.New().String(),
@@ -540,7 +547,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		totalOutputTokens += resp.Usage.OutputTokens
 		// REQ-9.2: accumulate per-iteration cost for the per-turn tokens.usage bus event.
 		{
-			modelName := a.provider.Model()
+			modelName := prov.Model()
 			iCost, oCost := audit.EstimateCostSplit(modelName, int64(resp.Usage.InputTokens), int64(resp.Usage.OutputTokens))
 			turnCostUSD += iCost + oCost
 		}
