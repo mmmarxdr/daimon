@@ -717,6 +717,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
 						toolCtx = tool.WithScope(toolCtx, scope)
 						toolCtx = tool.WithConvID(toolCtx, conv.ID)
+						// WU6: inject per-(channel,sender) effective cwd so the shell
+						// tool uses the /cd override rather than the static config cwd.
+						// Only inject when an override is actually set — keep ctx clean
+						// when no override exists so the shell tool falls back to config.
+						if effectiveCwd, hasCwd := a.shellCwd.Get(cancelKey{ChannelID: msg.ChannelID, SenderID: msg.SenderID}); hasCwd {
+							toolCtx = tool.WithEffectiveCwd(toolCtx, effectiveCwd)
+						}
 						result, err = executeWithRecover(toolCtx, t, tc.Input)
 						tCancel()
 						if err != nil {
