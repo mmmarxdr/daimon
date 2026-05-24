@@ -100,6 +100,16 @@ type Agent struct {
 	provider      provider.Provider
 	providerCreds config.ProviderCredentials // stored at construction for PR2 thinking-config re-apply
 
+	// modeMu guards a.currentMode. Reads via RLock in modeSnapshot(); writes via
+	// Lock in SetMode + loadMode.
+	//
+	// Lock ordering: modeMu is INDEPENDENT of providerMu — no code path holds
+	// both simultaneously. providerSnapshot() and modeSnapshot() are called
+	// sequentially at turn-start; each releases its lock before returning.
+	// Acquire EITHER but never both nested (to avoid deadlock).
+	modeMu      sync.RWMutex
+	currentMode string // one of: "plan" | "build" | "review"; zero value defaults to "build"
+
 	// newProviderFn is the factory used by SetProvider to construct a replacement
 	// provider from a config. Defaults to provider.NewFromConfig; overridable in
 	// tests to avoid real API calls.
@@ -380,6 +390,31 @@ func (a *Agent) providerSnapshot() provider.Provider {
 	a.providerMu.RLock()
 	defer a.providerMu.RUnlock()
 	return a.provider
+}
+
+// modeSnapshot returns the ModeDefinition for the active mode under RLock.
+// Mirror of providerSnapshot — acquire RLock briefly, copy out name, release,
+// then resolve the tuple via LookupMode.
+//
+// If currentMode is empty (zero value, i.e. a fresh agent before any turn) or
+// contains an invalid value (corruption / future downgrade), falls back to the
+// "build" mode definition and logs a warning. This branch is unreachable in
+// normal operation because SetMode validates before mutating.
+//
+// The returned ModeDefinition is a value copy — safe to use after the lock is
+// released. Callers should capture the result once and use it for the entire turn.
+func (a *Agent) modeSnapshot() ModeDefinition {
+	a.modeMu.RLock()
+	name := a.currentMode
+	a.modeMu.RUnlock()
+
+	def, err := LookupMode(name)
+	if err != nil {
+		// Unknown or empty currentMode: fall back to build (defensive).
+		slog.Warn("mode_snapshot: unknown mode, falling back to build", "mode", name, "error", err)
+		def, _ = LookupMode("build")
+	}
+	return def
 }
 
 // WithProviderCredentials stores the ProviderCredentials for the active
