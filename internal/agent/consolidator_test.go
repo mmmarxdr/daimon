@@ -163,6 +163,12 @@ func (p *consolidatorMockProvider) chatCalls() int {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// staticProvFn wraps a fixed provider.Provider as a func() provider.Provider
+// for use with NewConsolidator (which now takes a closure, not a bare provider).
+func staticProvFn(p provider.Provider) func() provider.Provider {
+	return func() provider.Provider { return p }
+}
+
 func defaultConsolidationCfg() config.ConsolidationConfig {
 	return config.ConsolidationConfig{
 		Enabled:            true,
@@ -198,7 +204,7 @@ func TestConsolidator_NewDisabled(t *testing.T) {
 	cfg := config.ConsolidationConfig{Enabled: false}
 	prov := &consolidatorMockProvider{response: "consolidated"}
 	st := &consolidatorMockStore{}
-	c := NewConsolidator(prov, st, nil, nil, cfg)
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, cfg)
 	if c != nil {
 		t.Error("expected nil Consolidator when disabled")
 	}
@@ -209,7 +215,7 @@ func TestConsolidator_NoScopes(t *testing.T) {
 	prov := &consolidatorMockProvider{response: "consolidated"}
 	st := &consolidatorMockStore{} // entries is nil → SearchMemory returns []
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 	if c == nil {
 		t.Fatal("expected non-nil Consolidator")
 	}
@@ -234,7 +240,7 @@ func TestConsolidator_TopicBelowThreshold(t *testing.T) {
 		entries: makeEntries(3, "cooking", "fact"),
 	}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 
 	archived, created, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
@@ -255,7 +261,7 @@ func TestConsolidator_TopicAboveThreshold(t *testing.T) {
 		entries: makeEntries(7, "cooking", "fact"),
 	}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 
 	archived, created, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
@@ -292,7 +298,7 @@ func TestConsolidator_PreservesMaxImportance(t *testing.T) {
 	prov := &consolidatorMockProvider{response: "Architecture decisions summary"}
 	st := &consolidatorMockStore{entries: entries}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 	_, _, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -312,7 +318,7 @@ func TestConsolidator_ArchivesOriginals(t *testing.T) {
 	prov := &consolidatorMockProvider{response: "Project history summary"}
 	st := &consolidatorMockStore{entries: entries}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 	archived, _, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -339,7 +345,7 @@ func TestConsolidator_MultipleTopics(t *testing.T) {
 	prov := &consolidatorMockProvider{response: "Summary"}
 	st := &consolidatorMockStore{entries: allEntries}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 	_, created, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -363,18 +369,18 @@ func TestConsolidator_SkipsEmptyTopic(t *testing.T) {
 	base := time.Now().Add(-10 * time.Hour)
 	for i := 0; i < 10; i++ {
 		entries[i] = store.MemoryEntry{
-			ID:        fmt.Sprintf("notopic-%d", i),
-			Topic:     "", // no topic
-			Content:   fmt.Sprintf("uncategorized content %d", i),
+			ID:         fmt.Sprintf("notopic-%d", i),
+			Topic:      "", // no topic
+			Content:    fmt.Sprintf("uncategorized content %d", i),
 			Importance: 5,
-			CreatedAt: base.Add(time.Duration(i) * time.Hour),
+			CreatedAt:  base.Add(time.Duration(i) * time.Hour),
 		}
 	}
 
 	prov := &consolidatorMockProvider{response: "Summary"}
 	st := &consolidatorMockStore{entries: entries}
 
-	c := NewConsolidator(prov, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(prov), st, nil, nil, defaultConsolidationCfg())
 	archived, created, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -408,7 +414,7 @@ func TestConsolidator_LLMFailure_NoDataLoss(t *testing.T) {
 	st := &consolidatorMockStore{entries: allEntries}
 	_ = callCount
 
-	c := NewConsolidator(mockProv, st, nil, nil, defaultConsolidationCfg())
+	c := NewConsolidator(staticProvFn(mockProv), st, nil, nil, defaultConsolidationCfg())
 	_, created, err := c.consolidateScope(context.Background(), "test-scope")
 	if err != nil {
 		t.Fatalf("unexpected error from consolidateScope (errors are per-topic, not returned): %v", err)

@@ -54,12 +54,12 @@ func (p *curatorMockProvider) chatCalls() int { //nolint:unused // kept for futu
 // curatorMockStore records AppendMemory and UpdateMemory calls.
 // SearchMemory returns a configurable set of candidates.
 type curatorMockStore struct {
-	mu           sync.Mutex
-	appendCalls  []store.MemoryEntry
-	updateCalls  []store.MemoryEntry
-	candidates   []store.MemoryEntry // returned by SearchMemory
-	searchErr    error
-	appendErr    error
+	mu          sync.Mutex
+	appendCalls []store.MemoryEntry
+	updateCalls []store.MemoryEntry
+	candidates  []store.MemoryEntry // returned by SearchMemory
+	searchErr   error
+	appendErr   error
 }
 
 func (s *curatorMockStore) SaveConversation(_ context.Context, _ store.Conversation) error {
@@ -204,6 +204,12 @@ func longResponse(n int) string {
 	return strings.Repeat("x", n)
 }
 
+// curatorStaticProvFn wraps a fixed provider.Provider as a func() provider.Provider
+// for use with NewCurator (which now takes a closure, not a bare provider).
+func curatorStaticProvFn(p provider.Provider) func() provider.Provider {
+	return func() provider.Provider { return p }
+}
+
 // ---------------------------------------------------------------------------
 // Test 1: NewCurator returns nil when Enabled = false
 // ---------------------------------------------------------------------------
@@ -213,7 +219,7 @@ func TestCurator_NewCurator_Disabled(t *testing.T) {
 	st := &curatorMockStore{}
 	cfg := config.MemoryCurationConfig{Enabled: false}
 
-	c := NewCurator(prov, st, nil, nil, cfg, disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, cfg, disabledDedupCfg())
 	if c != nil {
 		t.Fatal("expected nil Curator when Enabled=false, got non-nil")
 	}
@@ -226,7 +232,7 @@ func TestCurator_NewCurator_Disabled(t *testing.T) {
 func TestCurator_ShouldSkip_ShortResponse(t *testing.T) {
 	prov := &curatorMockProvider{response: classifyJSON(8, "fact", "topic", "title")}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	// 49 chars — below MinResponseChars (50).
 	if !c.shouldSkip(strings.Repeat("a", 49)) {
@@ -246,7 +252,7 @@ func TestCurator_ShouldSkip_ShortResponse(t *testing.T) {
 func TestCurator_ShouldSkip_Refusal(t *testing.T) {
 	prov := &curatorMockProvider{}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	refusals := []string{
 		"I'm sorry, I cannot help with that request. " + longResponse(50),
@@ -271,7 +277,7 @@ func TestCurator_ShouldSkip_Refusal(t *testing.T) {
 func TestCurator_ShouldSkip_Filler(t *testing.T) {
 	prov := &curatorMockProvider{}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	fillers := []string{"ok", "sure", "done", "understood", "got it", "Great!", "Thanks.", "OK!"}
 	for _, f := range fillers {
@@ -288,7 +294,7 @@ func TestCurator_ShouldSkip_Filler(t *testing.T) {
 func TestCurator_ShouldSkip_ValidResponse(t *testing.T) {
 	prov := &curatorMockProvider{}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	valid := "The user prefers Go for all backend services and wants to avoid Python in new projects."
 	if c.shouldSkip(valid) {
@@ -305,7 +311,7 @@ func TestCurator_Classify_Success(t *testing.T) {
 		response: classifyJSON(8, "preference", "technology", "User prefers Go for backend"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	result, err := c.classify(context.Background(), "what language do you prefer?", longResponse(100))
 	if err != nil {
@@ -332,7 +338,7 @@ func TestCurator_Classify_Success(t *testing.T) {
 func TestCurator_Classify_ParseError_Fallback(t *testing.T) {
 	prov := &curatorMockProvider{response: "this is not json at all"}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	response := longResponse(100)
 	result, err := c.classify(context.Background(), "user msg", response)
@@ -363,7 +369,7 @@ func TestCurator_Curate_LowImportance_NotSaved(t *testing.T) {
 		response: classifyJSON(2, "skip", "irrelevant", "trivial"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	// 100+ char response so it passes the fast-path skip.
 	err := c.Curate(context.Background(), "scope-1", "hello", longResponse(100), "conv-1")
@@ -384,7 +390,7 @@ func TestCurator_Curate_HighImportance_Saved(t *testing.T) {
 		response: classifyJSON(8, "preference", "technology", "Prefers Go for backend"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	userMsg := "What language do you use for backend?"
 	response := "I always use Go for backend services because of its performance and simplicity. Python is reserved for data science tasks."
@@ -453,7 +459,7 @@ func TestCurator_Curate_Dedup_UpdatesExisting(t *testing.T) {
 		CosineThreshold: 0.85,
 		MaxCandidates:   5,
 	}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), dedupCfg)
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), dedupCfg)
 
 	// Response is verbose; the classifier-extracted fact (canned via
 	// classifyJSON) is what matters for dedup matching.
@@ -485,7 +491,7 @@ func TestCurator_Cluster_PersistedFromLLM(t *testing.T) {
 		response: classifyJSONWithCluster(8, "preference", "preferences", "lang", "prefers Go"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	err := c.Curate(context.Background(), "scope-1", "what do you prefer?", longResponse(100), "conv-1")
 	if err != nil {
@@ -505,7 +511,7 @@ func TestCurator_Cluster_FallbackOnUnknown(t *testing.T) {
 		response: classifyJSONWithCluster(8, "fact", "bogus-cluster", "t", "hello"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	err := c.Curate(context.Background(), "scope-1", "u", longResponse(100), "conv-1")
 	if err != nil {
@@ -522,7 +528,7 @@ func TestCurator_Cluster_FallbackOnMissing(t *testing.T) {
 		response: classifyJSON(8, "fact", "t", "hello"),
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	err := c.Curate(context.Background(), "scope-1", "u", longResponse(100), "conv-1")
 	if err != nil {
@@ -545,7 +551,7 @@ func TestCurator_MemorableFact_PersistedAsContent(t *testing.T) {
 		response: `{"importance":8,"type":"fact","cluster":"technical","topic":"stack","title":"User runs payments service in Go","memorable_fact":"User runs the payments service at Helix and it is written in Go."}`,
 	}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	hugeMarkdown := "## Big tutorial\n\n" + strings.Repeat("blah ", 1000)
 	if err := c.Curate(context.Background(), "scope-1", "tell me about Go", hugeMarkdown, "conv-1"); err != nil {
@@ -568,7 +574,7 @@ func TestCurator_EmptyMemorableFact_DoesNotPersist(t *testing.T) {
 	// → entry dropped, conversation transcript still has the response.
 	prov := &curatorMockProvider{response: classifyJSONNoFact(7, "context", "Generic Kubernetes tutorial")}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	if err := c.Curate(context.Background(), "scope-1", "explain k8s", longResponse(2000), "conv-1"); err != nil {
 		t.Fatalf("Curate: %v", err)
@@ -588,7 +594,7 @@ func TestCurator_ClassifyParseFailure_DoesNotPersist(t *testing.T) {
 	// leaking into the dashboard.
 	prov := &curatorMockProvider{response: "definitely not valid json"}
 	st := &curatorMockStore{}
-	c := NewCurator(prov, st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
 
 	if err := c.Curate(context.Background(), "scope-1", "u", longResponse(200), "conv-1"); err != nil {
 		t.Fatalf("Curate: %v", err)
