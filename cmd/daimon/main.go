@@ -545,7 +545,7 @@ func main() {
 				CallTimeout:    time.Duration(cfg.AI.Compaction.CallTimeoutSec) * time.Second,
 				MaxConvsPerRun: cfg.AI.Compaction.MaxConvsPerRun,
 			}
-			if compactor := agent.NewConversationCompactor(sq, prov, compactorCfg); compactor != nil {
+			if compactor := agent.NewConversationCompactor(sq, func() provider.Provider { return prov }, compactorCfg); compactor != nil {
 				compactor.Start()
 				defer func() {
 					sctx, scancel := context.WithTimeout(context.Background(), 5*time.Second)

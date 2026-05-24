@@ -97,9 +97,9 @@ type compactorStoreAPI interface {
 // Failures are silent (slog.Warn at most) — compaction is a best-effort
 // optimisation. A failed run only delays cleanup; nothing breaks.
 type ConversationCompactor struct {
-	store    compactorStoreAPI
-	provider compactorProviderAPI
-	cfg      CompactorConfig
+	store  compactorStoreAPI
+	chatFn func() compactorProviderAPI // accessor closure; always reads the live provider
+	cfg    CompactorConfig
 
 	doneCtx context.Context
 	cancel  context.CancelFunc
@@ -119,19 +119,21 @@ type compactorProviderAPI interface {
 // NewConversationCompactor constructs a compactor. Returns nil when
 // cfg.Enabled is false so the caller can write `if c := NewConversationCompactor(...); c != nil { ... }`
 // without an extra check.
-func NewConversationCompactor(st compactorStoreAPI, prov compactorProviderAPI, cfg CompactorConfig) *ConversationCompactor {
+// providerFn is called on every compaction job to read the live provider after a SetProvider swap.
+// provider.Provider satisfies compactorProviderAPI; the narrowing happens internally.
+func NewConversationCompactor(st compactorStoreAPI, providerFn func() provider.Provider, cfg CompactorConfig) *ConversationCompactor {
 	if !cfg.Enabled {
 		return nil
 	}
 	cfg = applyCompactorDefaults(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ConversationCompactor{
-		store:    st,
-		provider: prov,
-		cfg:      cfg,
-		doneCtx:  ctx,
-		cancel:   cancel,
-		now:      time.Now,
+		store:   st,
+		chatFn:  func() compactorProviderAPI { return providerFn() },
+		cfg:     cfg,
+		doneCtx: ctx,
+		cancel:  cancel,
+		now:     time.Now,
 	}
 }
 
@@ -214,7 +216,7 @@ func (c *ConversationCompactor) compactOne(convID string) {
 	}
 
 	prompt := compactionPrompt + serializeConvForCompaction(conv.Messages)
-	resp, err := c.provider.Chat(ctx, provider.ChatRequest{
+	resp, err := c.chatFn().Chat(ctx, provider.ChatRequest{
 		Model: c.cfg.Model,
 		Messages: []provider.ChatMessage{{
 			Role:    "user",
