@@ -52,6 +52,19 @@ func (a *Agent) ReplaceExecutableSkills(defs []skill.ExecutableSkillDef) {
 		a.tools[def.Name] = &SubagentSpawnTool{def: def, manager: a.subMgr}
 	}
 
+	// Phase 4 (WU9, REQ-18): rotate skill-source commands atomically.
+	// UnregisterAllBySource and registerSkillCommands each acquire commands.mu
+	// independently. The two calls here are not inside a single transaction, but
+	// because this function holds toolsMu (write), no concurrent ReplaceExecutableSkills
+	// call can interleave. Concurrent Lookups (reads on commands.mu) see either the
+	// fully-unregistered state or the fully-registered state — both are consistent
+	// snapshots.
+	// Guard: a.commands may be nil in minimal test agents that bypass New().
+	if a.commands != nil {
+		a.commands.UnregisterAllBySource(SourceSkill)
+		registerSkillCommands(a, defs)
+	}
+
 	slog.Info("hot_reload: executable skills replaced",
 		"count", len(defs),
 		"total_tools", len(a.tools))

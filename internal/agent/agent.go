@@ -472,6 +472,13 @@ func (a *Agent) WithExecutableSkills(defs []skill.ExecutableSkillDef) *Agent {
 		}
 		a.tools[def.Name] = spawn
 	}
+
+	// WU8 (REQ-12): auto-mount each skill as a /<normalized_name> slash command.
+	// registerSkillCommands acquires commands.mu internally — no deadlock risk
+	// because toolsMu is held OUTSIDE and commands.mu is acquired INSIDE (correct
+	// nesting order per design D5).
+	registerSkillCommands(a, defs)
+
 	return a
 }
 
