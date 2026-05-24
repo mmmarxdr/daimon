@@ -37,13 +37,13 @@ func TestFindTurnBoundaries_SimpleAlternation(t *testing.T) {
 func TestFindTurnBoundaries_MultiToolGrouped(t *testing.T) {
 	// assistant with tool calls + multiple tool results = ONE turn (not split)
 	msgs := []provider.ChatMessage{
-		{Role: "user"},                                                          // 0
-		{Role: "assistant", ToolCalls: []provider.ToolCall{{ID: "c1", Name: "tool_a"}}}, // 1 — turn start
-		{Role: "tool", ToolCallID: "c1"},                                        // 2 — same turn as 1
+		{Role: "user"}, // 0
+		{Role: "assistant", ToolCalls: []provider.ToolCall{{ID: "c1", Name: "tool_a"}}},                             // 1 — turn start
+		{Role: "tool", ToolCallID: "c1"},                                                                            // 2 — same turn as 1
 		{Role: "assistant", ToolCalls: []provider.ToolCall{{ID: "c2", Name: "tool_b"}, {ID: "c3", Name: "tool_c"}}}, // 3 — new turn
-		{Role: "tool", ToolCallID: "c2"},                                        // 4 — same turn as 3
-		{Role: "tool", ToolCallID: "c3"},                                        // 5 — same turn as 3
-		{Role: "user"},                                                          // 6 — new turn
+		{Role: "tool", ToolCallID: "c2"},                                                                            // 4 — same turn as 3
+		{Role: "tool", ToolCallID: "c3"},                                                                            // 5 — same turn as 3
+		{Role: "user"},                                                                                              // 6 — new turn
 	}
 
 	boundaries := findTurnBoundaries(msgs)
@@ -165,7 +165,7 @@ func buildPipelineManager(maxTokens int) *ContextManager {
 	prov := &cmMockProvider{name: "test", model: "test-model"}
 	return &ContextManager{
 		cfg:             cfg,
-		prov:            prov,
+		providerFn:      func() provider.Provider { return prov },
 		resolvedMaxToks: maxTokens,
 	}
 }
@@ -325,7 +325,7 @@ func buildPipelineManagerWithProvider(maxTokens int, prov provider.Provider) *Co
 	cfg.ToolResultMaxChars = 100
 	return &ContextManager{
 		cfg:             cfg,
-		prov:            prov,
+		providerFn:      func() provider.Provider { return prov },
 		resolvedMaxToks: maxTokens,
 	}
 }
