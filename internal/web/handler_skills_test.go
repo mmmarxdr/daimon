@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"daimon/internal/agent"
 	"daimon/internal/config"
 	"daimon/internal/skill"
 	"daimon/internal/store"
@@ -1053,4 +1054,178 @@ func (f *fakeTool) Description() string     { return "fake tool for testing" }
 func (f *fakeTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 func (f *fakeTool) Execute(_ context.Context, _ json.RawMessage) (tool.ToolResult, error) {
 	return tool.ToolResult{Content: "ok"}, nil
+}
+
+// ---------------------------------------------------------------------------
+// WU11 tests: command_status field in GET /api/skills (REQ-22)
+// ---------------------------------------------------------------------------
+
+// newSkillsTestServerWithCommands creates a test server with both a UserSkillStore
+// and a CommandProvider so the command_status field can be tested.
+func newSkillsTestServerWithCommands(t *testing.T, uss store.UserSkillStore, cp CommandProvider) *Server {
+	t.Helper()
+	s := &Server{
+		deps: ServerDeps{
+			Store:           &fakeWebStore{},
+			Config:          minimalConfig(),
+			UserSkillStore:  uss,
+			CommandProvider: cp,
+		},
+		mux:        http.NewServeMux(),
+		wsUpgrader: newWSUpgrader(nil),
+	}
+	s.routes()
+	return s
+}
+
+// skillWithStatus is the response shape we expect when command_status is included.
+type skillWithStatus struct {
+	store.UserSkill
+	CommandStatus string `json:"command_status,omitempty"`
+}
+
+type listSkillsWithStatusResp struct {
+	Skills []skillWithStatus `json:"skills"`
+}
+
+// TestHandleListSkills_CommandStatus_Registered verifies that an executable skill
+// whose normalized name is present in the command registry with source="skill"
+// gets command_status="registered".
+func TestHandleListSkills_CommandStatus_Registered(t *testing.T) {
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "1", Name: "researcher", Executable: true, Source: "user", Version: 1},
+		},
+	}
+	cp := &fakeCommandProvider{
+		commands: []agent.CommandInfo{
+			{Name: "researcher", Description: "Subagent: researcher", Source: "skill", Destructive: false},
+		},
+	}
+	srv := newSkillsTestServerWithCommands(t, uss, cp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=user", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp listSkillsWithStatusResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
+	}
+	if resp.Skills[0].CommandStatus != "registered" {
+		t.Errorf("expected command_status=registered for mounted skill, got %q", resp.Skills[0].CommandStatus)
+	}
+}
+
+// TestHandleListSkills_CommandStatus_Collision verifies that an executable skill
+// whose normalized name is taken by a builtin or cron command gets command_status="collision".
+func TestHandleListSkills_CommandStatus_Collision(t *testing.T) {
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "1", Name: "ping", Executable: true, Source: "user", Version: 1},
+		},
+	}
+	cp := &fakeCommandProvider{
+		commands: []agent.CommandInfo{
+			// "ping" is registered as builtin, not skill
+			{Name: "ping", Description: "Check alive", Source: "builtin", Destructive: false},
+		},
+	}
+	srv := newSkillsTestServerWithCommands(t, uss, cp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=user", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp listSkillsWithStatusResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
+	}
+	if resp.Skills[0].CommandStatus != "collision" {
+		t.Errorf("expected command_status=collision for shadowed skill, got %q", resp.Skills[0].CommandStatus)
+	}
+}
+
+// TestHandleListSkills_CommandStatus_Unmounted verifies that an executable skill
+// whose normalized name is not in the command registry at all gets command_status="unmounted".
+func TestHandleListSkills_CommandStatus_Unmounted(t *testing.T) {
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "1", Name: "my-researcher", Executable: true, Source: "user", Version: 1},
+		},
+	}
+	cp := &fakeCommandProvider{
+		commands: []agent.CommandInfo{
+			// "my_researcher" (normalized) is NOT in the registry
+			{Name: "ping", Description: "Check alive", Source: "builtin", Destructive: false},
+		},
+	}
+	srv := newSkillsTestServerWithCommands(t, uss, cp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=user", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp listSkillsWithStatusResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
+	}
+	if resp.Skills[0].CommandStatus != "unmounted" {
+		t.Errorf("expected command_status=unmounted for unregistered skill, got %q", resp.Skills[0].CommandStatus)
+	}
+}
+
+// TestHandleListSkills_CommandStatus_NonExecutable verifies that a non-executable
+// skill gets an empty command_status (not applicable).
+func TestHandleListSkills_CommandStatus_NonExecutable(t *testing.T) {
+	uss := &fakeUserSkillStore{
+		skills: []store.UserSkill{
+			{ID: "1", Name: "docs-helper", Executable: false, Source: "user", Version: 1},
+		},
+	}
+	cp := &fakeCommandProvider{
+		commands: []agent.CommandInfo{},
+	}
+	srv := newSkillsTestServerWithCommands(t, uss, cp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/skills?source=user", nil)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp listSkillsWithStatusResp
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if len(resp.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d", len(resp.Skills))
+	}
+	// Non-executable skills get empty command_status
+	if resp.Skills[0].CommandStatus != "" {
+		t.Errorf("expected empty command_status for non-executable skill, got %q", resp.Skills[0].CommandStatus)
+	}
 }
