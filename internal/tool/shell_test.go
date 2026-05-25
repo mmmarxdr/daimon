@@ -165,8 +165,8 @@ func TestExecute_AllowAll_MetacharsStillWork(t *testing.T) {
 	}
 }
 
-// TestFirstShellMetachar covers the helper directly so the reject set is
-// pinned by a unit test, not only by integration cases above.
+// TestFirstShellMetachar covers the exported helper directly so the reject set
+// is pinned by a unit test, not only by integration cases above.
 func TestFirstShellMetachar(t *testing.T) {
 	reject := []struct {
 		in   string
@@ -187,9 +187,9 @@ func TestFirstShellMetachar(t *testing.T) {
 		{"foo\rbar", '\r'},
 	}
 	for _, tc := range reject {
-		got, ok := firstShellMetachar(tc.in)
+		got, ok := FirstShellMetachar(tc.in)
 		if !ok || got != tc.want {
-			t.Errorf("firstShellMetachar(%q) = (%q,%v), want (%q,true)", tc.in, got, ok, tc.want)
+			t.Errorf("FirstShellMetachar(%q) = (%q,%v), want (%q,true)", tc.in, got, ok, tc.want)
 		}
 	}
 
@@ -207,8 +207,8 @@ func TestFirstShellMetachar(t *testing.T) {
 		"ls foo?bar",
 	}
 	for _, in := range benign {
-		if _, ok := firstShellMetachar(in); ok {
-			t.Errorf("firstShellMetachar(%q) flagged a benign input", in)
+		if _, ok := FirstShellMetachar(in); ok {
+			t.Errorf("FirstShellMetachar(%q) flagged a benign input", in)
 		}
 	}
 }

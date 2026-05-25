@@ -61,7 +61,7 @@ type shellParams struct {
 // or NTFS mounts on WSL.
 const hardKillGrace = 500 * time.Millisecond
 
-// firstShellMetachar returns the first shell metacharacter present in s, if
+// FirstShellMetachar returns the first shell metacharacter present in s, if
 // any. These characters let a single command string expand into multiple
 // commands or subvert a base-command whitelist when executed via `sh -c`:
 //
@@ -69,7 +69,11 @@ const hardKillGrace = 500 * time.Millisecond
 //
 // Globs (* ? [ ]) and tildes are deliberately NOT in this set — without a
 // shell they are passed as literal arguments, which is harmless.
-func firstShellMetachar(s string) (rune, bool) {
+//
+// Exported as a single source of truth shared with the agent's argument-level
+// mode policy gate (internal/agent/modes.go). Any extension to this reject set
+// must be made here only — never duplicated.
+func FirstShellMetachar(s string) (rune, bool) {
 	for _, r := range s {
 		switch r {
 		case ';', '&', '|', '<', '>', '$', '`', '(', ')', '{', '}', '\n', '\r':
@@ -113,7 +117,7 @@ func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolRe
 		// smuggle a second command past the base-command check (the
 		// classic `cat f; rm -rf ~` bypass), then exec the binary directly
 		// with no shell involved.
-		if bad, ok := firstShellMetachar(cmdStr); ok {
+		if bad, ok := FirstShellMetachar(cmdStr); ok {
 			return ToolResult{
 				IsError: true,
 				Content: fmt.Sprintf("Command contains shell metacharacter %q which is not permitted when allow_all=false. Break it into separate tool calls, or enable tools.shell.allow_all.", bad),
