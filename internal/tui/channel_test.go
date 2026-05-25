@@ -16,7 +16,7 @@ var _ channel.Channel = (*TUIChannel)(nil)
 // TestTUIChannel_ImplementsChannelInterface is the runtime companion —
 // ensures the interface check above surfaces in the test binary.
 func TestTUIChannel_ImplementsChannelInterface(t *testing.T) {
-	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	ch := newTUIChannel()
 	// Must not panic and must return "tui".
 	if ch.Name() != "tui" {
 		t.Errorf("Name() = %q, want %q", ch.Name(), "tui")
@@ -28,7 +28,7 @@ func TestTUIChannel_ImplementsChannelInterface(t *testing.T) {
 // with the expected fields.
 func TestTUIChannel_Submit_EnqueuesIncomingMessage(t *testing.T) {
 	inbox := make(chan channel.IncomingMessage, 1)
-	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	ch := newTUIChannel()
 	_ = ch.Start(context.Background(), inbox)
 
 	cmd := ch.submit("hello world")
@@ -65,7 +65,7 @@ func TestTUIChannel_Submit_EnqueuesIncomingMessage(t *testing.T) {
 // TestTUIChannel_Send_EnqueuesAgentReplyMsg verifies that calling Send()
 // with an OutgoingMessage enqueues an agentReplyMsg onto the out channel.
 func TestTUIChannel_Send_EnqueuesAgentReplyMsg(t *testing.T) {
-	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	ch := newTUIChannel()
 	ctx := context.Background()
 
 	err := ch.Send(ctx, channel.OutgoingMessage{
@@ -93,7 +93,7 @@ func TestTUIChannel_Send_EnqueuesAgentReplyMsg(t *testing.T) {
 
 // TestTUIChannel_Stop_ReturnsNil verifies Stop() is a clean no-op.
 func TestTUIChannel_Stop_ReturnsNil(t *testing.T) {
-	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	ch := newTUIChannel()
 	if err := ch.Stop(); err != nil {
 		t.Errorf("Stop() = %v, want nil", err)
 	}
@@ -106,7 +106,7 @@ func TestTUIChannel_Stop_ReturnsNil(t *testing.T) {
 //
 // RED: without the nil-inbox guard the goroutine blocks indefinitely.
 func TestTUIChannel_Submit_NilInbox_DoesNotBlock(t *testing.T) {
-	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	ch := newTUIChannel()
 	// inbox is nil — Start has NOT been called.
 
 	done := make(chan tea.Msg, 1)

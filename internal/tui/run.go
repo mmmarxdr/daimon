@@ -7,6 +7,7 @@ package tui
 // (REFACTOR task 1.25).
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -51,6 +52,12 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		return err
 	}
 
+	// Wire the events channel BEFORE constructing the Model so the live model
+	// holds the channel from the start. Init() will start pumpEvents on it.
+	// FIX 1: pass context.Background() — goroutine exit is controlled by
+	// ch.done (closed by TUIChannel.Stop()) as the primary signal.
+	evCh := wireEvents(context.Background(), bus, ch)
+
 	m := Model{
 		styles:    newTuiStyles(),
 		ag:        ag,
@@ -61,6 +68,8 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		channelID: "tui",
 		senderID:  "local_user",
 		screen:    screenWelcome,
+		focus:     focusEditor,
+		events:    evCh,
 		topBar:    topBar{brand: "⫶"},
 		footer:    footerHints{screen: screenWelcome},
 		input:     newInputBar(),

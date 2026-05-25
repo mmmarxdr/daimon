@@ -1,14 +1,18 @@
-⫶ · /home/user/project · main                 claude-3-5 · build · $0.00 · ready
-
-
-
-
-
-
-                    ⫶ daimon
-             your embedded AI agent
-
+⫶ · /home/user/project · main              claude-opus-4 · build · $0.12 · ready
+you  Write a Go function that reverses a slice
+     .
+δ    Sure! Here's a generic reverse function:
+     
+     ```go
+     func Reverse[T any](s []T) {
+         for i, j := 0, len(s)-1; i < j; i, j 
+     = i+1, j-1 {
+             s[i], s[j] = s[j], s[i]
+         }
+     }
+     ```
+✓  write_file                          12L 48tok
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ › > message daimon…                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-enter: send  ctrl+c: quit  tab: sessions  t: tools
+enter: send  /: commands  tab: sessions  t: tools  ctrl+c: quit
