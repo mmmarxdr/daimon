@@ -20,7 +20,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"daimon/internal/agent"
@@ -261,7 +260,7 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 		nameRendered := marker + styles.label.Render(nameStr)
 		nameW := ansi.StringWidth(nameRendered)
 		sep := "  "
-		descAvail := innerWidth - nameW - len(sep)
+		descAvail := innerWidth - nameW - ansi.StringWidth(sep)
 		if descAvail < 0 {
 			descAvail = 0
 		}
@@ -275,7 +274,7 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 				row = styles.amber.Render("⚠ ") + styles.selected.Render(nameStr)
 			}
 			rowW := ansi.StringWidth(row)
-			descAvail2 := innerWidth - rowW - len(sep)
+			descAvail2 := innerWidth - rowW - ansi.StringWidth(sep)
 			if descAvail2 < 0 {
 				descAvail2 = 0
 			}
@@ -298,19 +297,12 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 
 	content := sb.String()
 
-	// Wrap in a styled border box.
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		Padding(0, 1).
-		BorderForeground(lipgloss.Color(colorAccent)).
-		Width(boxWidth - 4). // lipgloss Width sets inner content width
-		Render(content)
-
-	// Center the box horizontally and vertically.
-	return lipgloss.Place(width, height,
-		lipgloss.Center, lipgloss.Center,
-		box,
-	)
+	// Wrap in the centralized palette border box (styles.paletteBox).
+	// Width sets the inner content width (border+padding steal 4 cols).
+	// Return the raw bordered box; Model.View() calls placeOverlay to composite
+	// it over the dimmed base at the correct center position.
+	// lipgloss.Place is NOT called here — the caller (placeOverlay) handles centering.
+	return styles.paletteBox.Width(boxWidth - 4).Render(content)
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +311,7 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 
 // runCommandCmd returns a tea.Cmd that calls ag.RunCommand in a goroutine
 // and delivers the result as a commandResultMsg. No mutation in the closure.
+// V1 limitation: context.Background() is used — there is no cancellation on TUI exit.
 func runCommandCmd(ag *agent.Agent, name, args string, allowDestructive bool) tea.Cmd {
 	return func() tea.Msg {
 		res, err := ag.RunCommand(context.Background(), agent.RunCommandRequest{

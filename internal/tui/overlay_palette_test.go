@@ -498,6 +498,26 @@ func TestHandleChatKey_Slash_NonEmptyInput_DoesNotPushPalette(t *testing.T) {
 	}
 }
 
+// TestHandleChatKey_Slash_NonEmptyInput_ForwardsSlashToInput verifies that
+// pressing '/' when the input bar already has content forwards '/' to the input
+// (the character becomes part of the typed message).
+func TestHandleChatKey_Slash_NonEmptyInput_ForwardsSlashToInput(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.focus = focusEditor
+	m.input.ti.SetValue("hello")
+
+	msg := keyRunes("/")
+	next, _ := m.handleChatKey(msg)
+	nm := next.(Model)
+
+	// The input value must now contain "/".
+	val := nm.input.Value()
+	if !strings.Contains(val, "/") {
+		t.Errorf("after '/' with non-empty input: input value = %q, want it to contain '/'", val)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Group 3: model.Update messages
 // ---------------------------------------------------------------------------
@@ -521,21 +541,45 @@ func TestModel_Update_PopOverlayMsg_PopsOverlay(t *testing.T) {
 	}
 }
 
-func TestModel_Update_DispatchCommandMsg_PopsOverlayAndReturnsCmd(t *testing.T) {
+func TestModel_Update_DispatchCommandMsg_PopsOverlay(t *testing.T) {
 	m := newTestModel()
 	m.overlays.Push(newCommandPalette(testCmds, newTuiStyles()))
 
-	// dispatchCommandMsg with ag == nil — cmd should still be returned
-	// (the runCommandCmd closure panics on nil ag; that's acceptable in prod
-	// but our test just checks the cmd is non-nil and overlay is popped)
-	next, cmd := m.Update(dispatchCommandMsg{name: "ping", allowDestructive: false})
+	// With ag == nil: overlay is popped and "no agent connected" is appended.
+	next, _ := m.Update(dispatchCommandMsg{name: "ping", allowDestructive: false})
 	nm := next.(Model)
 
 	if nm.overlays.Active() {
 		t.Error("after dispatchCommandMsg: overlay should be popped")
 	}
-	if cmd == nil {
-		t.Error("dispatchCommandMsg should return a non-nil tea.Cmd (runCommandCmd)")
+}
+
+// TestModel_Update_DispatchCommandMsg_NilAg_AppendsErrorMessage verifies the
+// nil-ag guard: when ag == nil, dispatchCommandMsg appends "no agent connected"
+// to the thread (non-vacuous: drives the full dispatch→result path).
+func TestModel_Update_DispatchCommandMsg_NilAg_AppendsErrorMessage(t *testing.T) {
+	m := newTestModel() // ag is nil by default in newTestModel
+	m.overlays.Push(newCommandPalette(testCmds, newTuiStyles()))
+
+	// Execute dispatchCommandMsg — nil-ag guard must fire.
+	next, cmd := m.Update(dispatchCommandMsg{name: "ping", allowDestructive: false})
+	nm := next.(Model)
+
+	// cmd must be nil (nil-ag guard returns nil, not runCommandCmd).
+	if cmd != nil {
+		t.Errorf("nil-ag guard: expected nil cmd, got %T", cmd)
+	}
+
+	// The thread must contain the "no agent connected" message.
+	if len(nm.thread.items) == 0 {
+		t.Fatal("nil-ag guard: thread must have an item appended")
+	}
+	md, ok := nm.thread.items[len(nm.thread.items)-1].(*MsgDaimon)
+	if !ok {
+		t.Fatalf("nil-ag guard: last thread item is %T, want *MsgDaimon", nm.thread.items[len(nm.thread.items)-1])
+	}
+	if !strings.Contains(md.text, "no agent connected") {
+		t.Errorf("nil-ag guard: MsgDaimon.text = %q, want to contain 'no agent connected'", md.text)
 	}
 }
 

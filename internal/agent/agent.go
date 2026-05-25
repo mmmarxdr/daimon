@@ -923,6 +923,15 @@ func (a *Agent) Commands() []CommandInfo {
 // the collected reply text. Returns an error when the command is not found or
 // the handler returns an error.
 func (a *Agent) RunCommand(ctx context.Context, req RunCommandRequest) (CommandResult, error) {
+	// Backend enforcement: destructive commands require AllowDestructive=true.
+	// This guard applies regardless of caller (REST, TUI, or direct). The REST
+	// handler (handler_commands.go) also gates at its layer and only calls
+	// RunCommand with AllowDestructive=true for destructive cmds — so this is
+	// defence-in-depth, not a double-block for the REST path.
+	if IsDestructiveCommand(req.Name) && !req.AllowDestructive {
+		return CommandResult{}, fmt.Errorf("command %q is destructive: set AllowDestructive=true to confirm", req.Name)
+	}
+
 	h, ok := a.commands.Lookup(req.Name)
 	if !ok {
 		return CommandResult{}, fmt.Errorf("command not found: %s", req.Name)

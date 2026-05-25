@@ -158,8 +158,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
+			// ctrl+c always quits regardless of overlay or focus state.
 			return m, tea.Quit
+		case "q":
+			// Bare 'q' quits ONLY in navigation context: no active overlay and
+			// focus is NOT on the editor (where 'q' is a valid typed character).
+			if !m.overlays.Active() && m.focus != focusEditor && m.focus != focusNone {
+				return m, tea.Quit
+			}
 		}
 
 	// PR2b: todolistRefreshMsg arrives from fetchTodolist Cmd after
@@ -204,6 +211,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dispatchCommandMsg:
 		m.overlays.Pop()
+		if m.ag == nil {
+			m.thread.append(&MsgDaimon{text: "no agent connected", styles: m.styles})
+			return m, nil
+		}
 		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
 
 	case commandResultMsg:
@@ -271,16 +282,20 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model. It renders the active screen with persistent
 // shell (TopBar + optional InputBar + FooterHints) and the right rail.
-// When overlays are active the topmost dialog is composited last (drawn on top).
+// When overlays are active the topmost dialog is composited OVER the dimmed
+// base (AD-9: "composited over the dimmed main layout") so chat content remains
+// visible around the palette instead of being discarded.
 func (m Model) View() string {
 	if m.width == 0 {
 		return ""
 	}
 	base := renderLayout(m)
 	if m.overlays.Active() {
-		overlay := m.overlays.Render(m.width, m.height, m.styles)
-		if overlay != "" {
-			return overlay
+		box := m.overlays.Render(m.width, m.height, m.styles)
+		if box != "" {
+			// Dim the base (best-effort; content remains visible outside the box).
+			dimmedBase := m.styles.dim.Render(base)
+			return placeOverlay(dimmedBase, box, m.width, m.height)
 		}
 	}
 	return base
