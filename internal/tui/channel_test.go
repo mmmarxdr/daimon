@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"daimon/internal/channel"
 )
 
@@ -94,5 +96,32 @@ func TestTUIChannel_Stop_ReturnsNil(t *testing.T) {
 	ch := &TUIChannel{out: make(chan interface{}, 64)}
 	if err := ch.Stop(); err != nil {
 		t.Errorf("Stop() = %v, want nil", err)
+	}
+}
+
+// TestTUIChannel_Submit_NilInbox_DoesNotBlock verifies that calling submit()
+// on a TUIChannel whose Start has NOT been called (inbox == nil) returns
+// promptly without blocking. Before the fix, c.inbox <- im would block
+// forever, leaking the goroutine and causing this test to time out.
+//
+// RED: without the nil-inbox guard the goroutine blocks indefinitely.
+func TestTUIChannel_Submit_NilInbox_DoesNotBlock(t *testing.T) {
+	ch := &TUIChannel{out: make(chan interface{}, 64)}
+	// inbox is nil — Start has NOT been called.
+
+	done := make(chan tea.Msg, 1)
+	go func() {
+		cmd := ch.submit("will this block?")
+		done <- cmd()
+	}()
+
+	select {
+	case msg := <-done:
+		// Must return promptSentMsg (or at minimum must not block).
+		if _, ok := msg.(promptSentMsg); !ok {
+			t.Errorf("submit() on nil inbox returned %T, want promptSentMsg", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("submit() on nil inbox blocked for 2s — goroutine leak (nil-inbox guard missing)")
 	}
 }

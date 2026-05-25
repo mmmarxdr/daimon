@@ -88,8 +88,15 @@ func (c *TUIChannel) Stop() error { return nil }
 // This MUST be called only as a tea.Cmd (i.e., returned from Update), never
 // invoked inline. The blocking send to c.inbox runs on the Cmd's goroutine,
 // keeping Update IO-free.
+//
+// Guard: if inbox is nil (Start has not been called), returns promptSentMsg
+// immediately to avoid an indefinite goroutine block.
 func (c *TUIChannel) submit(text string) tea.Cmd {
 	return func() tea.Msg {
+		if c.inbox == nil {
+			// Agent not started yet; drop the message rather than block forever.
+			return promptSentMsg{}
+		}
 		im := channel.IncomingMessage{
 			ID:        uuid.New().String(),
 			ChannelID: "tui",
