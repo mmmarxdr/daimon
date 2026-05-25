@@ -107,6 +107,14 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		m.thread.append(tl)
 		// Start spinner animation.
 		cmds = append(cmds, tl.Tick())
+		// PR2b: Update telemetry panel tool-call count (copy-on-write).
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+				cp := *tp
+				cp.accumulate(ev)
+				panels[panelTelemetry] = &cp
+			}
+		})
 
 	case notify.EventToolEnd:
 		// Transition existing ToolLine to done or error.
@@ -130,6 +138,14 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			newItems[idx] = &tlCopy
 			m.thread.items = newItems
 		}
+		// PR2b: Update telemetry panel error count (copy-on-write).
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+				cp := *tp
+				cp.accumulate(ev)
+				panels[panelTelemetry] = &cp
+			}
+		})
 
 	case notify.EventTurnCompleted:
 		// C4 FIX: agentReplyMsg (TUIChannel.Send path) is the SINGLE source of
@@ -171,15 +187,26 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		}
 
 	case notify.EventTokensUsage:
-		// Telemetry rail update (PR2b rail panels will consume this).
-		// Store on activeConvID for future rail panels; no thread mutation here.
-		_ = ev.TokenCount
-		_ = ev.CostUSD
+		// PR2b: Update telemetry and context-meter rail panels.
+		// Copy-on-write: copy each panel value, mutate the copy, replace in map.
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+				cp := *tp
+				cp.accumulate(ev)
+				panels[panelTelemetry] = &cp
+			}
+			if cm, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+				cp := *cm
+				cp.accumulate(ev)
+				panels[panelContextMeter] = &cp
+			}
+		})
 
 	case notify.EventTodolistChanged:
-		// Todolist rail refresh (PR2b rail panels will react to this).
-		// No thread mutation; the rail panel will call TodoListForConv.
-		_ = ev.ChannelID
+		// PR2b: Schedule a TodoListForConv re-read via a tea.Cmd (Cmd discipline —
+		// no IO in Update). The result arrives as a todolistRefreshMsg which is
+		// handled in Model.Update to update the todolist panel.
+		cmds = append(cmds, fetchTodolist(m.ag, m.activeConvID))
 	}
 
 	// Re-issue pump so the drain loop continues.

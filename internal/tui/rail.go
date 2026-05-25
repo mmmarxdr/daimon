@@ -1,8 +1,8 @@
 package tui
 
-// rail.go — right-rail panel stub (PR2+ implements concrete panel types).
-// PR1 declares the Panel interface, rail type, and railWidth constant so
-// the layout math in renderLayout compiles.
+// rail.go — right-rail panel container (PR2b populates concrete panel types).
+// PR1 declared the Panel interface and the rail type skeleton.
+// PR2b (this PR) adds newRail() which wires the three chat-screen panels.
 
 // railWidth is the fixed column width of the right rail when panels are active.
 const railWidth = 32
@@ -14,9 +14,22 @@ type Panel interface {
 }
 
 // rail manages the set of active panels for the current screen.
-// PR2-5 populate concrete panel implementations; PR1 keeps this a stub.
 type rail struct {
 	panels map[panelID]Panel
+}
+
+// newRail constructs a rail with the concrete panels wired for every screen
+// that PR2b delivers (chat: todolist, context-meter, telemetry).
+// Panels for later screens (diff, error, tools, sessions, welcome) are added
+// by their respective PRs; until then, rail.Render simply skips missing IDs.
+func newRail(s tuiStyles) rail {
+	return rail{
+		panels: map[panelID]Panel{
+			panelTodolist:     newTodolistPanel(s),
+			panelContextMeter: newContextMeterPanel(s),
+			panelTelemetry:    newTelemetryPanel(s),
+		},
+	}
 }
 
 // Render renders all active panels for `screen` stacked vertically.
@@ -41,4 +54,19 @@ func (r *rail) Render(screen screenState, width, height int) string {
 // HasPanels reports whether the given screen has any rail panels.
 func HasPanels(screen screenState) bool {
 	return len(panelsFor(screen)) > 0
+}
+
+// copyRailWith returns a new rail whose panel map is a shallow copy of r.panels
+// with the mutations applied by fn. This enables copy-on-write panel updates
+// in Model.Update (value-receiver): we never mutate the map of the prior model.
+//
+// fn receives the NEW (copied) map and may replace panel entries in it.
+// The original r is not modified.
+func copyRailWith(r rail, fn func(map[panelID]Panel)) rail {
+	newPanels := make(map[panelID]Panel, len(r.panels))
+	for k, v := range r.panels {
+		newPanels[k] = v
+	}
+	fn(newPanels)
+	return rail{panels: newPanels}
 }

@@ -58,8 +58,9 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 	// ch.done (closed by TUIChannel.Stop()) as the primary signal.
 	evCh := wireEvents(context.Background(), bus, ch)
 
+	s := newTuiStyles()
 	m := Model{
-		styles:    newTuiStyles(),
+		styles:    s,
 		ag:        ag,
 		bus:       bus,
 		store:     st,
@@ -73,6 +74,7 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		topBar:    topBar{brand: "⫶"},
 		footer:    footerHints{screen: screenWelcome},
 		input:     newInputBar(),
+		rail:      newRail(s),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
