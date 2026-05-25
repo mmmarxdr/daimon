@@ -72,10 +72,15 @@ func runTUICommand(args []string, cfgPath string) error {
 	// 6. TUIChannel — wired as the agent's user-facing channel.
 	tuiCh := tui.NewTUIChannel()
 
-	// 7. Build the notification bus (nil if notifications disabled).
+	// 7. Single mux shared by the notification sender and the agent so both
+	// routes reach the same TUIChannel instance (C4 fix: was two separate mux
+	// instances wrapping tuiCh, meaning agent and notification sender used
+	// different wrappers around the same channel).
+	mux := channel.NewMultiplexChannel([]channel.Channel{tuiCh})
+
+	// 8. Build the notification bus (nil if notifications disabled).
 	var notifyBus notify.Bus
 	if cfg.Notifications.Enabled && len(cfg.Notifications.Rules) > 0 {
-		mux := channel.NewMultiplexChannel([]channel.Channel{tuiCh})
 		bus := notify.NewEventBus(
 			cfg.Notifications.BusBufferSize,
 			cfg.Notifications.MaxPerMinute,
@@ -89,8 +94,7 @@ func runTUICommand(args []string, cfgPath string) error {
 		notifyBus = bus
 	}
 
-	// 8. Agent.
-	mux := channel.NewMultiplexChannel([]channel.Channel{tuiCh})
+	// 9. Agent (reuses the mux constructed above).
 	ag := agent.New(
 		cfg.Agent, cfg.Limits, cfg.Filter,
 		mux, prov, st,
@@ -104,7 +108,14 @@ func runTUICommand(args []string, cfgPath string) error {
 	// wireTodo is a package-private function in main; call via the exported path.
 	// The TUI uses the agent accessor TodoListForConv, not the tool directly.
 
-	// 9. Start agent loop in background — exits when ctx is cancelled.
+	// 10. Shutdown agent when RunTUI returns (S-b fix: prevents EventBus goroutine leak).
+	defer func() {
+		if err := ag.Shutdown(); err != nil {
+			slog.Error("tui: agent shutdown error", "error", err)
+		}
+	}()
+
+	// 11. Start agent loop in background — exits when ctx is cancelled.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -117,6 +128,6 @@ func runTUICommand(args []string, cfgPath string) error {
 		close(agErrCh)
 	}()
 
-	// 10. RunTUI blocks until the user quits (Ctrl+C / q).
+	// 12. RunTUI blocks until the user quits (Ctrl+C / q).
 	return tui.RunTUI(cfg, ag, notifyBus, st)
 }
