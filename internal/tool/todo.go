@@ -20,6 +20,11 @@ import (
 // the cap; "completed" and "cancelled" items do not (AD-5).
 const maxActiveTodos = 200
 
+// TodoMetadataKey is the conv.Metadata key under which the JSON-encoded
+// TodoList is stored. Exported so the agent bridge can read/write the key
+// without duplicating the constant.
+const TodoMetadataKey = "daimon/todolist"
+
 // IDGen is the function type used to generate todo item IDs.
 // The default implementation uses crypto/rand; tests inject deterministic sequences.
 type IDGen func() string
@@ -67,7 +72,11 @@ type TodoList struct {
 // Mutate decodes the current list, invokes fn with a pointer to it, then
 // encodes and persists the result. It returns the final list so callers can
 // inspect counts for event payloads.
-type TodoMutator func(convID string, mutate func(list *TodoList) error) (TodoList, error)
+//
+// The mutate closure returns the affected item's ID (the created or modified
+// item); "" means no item was affected (e.g. id not found), which signals the
+// persistence/event layer to skip emitting a change event.
+type TodoMutator func(convID string, mutate func(list *TodoList) (itemID string, err error)) (TodoList, error)
 
 // TodoToolDeps holds the callback dependencies for the todo tool set.
 // Using callback functions avoids import cycles between internal/tool and
@@ -100,6 +109,13 @@ func encodeTodoList(list TodoList) (string, error) {
 	return string(b), nil
 }
 
+// EncodeTodoList is the exported counterpart of encodeTodoList.
+// Used by the agent bridge (internal/agent/todo_bridge.go) to persist the list
+// without duplicating the encoding logic.
+func EncodeTodoList(list TodoList) (string, error) {
+	return encodeTodoList(list)
+}
+
 // decodeTodoList deserialises a JSON string produced by encodeTodoList.
 // An empty or absent key (s == "") returns a default TodoList{Version:1}
 // with no error, satisfying the zero-value-is-useful contract (AD-7, REQ-1).
@@ -112,6 +128,12 @@ func decodeTodoList(s string) (TodoList, error) {
 		return TodoList{Version: 1}, fmt.Errorf("decodeTodoList: %w", err)
 	}
 	return list, nil
+}
+
+// DecodeTodoList is the exported counterpart of decodeTodoList.
+// Used by the agent bridge (internal/agent/todo_bridge.go).
+func DecodeTodoList(s string) (TodoList, error) {
+	return decodeTodoList(s)
 }
 
 // validStatuses is the set of permitted status enum values (AD-8).
@@ -255,10 +277,10 @@ func (t *todoCreateTool) Execute(ctx context.Context, params json.RawMessage) (T
 	var createdID string
 	var createdPos int
 
-	finalList, err := t.deps.Mutate(convID, func(list *TodoList) error {
+	finalList, err := t.deps.Mutate(convID, func(list *TodoList) (string, error) {
 		// AD-5: soft cap on active (non-terminal) items.
 		if countActiveItems(list.Items) >= maxActiveTodos {
-			return fmt.Errorf("todo list full: max %d active items (complete or cancel some first)", maxActiveTodos)
+			return "", fmt.Errorf("todo list full: max %d active items (complete or cancel some first)", maxActiveTodos)
 		}
 
 		id := generateID(t.deps.IDGen, list.Items)
@@ -294,7 +316,7 @@ func (t *todoCreateTool) Execute(ctx context.Context, params json.RawMessage) (T
 
 		createdID = id
 		createdPos = targetPos
-		return nil
+		return id, nil
 	})
 	if err != nil {
 		return ToolResult{IsError: true, Content: err.Error()}, nil
@@ -383,7 +405,7 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 	// item was not found without returning an error (not-found is non-fatal).
 	notFound := false
 
-	_, err := t.deps.Mutate(convID, func(list *TodoList) error {
+	_, err := t.deps.Mutate(convID, func(list *TodoList) (string, error) {
 		var target *TodoItem
 		for i := range list.Items {
 			if list.Items[i].ID == input.ID {
@@ -393,12 +415,12 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 		}
 		if target == nil {
 			notFound = true
-			return nil
+			return "", nil // no item affected; signals bridge to skip event
 		}
 
 		// AD-8: cancelled is terminal — no transition out of cancelled is permitted.
 		if target.Status == "cancelled" && input.Status != nil {
-			return fmt.Errorf("%w (%s)", errCancelledTerminal, input.ID)
+			return "", fmt.Errorf("%w (%s)", errCancelledTerminal, input.ID)
 		}
 
 		if input.Content != nil {
@@ -408,7 +430,7 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 			target.Status = *input.Status
 		}
 		target.UpdatedAt = time.Now().UTC()
-		return nil
+		return input.ID, nil
 	})
 
 	switch {

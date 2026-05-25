@@ -37,8 +37,8 @@ func newFakeStore() *fakeStore {
 func (fs *fakeStore) deps(idg IDGen) TodoToolDeps {
 	return TodoToolDeps{
 		IDGen: idg,
-		Mutate: func(convID string, mutate func(*TodoList) error) (TodoList, error) {
-			if err := mutate(&fs.list); err != nil {
+		Mutate: func(convID string, mutate func(*TodoList) (string, error)) (TodoList, error) {
+			if _, err := mutate(&fs.list); err != nil {
 				return TodoList{}, err
 			}
 			return fs.list, nil
@@ -577,7 +577,7 @@ func TestTodoList_NeverMutates(t *testing.T) {
 	}
 	deps := TodoToolDeps{
 		IDGen: newSeqIDGen(),
-		Mutate: func(convID string, fn func(*TodoList) error) (TodoList, error) {
+		Mutate: func(convID string, fn func(*TodoList) (string, error)) (TodoList, error) {
 			mutated = true
 			return TodoList{}, nil
 		},
