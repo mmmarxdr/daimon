@@ -213,6 +213,11 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	// per-turn snapshot reflects the conversation's persisted mode. Defaults to
 	// "build" if key is absent, empty, or contains an unrecognised value.
 	a.loadMode(conv)
+	// AD-1 (todolist D4): register the live *conv so todo tool callbacks can
+	// locate and mutate it in place during this turn. The defer ensures the
+	// registry slot is released even on early returns from processMessage.
+	a.registerActiveConv(conv)
+	defer a.unregisterActiveConv(conv.ID)
 	// AD-3: capture mode snapshot ONCE per turn, before buildSystemPrompt and
 	// buildToolDefs. Both functions receive this snapshot as a parameter (REQ-11).
 	modeSnap := a.modeSnapshot()
