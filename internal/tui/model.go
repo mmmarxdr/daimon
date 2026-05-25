@@ -246,5 +246,6 @@ func newTestModel() Model {
 		senderID:  "local_user",
 		screen:    screenWelcome,
 		focus:     focusEditor,
+		input:     newInputBar(),
 	}
 }

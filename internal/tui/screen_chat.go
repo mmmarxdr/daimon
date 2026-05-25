@@ -210,26 +210,30 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "r":
-		// Toggle the most-recent Reasoning item's expanded state.
-		// The collapsed view shows "press r to expand" as the affordance.
-		// Copy-on-write: build a new items slice with the updated Reasoning value.
-		newItems := make([]threadItem, len(m.thread.items))
-		copy(newItems, m.thread.items)
-		for i := len(newItems) - 1; i >= 0; i-- {
-			if r, ok := newItems[i].(*Reasoning); ok {
-				// Copy the Reasoning value so we don't mutate the prior model.
-				rCopy := *r
-				if rCopy.Expanded() {
-					rCopy.Collapse()
-				} else {
-					rCopy.Expand()
+		// FIX 3: 'r' toggles the most-recent Reasoning ONLY when focus is on
+		// the thread (focusMain). When focusEditor is active, 'r' must fall
+		// through to the input bar so the user can type 'r' normally.
+		if m.focus != focusEditor && m.focus != focusNone {
+			// Copy-on-write: build a new items slice with the updated Reasoning value.
+			newItems := make([]threadItem, len(m.thread.items))
+			copy(newItems, m.thread.items)
+			for i := len(newItems) - 1; i >= 0; i-- {
+				if r, ok := newItems[i].(*Reasoning); ok {
+					// Copy the Reasoning value so we don't mutate the prior model.
+					rCopy := *r
+					if rCopy.Expanded() {
+						rCopy.Collapse()
+					} else {
+						rCopy.Expand()
+					}
+					newItems[i] = &rCopy
+					break
 				}
-				newItems[i] = &rCopy
-				break
 			}
+			m.thread.items = newItems
+			return m, nil
 		}
-		m.thread.items = newItems
-		return m, nil
+		// Focus is on editor — fall through to input bar below.
 
 	case "tab":
 		// Switch focus between editor and main (thread navigation).
@@ -243,9 +247,16 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "esc":
-		// Return focus to editor from main.
-		m.focus = focusEditor
-		m.input.Focus()
+		// FIX 3: Esc toggles focusEditor ↔ focusMain so the reasoning toggle
+		// ('r') remains reachable after the user switches to thread navigation.
+		// Previously Esc always returned to focusEditor unconditionally.
+		if m.focus == focusEditor || m.focus == focusNone {
+			m.focus = focusMain
+			m.input.Blur()
+		} else {
+			m.focus = focusEditor
+			m.input.Focus()
+		}
 		return m, nil
 	}
 

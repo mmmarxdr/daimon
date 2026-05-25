@@ -13,6 +13,6 @@ you  Write a Go function that reverses a slice
      ```
 ✓  write_file                          12L 48tok
 ╭──────────────────────────────────────────────────────────────────────────────╮
-│ ›                                                                            │
+│ › > message daimon…                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 enter: send  /: commands  tab: sessions  t: tools  ctrl+c: quit
