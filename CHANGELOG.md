@@ -43,6 +43,17 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
   before mutation. Shell-tool integration lands in WU6 (PR3) — the override exists
   in process memory ahead of the wiring. (PR2, REQ-5, REQ-23)
 
+### Fixed
+
+- **Review-mode `shell_exec` arg-restricted to read-only git**: `shell_exec` is now
+  permitted in review mode but argument-restricted to the five read-only git commands
+  (`git diff`, `git log`, `git show`, `git status`, `git blame`). Any other command,
+  shell metacharacter, or the `--output` file-write flag is rejected with an error
+  message that names the permitted set. Fixed the dead `"Bash"` entry in
+  `reviewAllowlist` (bug #438) that had silently blocked the shell in review mode
+  entirely — the allowlist now references the real registered tool name `shell_exec`.
+  (change tool-arg-policy #6 of 8)
+
 ---
 
 ## [v0.11.1] — New-chat escape hatch
