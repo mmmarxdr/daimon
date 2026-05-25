@@ -196,6 +196,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, pumpEvents(m.events)
 		}
 		return m, nil
+
+	// PR3a: overlay lifecycle messages — handled globally, before overlay-interception.
+	case popOverlayMsg:
+		m.overlays.Pop()
+		return m, nil
+
+	case dispatchCommandMsg:
+		m.overlays.Pop()
+		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
+
+	case commandResultMsg:
+		text := msg.reply
+		if msg.err != nil {
+			text = "command failed: " + msg.err.Error()
+		}
+		m.thread.append(&MsgDaimon{text: text, styles: m.styles})
+		return m, nil
 	}
 
 	// 2. Overlays intercept ALL messages before screen routing (AD-9 / PR3).
@@ -254,11 +271,19 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model. It renders the active screen with persistent
 // shell (TopBar + optional InputBar + FooterHints) and the right rail.
+// When overlays are active the topmost dialog is composited last (drawn on top).
 func (m Model) View() string {
 	if m.width == 0 {
 		return ""
 	}
-	return renderLayout(m)
+	base := renderLayout(m)
+	if m.overlays.Active() {
+		overlay := m.overlays.Render(m.width, m.height, m.styles)
+		if overlay != "" {
+			return overlay
+		}
+	}
+	return base
 }
 
 // ---------------------------------------------------------------------------
