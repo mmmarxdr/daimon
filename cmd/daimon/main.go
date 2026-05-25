@@ -559,6 +559,7 @@ func main() {
 		}
 	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
+	wireTodo(ag, notifyBus, toolsRegistry)
 	stopPricing := wireRuntimePricing(prov, 6*time.Hour)
 	defer stopPricing()
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
@@ -603,6 +604,7 @@ func main() {
 			}()
 		}
 		wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
+		wireTodo(ag, notifyBus, toolsRegistry)
 		// Re-wire RAG into the rebuilt agent (web path). Reuse the DocumentStore
 		// + embed function built by wireRAG — do NOT construct a second store.
 		if ragWiring.Worker != nil && ragWiring.Store != nil {
