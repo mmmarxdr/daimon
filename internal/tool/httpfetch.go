@@ -60,6 +60,17 @@ type httpParams struct {
 	Headers map[string]string `json:"headers"`
 }
 
+// Inspect implements ToolInspector. http_fetch makes outbound network calls and
+// supports POST which can mutate remote state: side-effects/network/user.
+func (t *HTTPFetchTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatNetwork,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *HTTPFetchTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var input httpParams
 	if err := json.Unmarshal(params, &input); err != nil {

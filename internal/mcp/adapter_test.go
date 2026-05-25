@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"daimon/internal/tool"
 )
 
 // ---------------------------------------------------------------------------
@@ -280,6 +282,50 @@ func TestMCPToolAdapter_Execute_RemoteName(t *testing.T) {
 		}
 		if gotName != "my_tool" {
 			t.Errorf("CallTool received name %q, want %q", gotName, "my_tool")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TestMCPToolAdapter_Inspect (Phase 3 — REQ-5)
+// ---------------------------------------------------------------------------
+
+// TestMCPToolAdapter_Inspect asserts that MCPToolAdapter implements ToolInspector
+// and returns side-effects/mcp/user/mcp per spec REQ-5.
+// Design AD-7 (destructive/admin) is explicitly WRONG per the spec override —
+// this test enforces the correct values.
+func TestMCPToolAdapter_Inspect(t *testing.T) {
+	mock := &mockMCPCaller{
+		callToolFn: func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{}, nil
+		},
+	}
+	a := newAdapter(mock, "some_mcp_tool", "does remote things")
+
+	inspector, ok := tool.Tool(a).(tool.ToolInspector)
+	if !ok {
+		t.Fatal("MCPToolAdapter does not implement tool.ToolInspector")
+	}
+	got := inspector.Inspect()
+
+	t.Run("Risk is side-effects", func(t *testing.T) {
+		if got.Risk != tool.RiskSideEffects {
+			t.Errorf("Risk = %q, want %q", got.Risk, tool.RiskSideEffects)
+		}
+	})
+	t.Run("Category is mcp", func(t *testing.T) {
+		if got.Category != tool.CatMCP {
+			t.Errorf("Category = %q, want %q", got.Category, tool.CatMCP)
+		}
+	})
+	t.Run("Permission is user", func(t *testing.T) {
+		if got.Permission != tool.PermUser {
+			t.Errorf("Permission = %q, want %q", got.Permission, tool.PermUser)
+		}
+	})
+	t.Run("Source is mcp", func(t *testing.T) {
+		if got.Source != tool.SourceMCP {
+			t.Errorf("Source = %q, want %q", got.Source, tool.SourceMCP)
 		}
 	})
 }

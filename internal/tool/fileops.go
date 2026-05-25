@@ -138,6 +138,17 @@ type writeParams struct {
 	Content string `json:"content"`
 }
 
+// Inspect implements ToolInspector. write_file mutates the filesystem and is
+// therefore side-effects/file/user.
+func (t *WriteFileTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatFile,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *WriteFileTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var input writeParams
 	if err := json.Unmarshal(params, &input); err != nil {

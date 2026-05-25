@@ -50,6 +50,19 @@ func (a *MCPToolAdapter) Schema() json.RawMessage {
 	return raw
 }
 
+// Inspect implements tool.ToolInspector. MCP tools are arbitrary remote code
+// whose behavior is unknown at registration time. Conservative tagging:
+// side-effects/mcp/user/mcp. (spec REQ-5; design AD-7 override applies here —
+// the spec value is side-effects/user, not destructive/admin.)
+func (a *MCPToolAdapter) Inspect() tool.ToolMeta {
+	return tool.ToolMeta{
+		Risk:       tool.RiskSideEffects,
+		Category:   tool.CatMCP,
+		Permission: tool.PermUser,
+		Source:     tool.SourceMCP,
+	}
+}
+
 // Execute invokes the remote MCP tool and converts the result to tool.ToolResult.
 //
 // Error translation policy:
