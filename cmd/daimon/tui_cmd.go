@@ -70,7 +70,9 @@ func runTUICommand(args []string, cfgPath string) error {
 	}
 
 	// 6. TUIChannel — wired as the agent's user-facing channel.
+	// defer Stop() so wireEvents goroutine exits deterministically when RunTUI returns.
 	tuiCh := tui.NewTUIChannel()
+	defer tuiCh.Stop() //nolint:errcheck // Stop() always returns nil
 
 	// 7. Single mux shared by the notification sender and the agent so both
 	// routes reach the same TUIChannel instance (C4 fix: was two separate mux

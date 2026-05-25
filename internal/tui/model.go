@@ -162,6 +162,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+	// PR2b: todolistRefreshMsg arrives from fetchTodolist Cmd after
+	// EventTodolistChanged. Update the todolist panel via copy-on-write.
+	case todolistRefreshMsg:
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if tp, ok := panels[panelTodolist].(*todolistPanel); ok {
+				cp := *tp
+				cp.setList(msg.list)
+				panels[panelTodolist] = &cp
+			}
+		})
+		return m, nil
+
 	// C3: Handle bus/reply messages globally so the pump is re-armed regardless
 	// of which screen is active. The chat screen handler also processes these
 	// for thread mutations when screen == screenChat.
@@ -239,13 +251,15 @@ func (m Model) View() string {
 // A fresh TUIChannel is allocated so tests that exercise m.ch don't panic on nil.
 // ---------------------------------------------------------------------------
 func newTestModel() Model {
+	s := newTuiStyles()
 	return Model{
-		styles:    newTuiStyles(),
+		styles:    s,
 		ch:        newTUIChannel(),
 		channelID: "tui",
 		senderID:  "local_user",
 		screen:    screenWelcome,
 		focus:     focusEditor,
 		input:     newInputBar(),
+		rail:      newRail(s),
 	}
 }
