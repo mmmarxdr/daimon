@@ -299,3 +299,54 @@ func TestBuildMode_NilAllowlistPassesAll(t *testing.T) {
 		t.Errorf("build mode should pass all tools; got %d, want %d", len(filtered), len(defs))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ArgAllowlists data-model tests (C2: AD-1, REQ-7)
+// ---------------------------------------------------------------------------
+
+// TestModeDefinitionArgAllowlists asserts the ArgAllowlists field is wired
+// correctly on all three mode definitions. Review gets the read-only git set;
+// plan and build leave ArgAllowlists nil (no arg restriction).
+func TestModeDefinitionArgAllowlists(t *testing.T) {
+	wantShellExec := []string{"git diff", "git log", "git show", "git status", "git blame"}
+
+	t.Run("review ArgAllowlists non-nil", func(t *testing.T) {
+		def, err := LookupMode("review")
+		if err != nil {
+			t.Fatalf("LookupMode(review): %v", err)
+		}
+		if def.ArgAllowlists == nil {
+			t.Fatal("review ArgAllowlists must not be nil")
+		}
+	})
+
+	t.Run("review ArgAllowlists[shell_exec] exact", func(t *testing.T) {
+		def, _ := LookupMode("review")
+		got, ok := def.ArgAllowlists["shell_exec"]
+		if !ok {
+			t.Fatal("review ArgAllowlists must have entry for shell_exec")
+		}
+		if len(got) != len(wantShellExec) {
+			t.Fatalf("ArgAllowlists[shell_exec] len=%d, want %d; got %v", len(got), len(wantShellExec), got)
+		}
+		for i, w := range wantShellExec {
+			if got[i] != w {
+				t.Errorf("ArgAllowlists[shell_exec][%d] = %q, want %q", i, got[i], w)
+			}
+		}
+	})
+
+	t.Run("plan ArgAllowlists nil", func(t *testing.T) {
+		def, _ := LookupMode("plan")
+		if def.ArgAllowlists != nil {
+			t.Errorf("plan ArgAllowlists should be nil, got %v", def.ArgAllowlists)
+		}
+	})
+
+	t.Run("build ArgAllowlists nil", func(t *testing.T) {
+		def, _ := LookupMode("build")
+		if def.ArgAllowlists != nil {
+			t.Errorf("build ArgAllowlists should be nil, got %v", def.ArgAllowlists)
+		}
+	})
+}

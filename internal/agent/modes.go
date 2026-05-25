@@ -62,6 +62,13 @@ type ModeDefinition struct {
 	//   []string{}  → NONE: all tools blocked (use case: future read-only posture).
 	//   non-empty   → only the listed tool names are allowed.
 	ToolAllowlist []string
+	// ArgAllowlists gates tool ARGUMENTS keyed by tool name. Values are allowed
+	// command prefixes (1-2 leading whitespace-split tokens). Semantics:
+	//   nil map        → no arg restriction for ANY tool (plan/build default)
+	//   no entry/tool  → no arg restriction for THAT tool
+	//   entry present  → only commands whose leading tokens match are allowed,
+	//                    and any shell metachar is rejected unconditionally.
+	ArgAllowlists map[string][]string
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +141,14 @@ var planAllowlist = append(append([]string{}, baseReadOnly...), "todo_create", "
 // (name-level only; argument-level restriction deferred to change #6 per spec gap note in REQ-7.)
 var reviewAllowlist = append(append([]string{}, baseReadOnly...), "Bash")
 
+// reviewArgAllowlists is the argument-level allowlist for review mode.
+// Only read-only git sub-commands are permitted for shell_exec.
+// Indexed by tool name; each entry is a list of allowed leading-token prefixes
+// (1-2 whitespace-split tokens — see isArgAllowed for matching semantics).
+var reviewArgAllowlists = map[string][]string{
+	"shell_exec": {"git diff", "git log", "git show", "git status", "git blame"},
+}
+
 // ---------------------------------------------------------------------------
 // Mode definitions table (package-private)
 // ---------------------------------------------------------------------------
@@ -155,6 +170,7 @@ var modes = map[string]ModeDefinition{
 		Name:          "review",
 		SystemPrompt:  reviewPrompt,
 		ToolAllowlist: reviewAllowlist,
+		ArgAllowlists: reviewArgAllowlists,
 	},
 }
 
