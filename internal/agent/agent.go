@@ -165,6 +165,18 @@ type Agent struct {
 	channelName     string
 	bus             notify.Bus
 
+	// activeTurns is a per-turn registry of live *store.Conversation pointers,
+	// keyed by conversation ID. It enables the todo bridge callbacks to locate
+	// the in-flight *conv and mutate its Metadata in place so the existing
+	// turn-end SaveConversation at loop.go:952 persists the change naturally
+	// (D4 resolution, AD-1).
+	//
+	// Lock ordering: activeTurnsMu is INDEPENDENT of all other agent mutexes
+	// (modeMu, providerMu, toolsMu). Never hold activeTurnsMu while calling
+	// the store or the bus — copy the pointer out, release the lock, then act.
+	activeTurns   map[string]*store.Conversation
+	activeTurnsMu sync.Mutex
+
 	// RAG fields — nil when RAG is not wired.
 	ragStore         rag.DocumentStore
 	ragEmbedFn       func(context.Context, string) ([]float32, error)
@@ -322,6 +334,7 @@ func New(
 		activeConv:      newConvOverrides(),
 		channelName:     ch.Name(),
 		newProviderFn:   provider.NewFromConfig,
+		activeTurns:     make(map[string]*store.Conversation),
 	}
 	// Re-wire sub-components to use the live-snapshot closure now that `a` exists.
 	// The staticProvFn used at construction read the original `prov` by value.
