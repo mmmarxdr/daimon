@@ -191,3 +191,43 @@ func TestTUIChannel_WiringIntegrity(t *testing.T) {
 		t.Fatal("agent Send() did not reach m.ch.out — model is reading a different channel")
 	}
 }
+
+// TestTUIChannel_Submit_ShutdownGuard verifies that submit() does not block
+// when the TUIChannel's context is cancelled (shutdown path), even when the
+// inbox is full.
+//
+// Without the select/ctx.Done guard, the blocking send c.inbox <- im would
+// hang indefinitely if the inbox is full during shutdown.
+func TestTUIChannel_Submit_ShutdownGuard(t *testing.T) {
+	// Build the channel with a cancellable context.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	tuiCh := NewTUIChannel()
+	tuiCh.ctx = ctx
+
+	// Wire an unbuffered inbox so the blocking path would immediately stall if
+	// nothing is reading from it and no select guard is in place.
+	inbox := make(chan channel.IncomingMessage) // unbuffered — will block if not selected away
+	if err := tuiCh.Start(ctx, inbox); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+
+	// Cancel the context to simulate shutdown BEFORE the send.
+	cancel()
+
+	done := make(chan tea.Msg, 1)
+	go func() {
+		cmd := tuiCh.submit("after cancel")
+		done <- cmd()
+	}()
+
+	select {
+	case msg := <-done:
+		// The send should be dropped cleanly; promptSentMsg is still returned.
+		if _, ok := msg.(promptSentMsg); !ok {
+			t.Errorf("submit() after cancel returned %T, want promptSentMsg", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("submit() blocked for 2s after context cancel — shutdown guard missing")
+	}
+}
