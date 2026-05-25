@@ -12,6 +12,7 @@ package agent
 // These tests are written BEFORE the implementation (TDD RED step).
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -429,39 +430,11 @@ func planDef(t *testing.T) ModeDefinition {
 }
 
 // shellInput produces a JSON-encoded {"command": cmd} for isArgAllowed tests.
+// Uses encoding/json for correct escaping of all characters, including control
+// chars (e.g. \n, \r used in metachar test cases).
 func shellInput(cmd string) []byte {
-	b, _ := jsonMarshalCmd(cmd)
+	b, _ := json.Marshal(map[string]string{"command": cmd})
 	return b
-}
-
-// jsonMarshalCmd marshals {"command": cmd} without importing encoding/json in
-// the test file — uses a simple format since cmd won't contain control chars
-// that need escaping in our test cases (all ASCII printable).
-func jsonMarshalCmd(cmd string) ([]byte, error) {
-	// Use the stdlib — import encoding/json is fine in test files.
-	// We add it to imports separately.
-	return []byte(`{"command":` + `"` + jsonEscapeSimple(cmd) + `"}`), nil
-}
-
-// jsonEscapeSimple escapes only the characters that need it for our test commands.
-func jsonEscapeSimple(s string) string {
-	out := make([]byte, 0, len(s)+4)
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch c {
-		case '"':
-			out = append(out, '\\', '"')
-		case '\\':
-			out = append(out, '\\', '\\')
-		case '\n':
-			out = append(out, '\\', 'n')
-		case '\r':
-			out = append(out, '\\', 'r')
-		default:
-			out = append(out, c)
-		}
-	}
-	return string(out)
 }
 
 // TestIsArgAllowed exercises the isArgAllowed gate with the full scenario matrix
@@ -643,6 +616,76 @@ func TestIsArgAllowed(t *testing.T) {
 			def:       rev,
 			wantOK:    false,
 			wantMsg:   "command not allowed in review mode: only read-only git commands are permitted (git diff, git log, git show, git status, git blame)",
+		},
+
+		// --- FIX 1: --output file-write bypass (security, adversarial-review finding) ---
+		// git {diff,log,show} --output=<file> silently writes/overwrites the target
+		// file — violates the read-only contract in review mode. Both forms must be
+		// rejected: --output=FILE (inline value) and --output FILE (space-separated).
+		// NOTE: the short flag -o is NOT blocked (git rejects it as ambiguous; not a
+		// write vector). Common read-only flags like --oneline, --stat, --name-only,
+		// --numstat MUST still pass (regression cases immediately below).
+		{
+			name:      "--output=FILE rejected (git diff)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git diff --output=/tmp/x"),
+			def:       rev,
+			wantOK:    false,
+			wantMsg:   reviewShellRejectMsg,
+		},
+		{
+			name:      "--output FILE rejected (space form, git diff)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git diff --output /tmp/x"),
+			def:       rev,
+			wantOK:    false,
+			wantMsg:   reviewShellRejectMsg,
+		},
+		{
+			name:      "--output=FILE rejected (git log)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git log --output=/tmp/x"),
+			def:       rev,
+			wantOK:    false,
+			wantMsg:   reviewShellRejectMsg,
+		},
+		{
+			name:      "--output=FILE rejected (git show)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git show --output=/tmp/x"),
+			def:       rev,
+			wantOK:    false,
+			wantMsg:   reviewShellRejectMsg,
+		},
+
+		// --- Regression: FIX 1 must NOT over-block legitimate read-only flags ---
+		{
+			name:      "git log --oneline still allowed (no over-block)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git log --oneline"),
+			def:       rev,
+			wantOK:    true,
+		},
+		{
+			name:      "git diff --stat still allowed (no over-block)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git diff --stat"),
+			def:       rev,
+			wantOK:    true,
+		},
+		{
+			name:      "git show --name-only still allowed (no over-block)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git show --name-only"),
+			def:       rev,
+			wantOK:    true,
+		},
+		{
+			name:      "git diff --numstat still allowed (no over-block)",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git diff --numstat"),
+			def:       rev,
+			wantOK:    true,
 		},
 	}
 

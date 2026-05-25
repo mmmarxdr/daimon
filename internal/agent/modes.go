@@ -333,6 +333,20 @@ func isArgAllowed(toolName string, rawParams json.RawMessage, def ModeDefinition
 	}
 	for _, entry := range allowed {
 		if entry == two || entry == parts[0] {
+			// Step 7: --output denylist (file-write bypass, security fix).
+			// git diff/log/show --output=<file> and --output <file> both WRITE/
+			// overwrite the target file — violating the read-only contract.
+			// Scan ALL tokens; reject on "--output" (space form) or any token
+			// whose prefix is "--output=" (inline-value form).
+			// Threat model (D2): honest-model accident prevention; this is a
+			// targeted denylist of the one write-capable flag in the read-only
+			// git family, not a complete sandbox.
+			// NOTE: -o is NOT blocked (git rejects it as ambiguous; not a vector).
+			for _, tok := range parts {
+				if tok == "--output" || strings.HasPrefix(tok, "--output=") {
+					return false, reviewShellRejectMsg
+				}
+			}
 			return true, ""
 		}
 	}
