@@ -159,6 +159,15 @@ func main() {
 		os.Exit(0)
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "tui" {
+		cfgPath := extractFlagValue(os.Args[2:], "--config", "-config")
+		if err := runTUICommand(os.Args[2:], cfgPath); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	flag.Parse()
 
 	if *showVersion {
