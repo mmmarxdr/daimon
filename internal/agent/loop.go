@@ -725,6 +725,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					IsError: true,
 					Content: fmt.Sprintf("tool '%s' not allowed in mode '%s'", tc.Name, modeSnap.Name),
 				}
+			} else if argOK, argReason := isArgAllowed(tc.Name, tc.Input, modeSnap); !argOK {
+				// AD-5 (change #6): mode arg-level execution gate. Runs AFTER the
+				// name-gate passes, BEFORE the tools-map lookup. Reuses AD-6
+				// wrapping — IsError result skips filter.Apply (loop.go:783) and
+				// flows verbatim through audit, bus emit, and conv.Messages append,
+				// identical to the name-level block path above.
+				result = tool.ToolResult{IsError: true, Content: argReason}
 			} else {
 				a.toolsMu.RLock()
 				t, ok := a.tools[tc.Name]
