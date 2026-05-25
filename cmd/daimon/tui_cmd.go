@@ -129,5 +129,7 @@ func runTUICommand(args []string, cfgPath string) error {
 	}()
 
 	// 12. RunTUI blocks until the user quits (Ctrl+C / q).
-	return tui.RunTUI(cfg, ag, notifyBus, st)
+	// Pass the same tuiCh that was wired into the mux so the Model reads/writes
+	// the exact channel instance the agent's mux.Start() initialised.
+	return tui.RunTUI(cfg, ag, notifyBus, st, tuiCh)
 }

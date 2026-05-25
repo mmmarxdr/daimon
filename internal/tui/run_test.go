@@ -16,7 +16,7 @@ func TestRunTUI_RejectsNonTTY(t *testing.T) {
 	}
 	defer f.Close()
 
-	err = runTUIWithStdin(nil, nil, nil, nil, f)
+	err = runTUIWithStdin(nil, nil, nil, nil, NewTUIChannel(), f)
 	if err == nil {
 		t.Fatal("RunTUI returned nil error on non-TTY stdin, want error")
 	}

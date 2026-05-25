@@ -30,24 +30,27 @@ func requireTTY(f *os.File) error {
 
 // RunTUI starts the full-screen Bubble Tea TUI.
 //
-// It builds the root Model with the injected ag/bus/store + a fresh TUIChannel,
-// then calls tea.NewProgram(m, tea.WithAltScreen()).Run(). The agent loop goroutine
-// MUST be started by the caller (cmd/daimon/tui_cmd.go) before calling RunTUI.
+// ch MUST be the same *TUIChannel that was wired into the agent's mux by the
+// caller (cmd/daimon/tui_cmd.go). Passing the same instance ensures that the
+// Model reads from the exact channel the agent writes to, and that submit()
+// delivers to the inbox the mux initialised via Start.
+//
+// The agent loop goroutine MUST be started by the caller before calling RunTUI.
 //
 // Returns an error if stdin is not a TTY or if the bubbletea program exits
 // with an error.
-func RunTUI(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store) error {
-	return runTUIWithStdin(cfg, ag, bus, st, os.Stdin)
+func RunTUI(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store, ch *TUIChannel) error {
+	return runTUIWithStdin(cfg, ag, bus, st, ch, os.Stdin)
 }
 
 // runTUIWithStdin is the testable inner implementation of RunTUI.
 // It accepts an explicit stdin file so tests can inject /dev/null.
-func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store, stdin *os.File) error {
+// ch is the caller-constructed TUIChannel already wired into the mux.
+func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store, ch *TUIChannel, stdin *os.File) error {
 	if err := requireTTY(stdin); err != nil {
 		return err
 	}
 
-	ch := newTUIChannel()
 	m := Model{
 		styles:    newTuiStyles(),
 		ag:        ag,

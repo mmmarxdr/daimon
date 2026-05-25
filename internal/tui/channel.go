@@ -39,9 +39,12 @@ type promptSentMsg struct{}
 //   - out is buffered (cap 64) so Send never blocks the agent goroutine.
 //   - inbox is captured in Start; submit writes to it from a tea.Cmd closure
 //     (which runs on its own goroutine, off the Update path).
+//   - ctx is captured in Start; submit selects on ctx.Done() so it does not
+//     block during shutdown even when inbox is full.
 type TUIChannel struct {
 	inbox chan<- channel.IncomingMessage // captured in Start; nil until Start is called
 	out   chan interface{}               // agent Send pushes agentReplyMsg here; tea.Cmd drains
+	ctx   context.Context                // captured in Start; guards submit send against shutdown
 }
 
 // newTUIChannel constructs a TUIChannel ready for use (package-internal).
@@ -60,10 +63,12 @@ func NewTUIChannel() *TUIChannel {
 // Name implements channel.Channel. Returns "tui".
 func (c *TUIChannel) Name() string { return "tui" }
 
-// Start implements channel.Channel. Captures the agent's inbox channel so
-// submit() can enqueue IncomingMessages. Non-blocking (no goroutines started).
-func (c *TUIChannel) Start(_ context.Context, inbox chan<- channel.IncomingMessage) error {
+// Start implements channel.Channel. Captures the agent's inbox channel and
+// shutdown context so submit() can enqueue IncomingMessages and bail out
+// during shutdown. Non-blocking (no goroutines started).
+func (c *TUIChannel) Start(ctx context.Context, inbox chan<- channel.IncomingMessage) error {
 	c.inbox = inbox
+	c.ctx = ctx
 	return nil
 }
 
@@ -89,8 +94,10 @@ func (c *TUIChannel) Stop() error { return nil }
 // invoked inline. The blocking send to c.inbox runs on the Cmd's goroutine,
 // keeping Update IO-free.
 //
-// Guard: if inbox is nil (Start has not been called), returns promptSentMsg
-// immediately to avoid an indefinite goroutine block.
+// Guards:
+//   - nil-inbox: if Start has not been called, returns promptSentMsg immediately.
+//   - shutdown: if c.ctx is cancelled (e.g. the agent is shutting down), the
+//     send is dropped via a select so the goroutine does not leak.
 func (c *TUIChannel) submit(text string) tea.Cmd {
 	return func() tea.Msg {
 		if c.inbox == nil {
@@ -104,7 +111,15 @@ func (c *TUIChannel) submit(text string) tea.Cmd {
 			Content:   content.TextBlock(text),
 			Timestamp: time.Now(),
 		}
-		c.inbox <- im // blocking send; runs in Cmd goroutine (off Update path)
+		// Select on ctx.Done() so a shutdown does not leak this goroutine.
+		if c.ctx != nil {
+			select {
+			case c.inbox <- im:
+			case <-c.ctx.Done():
+			}
+		} else {
+			c.inbox <- im // fallback: no ctx captured (pre-Start path guarded above)
+		}
 		return promptSentMsg{}
 	}
 }

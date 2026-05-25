@@ -173,10 +173,12 @@ func (m Model) View() string {
 // ---------------------------------------------------------------------------
 // newTestModel creates a minimal Model for unit tests.
 // It avoids any real agent/bus/store to keep tests hermetic.
+// A fresh TUIChannel is allocated so tests that exercise m.ch don't panic on nil.
 // ---------------------------------------------------------------------------
 func newTestModel() Model {
 	return Model{
 		styles:    newTuiStyles(),
+		ch:        newTUIChannel(),
 		channelID: "tui",
 		senderID:  "local_user",
 		screen:    screenWelcome,
