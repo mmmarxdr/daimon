@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestTopBar_Render_AllSlotsPresent verifies that a TopBar rendered at 80
@@ -67,5 +69,49 @@ func TestInputBar_PresentOnWelcome(t *testing.T) {
 	view := m.View()
 	if !strings.Contains(view, inputBarSentinel) {
 		t.Errorf("View() on screenWelcome missing inputBar sentinel %q", inputBarSentinel)
+	}
+}
+
+// firstLine returns the first line of a multi-line string.
+func firstLine(s string) string {
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		return s[:idx]
+	}
+	return s
+}
+
+// TestInputBar_Render_WidthFits80 verifies that an inputBar rendered at width=80
+// produces a first line whose visible width is exactly 80 columns.
+//
+// RED: before the fix, inputBarStyle.Width(width-2) combined with
+// RoundedBorder+Padding(0,1) overhead of 4 cols produces an outer width of
+// (80-2)+4 = 82, which overflows the terminal column and causes line wrapping.
+func TestInputBar_Render_WidthFits80(t *testing.T) {
+	s := newTuiStyles()
+	ib := newInputBar()
+	rendered := ib.Render(80, s)
+
+	line := firstLine(rendered)
+	got := ansi.StringWidth(line)
+	if got != 80 {
+		t.Errorf("inputBar.Render(80) first-line visible width = %d, want 80\nline = %q", got, line)
+	}
+}
+
+// TestInputBar_Render_NarrowWidth_NoPanic verifies that rendering at a very
+// narrow width (e.g. 2) does not panic and does not produce a negative Width.
+func TestInputBar_Render_NarrowWidth_NoPanic(t *testing.T) {
+	s := newTuiStyles()
+	ib := newInputBar()
+	// Must not panic at extreme narrow widths.
+	for _, w := range []int{0, 1, 2, 3, 4} {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("inputBar.Render(%d) panicked: %v", w, r)
+				}
+			}()
+			_ = ib.Render(w, s)
+		}()
 	}
 }
