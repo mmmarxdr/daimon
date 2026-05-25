@@ -13,6 +13,9 @@ package agent
 //   - EventTodolistChanged emitted on Mutate success (via recordingBus)
 //   - event meta: conv_id, action, item_count, item_id present
 //   - Mutate on unknown convID falls back to a store load (store-fallback path)
+//   - REQ-6 scenario 2: two mutations in one turn both survive turn-end save (W1)
+//   - REQ-7 event action value "create"/"update" asserted (not just key presence) (W2)
+//   - REQ-4/REQ-7 bus-level: todo_list emits zero agent.todolist.changed events (W3)
 
 import (
 	"context"
@@ -618,4 +621,282 @@ func newMinimalAgentWithBus(t *testing.T, bus notify.Bus) *Agent {
 	ag := newMinimalAgent(t)
 	ag.bus = bus
 	return ag
+}
+
+// ---------------------------------------------------------------------------
+// W1 — REQ-6 scenario 2: two todo_create calls in one turn both survive
+// ---------------------------------------------------------------------------
+
+// twoTodoCreateProvider issues two sequential todo_create tool calls in one
+// turn (call 0 → first create, call 1 → second create, call 2 → terminal text).
+type twoTodoCreateProvider struct {
+	mu        sync.Mutex
+	callCount int
+}
+
+func (p *twoTodoCreateProvider) Name() string                                  { return "todo-test-2" }
+func (p *twoTodoCreateProvider) Model() string                                 { return "todo-model-2" }
+func (p *twoTodoCreateProvider) SupportsTools() bool                           { return true }
+func (p *twoTodoCreateProvider) SupportsMultimodal() bool                      { return false }
+func (p *twoTodoCreateProvider) SupportsAudio() bool                           { return false }
+func (p *twoTodoCreateProvider) HealthCheck(_ context.Context) (string, error) { return "ok", nil }
+
+func (p *twoTodoCreateProvider) Chat(_ context.Context, _ provider.ChatRequest) (*provider.ChatResponse, error) {
+	p.mu.Lock()
+	call := p.callCount
+	p.callCount++
+	p.mu.Unlock()
+
+	switch call {
+	case 0:
+		return &provider.ChatResponse{
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc-two-1", Name: "todo_create", Input: json.RawMessage(`{"content":"First item"}`)},
+			},
+		}, nil
+	case 1:
+		return &provider.ChatResponse{
+			ToolCalls: []provider.ToolCall{
+				{ID: "tc-two-2", Name: "todo_create", Input: json.RawMessage(`{"content":"Second item"}`)},
+			},
+		}, nil
+	default:
+		return &provider.ChatResponse{Content: "done"}, nil
+	}
+}
+
+// TestD4_TwoTodoCreates_BothSurviveTurnEnd covers REQ-6 scenario 2:
+// "two mutations in one turn both survive". The provider issues two sequential
+// todo_create tool calls within the same turn. After turn-end SaveConversation
+// fires, both items must be present in the persisted todolist.
+func TestD4_TwoTodoCreates_BothSurviveTurnEnd(t *testing.T) {
+	t.Parallel()
+
+	convID := "conv-d4-two-1"
+	st := &mockStore{
+		conv: &store.Conversation{
+			ID:        convID,
+			ChannelID: "d4-two-ch",
+			Metadata:  map[string]string{},
+		},
+	}
+
+	prov := &twoTodoCreateProvider{}
+	ch := &mockChannel{}
+
+	ag := New(
+		config.AgentConfig{MaxIterations: 10, MaxTokensPerTurn: 100},
+		defaultLimits(),
+		config.FilterConfig{},
+		ch,
+		prov,
+		st,
+		audit.NoopAuditor{},
+		nil,
+		nil,
+		skill.SkillIndex{},
+		4,
+		false,
+	)
+
+	// Wire todo tools with the agent's own deps.
+	todoTools := tool.BuildTodoTools(ag.TodoToolDeps())
+	ag.toolsMu.Lock()
+	for name, tl := range todoTools {
+		ag.tools[name] = tl
+	}
+	ag.toolsMu.Unlock()
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "d4-two-ch",
+		SenderID:  "u1",
+		Content:   content.TextBlock("create two todos"),
+	})
+
+	// After the turn, the store must contain BOTH created items.
+	st.mu.Lock()
+	saved := st.conv
+	st.mu.Unlock()
+	if saved == nil {
+		t.Fatal("store has no saved conversation after turn")
+	}
+	raw, ok := saved.Metadata["daimon/todolist"]
+	if !ok {
+		t.Fatal("conv.Metadata missing 'daimon/todolist' after turn — D4 regression!")
+	}
+	var list tool.TodoList
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		t.Fatalf("could not decode saved list: %v", err)
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("expected 2 items in persisted list, got %d — REQ-6 scenario 2 regression!", len(list.Items))
+	}
+	// Verify both contents are present (order may vary by position assignment).
+	contents := map[string]bool{}
+	for _, it := range list.Items {
+		contents[it.Content] = true
+	}
+	if !contents["First item"] {
+		t.Error(`persisted list missing "First item"`)
+	}
+	if !contents["Second item"] {
+		t.Error(`persisted list missing "Second item"`)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// W2 — REQ-7: assert event action value "create" and "update"
+// ---------------------------------------------------------------------------
+
+// TestTodoMutate_EventActionCreate_ValueAsserted strengthens the REQ-7 create
+// scenario: asserts that ev.Meta["action"] == "create" (not just key presence).
+// This covers the gap noted in W2: TestTodoToolDeps_Mutate_EmitsEvent only
+// checked key presence, not the exact value.
+func TestTodoMutate_EventActionCreate_ValueAsserted(t *testing.T) {
+	t.Parallel()
+
+	conv := &store.Conversation{
+		ID:       "conv-action-create-1",
+		Metadata: map[string]string{},
+	}
+	bus := &recordingBus{}
+	ag := newMinimalAgentWithBus(t, bus)
+	ag.registerActiveConv(conv)
+	defer ag.unregisterActiveConv(conv.ID)
+
+	_, err := ag.todoMutate("conv-action-create-1", func(l *tool.TodoList) (string, error) {
+		l.Items = append(l.Items, tool.TodoItem{
+			ID: "td_create01", Content: "new item", Status: "pending",
+		})
+		return "td_create01", nil
+	})
+	if err != nil {
+		t.Fatalf("todoMutate error: %v", err)
+	}
+
+	events := bus.filterByType(notify.EventTodolistChanged)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if got := ev.Meta["action"]; got != "create" {
+		t.Errorf(`meta["action"] = %q, want "create"`, got)
+	}
+}
+
+// TestTodoMutate_EventActionUpdate_ValueAsserted covers the REQ-7 update path:
+// runs todoMutate with a closure that modifies an existing item, then asserts
+// ev.Meta["action"] == "update", ev.Meta["item_id"] == updated item's id, and
+// ev.Meta["item_count"] is correct.
+func TestTodoMutate_EventActionUpdate_ValueAsserted(t *testing.T) {
+	t.Parallel()
+
+	// Pre-seed a list with two items.
+	seedItems := []tool.TodoItem{
+		{ID: "td_upd_a", Content: "item A", Status: "pending", Position: 1},
+		{ID: "td_upd_b", Content: "item B", Status: "pending", Position: 2},
+	}
+	encoded, err := tool.EncodeTodoList(tool.TodoList{Version: 1, Items: seedItems})
+	if err != nil {
+		t.Fatalf("encode seed list: %v", err)
+	}
+	conv := &store.Conversation{
+		ID:       "conv-action-update-1",
+		Metadata: map[string]string{tool.TodoMetadataKey: encoded},
+	}
+	bus := &recordingBus{}
+	ag := newMinimalAgentWithBus(t, bus)
+	ag.registerActiveConv(conv)
+	defer ag.unregisterActiveConv(conv.ID)
+
+	// Mutate the first item (update path — item count stays the same).
+	_, err = ag.todoMutate("conv-action-update-1", func(l *tool.TodoList) (string, error) {
+		for i := range l.Items {
+			if l.Items[i].ID == "td_upd_a" {
+				l.Items[i].Status = "in_progress"
+				return "td_upd_a", nil
+			}
+		}
+		return "", nil
+	})
+	if err != nil {
+		t.Fatalf("todoMutate error: %v", err)
+	}
+
+	events := bus.filterByType(notify.EventTodolistChanged)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if got := ev.Meta["action"]; got != "update" {
+		t.Errorf(`meta["action"] = %q, want "update"`, got)
+	}
+	if got := ev.Meta["item_id"]; got != "td_upd_a" {
+		t.Errorf(`meta["item_id"] = %q, want "td_upd_a"`, got)
+	}
+	// item_count must equal the total items in list after mutation (2, unchanged).
+	if got := ev.Meta["item_count"]; got != "2" {
+		t.Errorf(`meta["item_count"] = %q, want "2"`, got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// W3 — REQ-4/REQ-7: todo_list emits zero events at the bus level
+// ---------------------------------------------------------------------------
+
+// TestTodoList_EmitsZeroBusEvents adds a bus-level assertion for the REQ-4
+// scenario "list never emits event". It wires a recordingBus into the agent,
+// invokes todo_list's Execute through the agent's wired TodoToolDeps, and
+// asserts the bus received zero agent.todolist.changed events.
+//
+// This is a stronger assertion than TestTodoList_NeverMutates (in
+// todo_tools_test.go), which only proves Mutate is not called. This test
+// proves at the bus level that no event escapes.
+func TestTodoList_EmitsZeroBusEvents(t *testing.T) {
+	t.Parallel()
+
+	// Pre-seed a list with one item so todo_list has something to return.
+	seedItems := []tool.TodoItem{
+		{ID: "td_list01", Content: "item for list", Status: "pending", Position: 1},
+	}
+	encoded, err := tool.EncodeTodoList(tool.TodoList{Version: 1, Items: seedItems})
+	if err != nil {
+		t.Fatalf("encode seed list: %v", err)
+	}
+	convID := "conv-listbus-1"
+	conv := &store.Conversation{
+		ID:       convID,
+		Metadata: map[string]string{tool.TodoMetadataKey: encoded},
+	}
+
+	bus := &recordingBus{}
+	ag := newMinimalAgentWithBus(t, bus)
+	ag.registerActiveConv(conv)
+	defer ag.unregisterActiveConv(conv.ID)
+
+	// Build todo tools wired to this agent.
+	deps := ag.TodoToolDeps()
+	todoTools := tool.BuildTodoTools(deps)
+
+	listTool, ok := todoTools["todo_list"]
+	if !ok {
+		t.Fatal("todo_list not present in BuildTodoTools output")
+	}
+
+	// Execute todo_list with the conversation ID in context.
+	ctx := tool.WithConvID(context.Background(), convID)
+	result, execErr := listTool.Execute(ctx, json.RawMessage(`{}`))
+	if execErr != nil {
+		t.Fatalf("todo_list Execute returned error: %v", execErr)
+	}
+	if result.IsError {
+		t.Fatalf("todo_list Execute returned IsError=true: %s", result.Content)
+	}
+
+	// The bus must have received ZERO agent.todolist.changed events.
+	events := bus.filterByType(notify.EventTodolistChanged)
+	if len(events) != 0 {
+		t.Errorf("expected 0 %q events after todo_list, got %d — REQ-4/REQ-7 violation!",
+			notify.EventTodolistChanged, len(events))
+	}
 }

@@ -604,6 +604,9 @@ func main() {
 			}()
 		}
 		wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
+		// wireTodo is called again here because the agent was rebuilt for the web
+		// channel (new *Agent pointer above). The first-writer-wins guard inside
+		// wireTodo makes repeated registration safe — tools are only registered once.
 		wireTodo(ag, toolsRegistry)
 		// Re-wire RAG into the rebuilt agent (web path). Reuse the DocumentStore
 		// + embed function built by wireRAG — do NOT construct a second store.
