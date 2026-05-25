@@ -1,0 +1,72 @@
+package tui
+
+// run.go — RunTUI entry point and TTY guard helper (AD-11).
+//
+// RunTUI is the exported entry point called by `daimon tui` (cmd/daimon/tui_cmd.go).
+// requireTTY is extracted as a shared helper usable by both RunMCPManage and RunTUI
+// (REFACTOR task 1.25).
+
+import (
+	"fmt"
+	"os"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
+
+	"daimon/internal/agent"
+	"daimon/internal/config"
+	"daimon/internal/notify"
+	"daimon/internal/store"
+)
+
+// requireTTY returns an error if f is not an interactive terminal.
+// Shared by RunTUI and RunMCPManage (refactor task 1.25).
+func requireTTY(f *os.File) error {
+	if isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd()) {
+		return nil
+	}
+	return fmt.Errorf("daimon tui requires a TTY (stdin is not a terminal)")
+}
+
+// RunTUI starts the full-screen Bubble Tea TUI.
+//
+// ch MUST be the same *TUIChannel that was wired into the agent's mux by the
+// caller (cmd/daimon/tui_cmd.go). Passing the same instance ensures that the
+// Model reads from the exact channel the agent writes to, and that submit()
+// delivers to the inbox the mux initialised via Start.
+//
+// The agent loop goroutine MUST be started by the caller before calling RunTUI.
+//
+// Returns an error if stdin is not a TTY or if the bubbletea program exits
+// with an error.
+func RunTUI(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store, ch *TUIChannel) error {
+	return runTUIWithStdin(cfg, ag, bus, st, ch, os.Stdin)
+}
+
+// runTUIWithStdin is the testable inner implementation of RunTUI.
+// It accepts an explicit stdin file so tests can inject /dev/null.
+// ch is the caller-constructed TUIChannel already wired into the mux.
+func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st store.Store, ch *TUIChannel, stdin *os.File) error {
+	if err := requireTTY(stdin); err != nil {
+		return err
+	}
+
+	m := Model{
+		styles:    newTuiStyles(),
+		ag:        ag,
+		bus:       bus,
+		store:     st,
+		ch:        ch,
+		cfg:       cfg,
+		channelID: "tui",
+		senderID:  "local_user",
+		screen:    screenWelcome,
+		topBar:    topBar{brand: "⫶"},
+		footer:    footerHints{screen: screenWelcome},
+		input:     newInputBar(),
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err := p.Run()
+	return err
+}
