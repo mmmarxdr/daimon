@@ -68,7 +68,7 @@ type ModeDefinition struct {
 // Mode prompt text (REQ-6, O-3 — verbatim from spec)
 // ---------------------------------------------------------------------------
 
-const planPrompt = `You are in PLAN mode. Your job: read, analyze, and propose. You MUST NOT modify files, execute shell commands, or take any action with side effects. Use Read, Grep, Glob, codegraph_*, and web tools to understand the codebase. When you have a plan, present it to the user and STOP. Wait for explicit approval before suggesting next steps. If the user asks you to implement, respond: "I'm in plan mode — switch to /mode build to implement."`
+const planPrompt = `You are in PLAN mode. Your job: read, analyze, and propose. You MUST NOT take any EXTERNAL or IRREVERSIBLE action with side effects — no file writes, no shell commands, no API mutations. Maintaining your internal planning state (the todolist via todo_create / todo_update) is explicitly permitted: the todolist IS your planning artifact, not an external side effect. Use Read, Grep, Glob, codegraph_*, and web tools to understand the codebase. When you have a plan, present it and STOP; wait for explicit approval. If asked to implement, respond: "I'm in plan mode — switch to /mode build to implement."`
 
 const buildPrompt = `` // build mode: no extra prompt injection (spec REQ-6 S6-2)
 
@@ -78,9 +78,10 @@ const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, dif
 // Tool allowlists (REQ-7)
 // ---------------------------------------------------------------------------
 
-// planAllowlist is the set of tool names permitted in "plan" mode.
-// read-only analysis and codegraph tools only. No file-mutating or shell tools.
-var planAllowlist = []string{
+// baseReadOnly is the set of read-only tools shared by BOTH plan and review modes.
+// todo_list is read-only (no mutation, no event) so it lives here — both modes
+// inherit it. (AD-3: extract shared base to prevent todo write-tool leakage into review.)
+var baseReadOnly = []string{
 	"Read",
 	"Grep",
 	"Glob",
@@ -113,11 +114,19 @@ var planAllowlist = []string{
 	"codegraph_explore",
 	"codegraph_files",
 	"codegraph_status",
+	// todo_list is read-only: plan and review both get it via this shared base.
+	"todo_list",
 }
 
-// reviewAllowlist is planAllowlist plus Bash (name-level only; argument-level
-// restriction deferred to change #6 per spec gap note in REQ-7).
-var reviewAllowlist = append(append([]string{}, planAllowlist...), "Bash")
+// planAllowlist is baseReadOnly plus the write todo tools. Plan mode may
+// maintain its planning artifact (todo_create / todo_update) per REQ-8.
+// Build from a copy so future appends don't mutate baseReadOnly's backing array.
+var planAllowlist = append(append([]string{}, baseReadOnly...), "todo_create", "todo_update")
+
+// reviewAllowlist is baseReadOnly plus Bash. Review is read-only: it inherits
+// todo_list via baseReadOnly but NOT todo_create/todo_update (AD-3).
+// (name-level only; argument-level restriction deferred to change #6 per spec gap note in REQ-7.)
+var reviewAllowlist = append(append([]string{}, baseReadOnly...), "Bash")
 
 // ---------------------------------------------------------------------------
 // Mode definitions table (package-private)
