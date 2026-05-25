@@ -20,6 +20,11 @@ import (
 // the cap; "completed" and "cancelled" items do not (AD-5).
 const maxActiveTodos = 200
 
+// TodoMetadataKey is the conv.Metadata key under which the JSON-encoded
+// TodoList is stored. Exported so the agent bridge can read/write the key
+// without duplicating the constant.
+const TodoMetadataKey = "daimon/todolist"
+
 // IDGen is the function type used to generate todo item IDs.
 // The default implementation uses crypto/rand; tests inject deterministic sequences.
 type IDGen func() string
@@ -100,6 +105,13 @@ func encodeTodoList(list TodoList) (string, error) {
 	return string(b), nil
 }
 
+// EncodeTodoList is the exported counterpart of encodeTodoList.
+// Used by the agent bridge (internal/agent/todo_bridge.go) to persist the list
+// without duplicating the encoding logic.
+func EncodeTodoList(list TodoList) (string, error) {
+	return encodeTodoList(list)
+}
+
 // decodeTodoList deserialises a JSON string produced by encodeTodoList.
 // An empty or absent key (s == "") returns a default TodoList{Version:1}
 // with no error, satisfying the zero-value-is-useful contract (AD-7, REQ-1).
@@ -112,6 +124,12 @@ func decodeTodoList(s string) (TodoList, error) {
 		return TodoList{Version: 1}, fmt.Errorf("decodeTodoList: %w", err)
 	}
 	return list, nil
+}
+
+// DecodeTodoList is the exported counterpart of decodeTodoList.
+// Used by the agent bridge (internal/agent/todo_bridge.go).
+func DecodeTodoList(s string) (TodoList, error) {
+	return decodeTodoList(s)
 }
 
 // validStatuses is the set of permitted status enum values (AD-8).
