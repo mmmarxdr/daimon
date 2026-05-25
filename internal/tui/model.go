@@ -212,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Unimplemented screens return (m, nil); PR2-5 replace stub bodies.
 	switch m.screen {
 	case screenWelcome:
-		return m.updateWelcomeStub(msg)
+		return m.updateWelcome(msg)
 	case screenChat:
 		return m.updateChat(msg) // PR2
 	case screenDiff:
@@ -229,8 +229,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateWelcomeStub handles messages on the welcome screen (stub for PR4 enrichment).
-func (m Model) updateWelcomeStub(msg tea.Msg) (tea.Model, tea.Cmd) {
+// updateWelcome handles messages on the welcome screen. Pressing Enter with
+// non-empty input transitions to the chat screen and submits the first message
+// (mirrors handleChatKey's Enter path). All other keys forward to the input bar.
+//
+// The thread is empty on welcome, so thread.append allocates a fresh slice — no
+// copy-on-write aliasing with a prior model for this first message. The input is
+// cleared via the existing promptSentMsg path (submit → updateChat → input.Reset)
+// since screen is screenChat by the time promptSentMsg arrives.
+func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "enter" {
+		if text := m.input.Value(); text != "" {
+			m.thread.append(&MsgUser{text: text, styles: m.styles})
+			m.screen = screenChat
+			m.focus = focusEditor
+			m.footer = footerHints{screen: screenChat}
+			return m, m.ch.submit(text)
+		}
+	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
