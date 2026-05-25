@@ -1,0 +1,241 @@
+// model-skeleton.go.tmpl
+// Template for a new daimon TUI screen.
+// Replace {{ScreenName}} with your screen (e.g. "Chat"), adjust package imports.
+// Do NOT use this file as-is — it is a reference skeleton only.
+
+package tui
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/google/go-cmp/cmp"
+
+	"daimon/internal/config"
+)
+
+// ---------------------------------------------------------------------------
+// Screen state & focus enums
+// ---------------------------------------------------------------------------
+
+type {{screenName}}State int
+
+const (
+	{{screenName}}StateMain {{screenName}}State = iota
+	{{screenName}}StateOverlay
+	// add more sub-states as needed
+)
+
+// ---------------------------------------------------------------------------
+// Centralized styles (mirror dashStyles / manageStyles pattern)
+// ---------------------------------------------------------------------------
+
+type {{screenName}}Styles struct {
+	border   lipgloss.Style
+	label    lipgloss.Style
+	dimLabel lipgloss.Style
+	hint     lipgloss.Style // faint + italic (stage directions)
+	accent   lipgloss.Style // phosphor teal #5dbfa7
+	errStyle lipgloss.Style
+}
+
+func new{{ScreenName}}Styles() {{screenName}}Styles {
+	accent := lipgloss.Color("#5dbfa7")
+	return {{screenName}}Styles{
+		border:   lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
+		label:    lipgloss.NewStyle().Bold(true),
+		dimLabel: lipgloss.NewStyle().Faint(true),
+		hint:     lipgloss.NewStyle().Faint(true).Italic(true),
+		accent:   lipgloss.NewStyle().Foreground(accent),
+		errStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Imperative sub-component (NOT a tea.Model — no Update method)
+// ---------------------------------------------------------------------------
+
+// {{ScreenName}}Pane is a sub-component with imperative methods only.
+// It never owns a tea.Cmd or calls Update itself.
+type {{ScreenName}}Pane struct {
+	items  []string // replace with real data type
+	styles {{screenName}}Styles
+}
+
+// SetItems replaces the pane content. Called directly from the root Update.
+func (p *{{ScreenName}}Pane) SetItems(items []string) {
+	p.items = items
+}
+
+// Render returns the composed string for the given width.
+// ALWAYS use ansi.StringWidth / ansi.Truncate — never len() on styled strings.
+func (p *{{ScreenName}}Pane) Render(width int) string {
+	// Account for border (1 cell each side) + padding (0,1 → 1 each side) = 4 cols.
+	innerW := width - 4
+	if innerW < 1 {
+		innerW = 1
+	}
+
+	lines := make([]string, 0, len(p.items))
+	for _, item := range p.items {
+		// Truncate to inner width using ANSI-safe truncation.
+		lines = append(lines, ansi.Truncate(item, innerW, "…"))
+	}
+
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	return p.styles.border.Width(width).Render(body)
+}
+
+// ---------------------------------------------------------------------------
+// Msg types — one per async operation
+// ---------------------------------------------------------------------------
+
+// {{screenName}}DataLoadedMsg carries the result of the one-shot Init load.
+type {{screenName}}DataLoadedMsg struct {
+	items []string
+	err   error
+}
+
+// ---------------------------------------------------------------------------
+// Root model — the only struct that implements tea.Model
+// ---------------------------------------------------------------------------
+
+// {{ScreenName}}Model is the top-level Bubbletea model for the {{ScreenName}} screen.
+// Sub-components are fields mutated directly; they do NOT implement tea.Model.
+type {{ScreenName}}Model struct {
+	state  {{screenName}}State
+	width  int
+	height int
+	styles {{screenName}}Styles
+
+	// sub-components
+	pane {{ScreenName}}Pane
+
+	loadErr string
+}
+
+func new{{ScreenName}}Model(cfg *config.Config) {{ScreenName}}Model {
+	s := new{{ScreenName}}Styles()
+	return {{ScreenName}}Model{
+		styles: s,
+		pane:   {{ScreenName}}Pane{styles: s},
+	}
+}
+
+// Init fires exactly once; returns a Cmd that loads data and emits a Msg.
+// Never mutate model state inside this closure — only emit a Msg.
+func (m {{ScreenName}}Model) Init() tea.Cmd {
+	return func() tea.Msg {
+		// Replace with real data fetch.
+		items := []string{"item one", "item two"}
+		return {{screenName}}DataLoadedMsg{items: items}
+	}
+}
+
+// Update handles all messages. IO stays in Cmds; state mutation stays here.
+func (m {{ScreenName}}Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		}
+
+	case {{screenName}}DataLoadedMsg:
+		if msg.err != nil {
+			m.loadErr = msg.err.Error()
+			return m, nil
+		}
+		// Mutate sub-component directly — no intermediary Cmd needed.
+		m.pane.SetItems(msg.items)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// View composes the full screen. Overlays are drawn last.
+func (m {{ScreenName}}Model) View() string {
+	if m.loadErr != "" {
+		return m.styles.errStyle.Render("Error: " + m.loadErr)
+	}
+
+	main := m.pane.Render(m.width)
+	footer := m.styles.hint.Render("q quit")
+
+	return lipgloss.JoinVertical(lipgloss.Left, main, footer)
+}
+
+// Run{{ScreenName}} starts the TUI screen. Requires a TTY — caller must check.
+func Run{{ScreenName}}(cfg *config.Config) error {
+	m := new{{ScreenName}}Model(cfg)
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Tests — teatest golden file + state-machine unit test
+// Harmonized with the repo's go-testing skill conventions.
+// Run: go test ./internal/tui/... -update   (regenerate goldens)
+// Run: go test ./internal/tui/... -race      (all TUI tests)
+// ---------------------------------------------------------------------------
+
+var updateGolden = testing.Verbose() // replace with flag.Bool("update", false, ...) in real file
+
+// Test{{ScreenName}}View_Golden asserts the rendered View matches a golden file.
+// Golden files live in testdata/ next to the test file; committed to the repo.
+func Test{{ScreenName}}View_Golden(t *testing.T) {
+	t.Helper()
+	m := new{{ScreenName}}Model(nil) // pass a stub config as needed
+	m.width, m.height = 80, 24
+	m.pane.SetItems([]string{"hello", "world"})
+
+	got := m.View()
+
+	golden := filepath.Join("testdata", t.Name()+".golden")
+	if updateGolden {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
+			t.Fatalf("mkdir testdata: %v", err)
+		}
+		if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		return
+	}
+
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatalf("read golden (run with -update to create): %v", err)
+	}
+	if diff := cmp.Diff(string(want), got); diff != "" {
+		t.Fatalf("view mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Test{{ScreenName}}Update_DataLoaded asserts that receiving a dataLoadedMsg
+// populates the pane items and does not return a Cmd.
+func Test{{ScreenName}}Update_DataLoaded(t *testing.T) {
+	m := new{{ScreenName}}Model(nil)
+
+	msg := {{screenName}}DataLoadedMsg{items: []string{"a", "b", "c"}}
+	next, cmd := m.Update(msg)
+	if cmd != nil {
+		t.Fatal("expected nil Cmd after data load")
+	}
+	got := next.({{ScreenName}}Model).pane.items
+	if len(got) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(got))
+	}
+}
