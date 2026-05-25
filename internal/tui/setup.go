@@ -34,8 +34,30 @@ type setupStep int
 const (
 	stepProvider    setupStep = iota // choose provider from list
 	stepCredentials                  // enter model + API key (+ base_url for ollama)
+	stepRAGEnable                    // "Enable RAG?" yes/no pick
+	stepRAGProvider                  // choose embedding provider (openai | gemini)
+	stepRAGCreds                     // enter embedding model + API key
 	stepDone                         // write completed or errored
 )
+
+// ragSetup holds the RAG-related inputs collected during setup.
+// Passed to buildSetupConfig so the signature stays clean.
+type ragSetup struct {
+	enabled                 bool
+	provider, model, apiKey string
+}
+
+// ragEmbeddingProviders is the ordered list of supported embedding providers.
+var ragEmbeddingProviders = []string{"openai", "gemini"}
+
+// ragEmbeddingDefaults maps a provider to its sensible default embedding model.
+var ragEmbeddingDefaults = map[string]string{
+	"openai": "text-embedding-3-small",
+	"gemini": "text-embedding-004",
+}
+
+// ragOptLabels are the display labels for the RAGEnable step.
+var ragOptLabels = []string{"No", "Yes"}
 
 // setupWroteMsg is returned by writeConfigCmd after the write attempt.
 type setupWroteMsg struct {
@@ -62,6 +84,14 @@ type setupModel struct {
 	// fieldIdx: 0=model (both providers), 1=key (non-ollama) OR baseURL (ollama).
 	// fieldCount is always 2; the second field's identity depends on the provider.
 	fieldIdx int
+
+	// RAG step state.
+	ragOptIdx     int             // 0=No, 1=Yes at stepRAGEnable
+	ragProviders  []string        // = ragEmbeddingProviders
+	ragProvIdx    int             // selected index at stepRAGProvider
+	ragProvider   string          // locked in when leaving stepRAGProvider
+	embModelInput textinput.Model // free-text embedding model (optional)
+	embKeyInput   textinput.Model // EchoPassword for embedding API key (required)
 
 	width  int
 	height int
@@ -96,15 +126,27 @@ func RunSetupTUI(cfgPath string) (*config.Config, error) {
 	baseIn.SetValue("http://localhost:11434")
 	baseIn.CharLimit = 256
 
+	embModelIn := textinput.New()
+	embModelIn.Placeholder = "embedding model (optional)"
+	embModelIn.CharLimit = 128
+
+	embKeyIn := textinput.New()
+	embKeyIn.Placeholder = "embedding API key"
+	embKeyIn.EchoMode = textinput.EchoPassword
+	embKeyIn.CharLimit = 256
+
 	m := setupModel{
-		styles:       s,
-		step:         stepProvider,
-		cfgPath:      cfgPath,
-		providers:    config.KnownProviders,
-		provIdx:      0,
-		modelInput:   modelIn,
-		keyInput:     keyIn,
-		baseURLInput: baseIn,
+		styles:        s,
+		step:          stepProvider,
+		cfgPath:       cfgPath,
+		providers:     config.KnownProviders,
+		provIdx:       0,
+		modelInput:    modelIn,
+		keyInput:      keyIn,
+		baseURLInput:  baseIn,
+		ragProviders:  ragEmbeddingProviders,
+		embModelInput: embModelIn,
+		embKeyInput:   embKeyIn,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
@@ -175,6 +217,12 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateProvider(msg)
 		case stepCredentials:
 			return m.updateCredentials(msg)
+		case stepRAGEnable:
+			return m.updateRAGEnable(msg)
+		case stepRAGProvider:
+			return m.updateRAGProvider(msg)
+		case stepRAGCreds:
+			return m.updateRAGCreds(msg)
 		case stepDone:
 			// Any key on the error screen quits
 			return m, tea.Quit
@@ -251,7 +299,6 @@ func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 	case tea.KeyEnter:
 		model := strings.TrimSpace(m.modelInput.Value())
 		key := strings.TrimSpace(m.keyInput.Value())
-		baseURL := strings.TrimSpace(m.baseURLInput.Value())
 
 		if model == "" {
 			m.validationErr = "model ID cannot be empty"
@@ -263,9 +310,13 @@ func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 		}
 
 		m.validationErr = ""
-		cfgPath := m.cfgPath
-		provider := m.provider
-		return m, writeConfigCmd(provider, model, key, baseURL, cfgPath)
+		// Advance to the RAG enable step instead of writing immediately.
+		m.modelInput.Blur()
+		m.keyInput.Blur()
+		m.baseURLInput.Blur()
+		m.ragOptIdx = 0 // default: No
+		m.step = stepRAGEnable
+		return m, nil
 	}
 
 	// Route keystrokes to the focused input.
@@ -312,9 +363,9 @@ func (m setupModel) focusField(ollama bool) setupModel {
 // Note: if the user sends ctrl+c while this cmd is in flight, the file may be
 // written but RunSetupTUI returns errSetupAborted. This is an accepted
 // bubbletea-v1 limitation; it self-heals on the next run (config.Load succeeds).
-func writeConfigCmd(provider, model, apiKey, baseURL, cfgPath string) tea.Cmd {
+func writeConfigCmd(provider, model, apiKey, baseURL, cfgPath string, rag ragSetup) tea.Cmd {
 	return func() tea.Msg {
-		cfg := buildSetupConfig(provider, model, apiKey, baseURL)
+		cfg := buildSetupConfig(provider, model, apiKey, baseURL, rag)
 
 		writePath := cfgPath
 		if writePath == "" {
@@ -335,7 +386,7 @@ func writeConfigCmd(provider, model, apiKey, baseURL, cfgPath string) tea.Cmd {
 // buildSetupConfig builds a *config.Config from the collected setup values.
 // Pure function — no IO, fully unit-testable.
 // Hardcodes channel.type="cli" and store.type="sqlite" (fixes file-vs-sqlite divergence).
-func buildSetupConfig(provider, model, apiKey, baseURL string) *config.Config {
+func buildSetupConfig(provider, model, apiKey, baseURL string, rag ragSetup) *config.Config {
 	cfg := &config.Config{}
 
 	creds := config.ProviderCredentials{APIKey: apiKey}
@@ -363,7 +414,169 @@ func buildSetupConfig(provider, model, apiKey, baseURL string) *config.Config {
 	cfg.Audit.Type = "sqlite"
 	cfg.Audit.Path = "~/.daimon/audit"
 
+	if rag.enabled {
+		cfg.RAG.Enabled = true
+		cfg.RAG.Embedding = config.RAGEmbeddingConf{
+			Enabled:  true,
+			Provider: rag.provider,
+			Model:    rag.model,
+			APIKey:   rag.apiKey,
+		}
+	}
+
 	return cfg
+}
+
+// updateRAGEnable handles input at the stepRAGEnable step.
+// n/N → disable RAG + write; y/Y → enable RAG + go to stepRAGProvider.
+// up/down (or left/right) toggle the No/Yes selector; enter confirms.
+// Esc goes back to stepCredentials.
+func (m setupModel) updateRAGEnable(msg tea.KeyMsg) (setupModel, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.step = stepCredentials
+		// Re-focus the last active field in credentials.
+		m.fieldIdx = 0
+		m.modelInput.Focus()
+		return m, nil
+
+	case tea.KeyUp, tea.KeyLeft:
+		m.ragOptIdx = 0
+	case tea.KeyDown, tea.KeyRight:
+		m.ragOptIdx = 1
+
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "n", "N":
+			// Disable RAG and go straight to write.
+			provider := m.provider
+			model := strings.TrimSpace(m.modelInput.Value())
+			apiKey := strings.TrimSpace(m.keyInput.Value())
+			baseURL := strings.TrimSpace(m.baseURLInput.Value())
+			return m, writeConfigCmd(provider, model, apiKey, baseURL, m.cfgPath, ragSetup{})
+		case "y", "Y":
+			m.step = stepRAGProvider
+			m.ragProvIdx = 0
+			return m, nil
+		}
+
+	case tea.KeyEnter:
+		if m.ragOptIdx == 0 {
+			// No selected — write without RAG.
+			provider := m.provider
+			model := strings.TrimSpace(m.modelInput.Value())
+			apiKey := strings.TrimSpace(m.keyInput.Value())
+			baseURL := strings.TrimSpace(m.baseURLInput.Value())
+			return m, writeConfigCmd(provider, model, apiKey, baseURL, m.cfgPath, ragSetup{})
+		}
+		// Yes selected — go to provider picker.
+		m.step = stepRAGProvider
+		m.ragProvIdx = 0
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// updateRAGProvider handles input at the stepRAGProvider step.
+// up/down navigate the provider list; enter confirms and advances to stepRAGCreds.
+func (m setupModel) updateRAGProvider(msg tea.KeyMsg) (setupModel, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.ragProvIdx > 0 {
+			m.ragProvIdx--
+		}
+	case tea.KeyDown:
+		if m.ragProvIdx < len(m.ragProviders)-1 {
+			m.ragProvIdx++
+		}
+	case tea.KeyEnter:
+		m.ragProvider = m.ragProviders[m.ragProvIdx]
+		// Prefill embedding model with a sensible default.
+		if def, ok := ragEmbeddingDefaults[m.ragProvider]; ok {
+			m.embModelInput.SetValue(def)
+		} else {
+			m.embModelInput.SetValue("")
+		}
+		m.fieldIdx = 0
+		m.embModelInput.Focus()
+		m.embKeyInput.Blur()
+		m.validationErr = ""
+		m.step = stepRAGCreds
+		return m, textinput.Blink
+	case tea.KeyEsc:
+		m.step = stepRAGEnable
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateRAGCreds handles input at the stepRAGCreds step.
+// Two fields: 0=embModel (optional), 1=embKey (required).
+// Tab/ShiftTab cycle; enter validates (embKey non-empty) → write.
+func (m setupModel) updateRAGCreds(msg tea.KeyMsg) (setupModel, tea.Cmd) {
+	const fieldCount = 2
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.step = stepRAGProvider
+		m.embModelInput.Blur()
+		m.embKeyInput.Blur()
+		return m, nil
+
+	case tea.KeyTab, tea.KeyShiftTab:
+		delta := 1
+		if msg.Type == tea.KeyShiftTab {
+			delta = -1
+		}
+		m.fieldIdx = (m.fieldIdx + delta + fieldCount) % fieldCount
+		m = m.focusRAGCredsField()
+		return m, textinput.Blink
+
+	case tea.KeyEnter:
+		embKey := strings.TrimSpace(m.embKeyInput.Value())
+		if embKey == "" {
+			m.validationErr = "embedding API key cannot be empty"
+			return m, nil
+		}
+		m.validationErr = ""
+		provider := m.provider
+		model := strings.TrimSpace(m.modelInput.Value())
+		apiKey := strings.TrimSpace(m.keyInput.Value())
+		baseURL := strings.TrimSpace(m.baseURLInput.Value())
+		rag := ragSetup{
+			enabled:  true,
+			provider: m.ragProvider,
+			model:    strings.TrimSpace(m.embModelInput.Value()),
+			apiKey:   embKey,
+		}
+		return m, writeConfigCmd(provider, model, apiKey, baseURL, m.cfgPath, rag)
+	}
+
+	// Route keystrokes to the focused field.
+	var cmd tea.Cmd
+	switch m.fieldIdx {
+	case 0:
+		m.embModelInput, cmd = m.embModelInput.Update(msg)
+	case 1:
+		m.embKeyInput, cmd = m.embKeyInput.Update(msg)
+	}
+	return m, cmd
+}
+
+// focusRAGCredsField applies Focus/Blur to the RAG creds inputs based on fieldIdx.
+// fieldIdx is always in {0, 1}: 0=embModel, 1=embKey.
+func (m setupModel) focusRAGCredsField() setupModel {
+	m.embModelInput.Blur()
+	m.embKeyInput.Blur()
+
+	switch m.fieldIdx {
+	case 0:
+		m.embModelInput.Focus()
+	case 1:
+		m.embKeyInput.Focus()
+	}
+	return m
 }
 
 // ─── View ──────────────────────────────────────────────────────────────────
@@ -374,6 +587,12 @@ func (m setupModel) View() string {
 		return m.viewProvider()
 	case stepCredentials:
 		return m.viewCredentials()
+	case stepRAGEnable:
+		return m.viewRAGEnable()
+	case stepRAGProvider:
+		return m.viewRAGProvider()
+	case stepRAGCreds:
+		return m.viewRAGCreds()
 	case stepDone:
 		return m.viewDone()
 	default:
@@ -442,6 +661,88 @@ func (m setupModel) viewCredentials() string {
 		sb.WriteString(m.keyInput.View())
 		sb.WriteString("\n\n")
 	}
+
+	if m.validationErr != "" {
+		sb.WriteString(s.errStyle.Render("✗ " + m.validationErr))
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString(s.hint.Render("tab  next field • shift+tab  prev field • enter  save • esc  back • ctrl+c  quit"))
+	return sb.String()
+}
+
+func (m setupModel) viewRAGEnable() string {
+	s := m.styles
+	var sb strings.Builder
+
+	sb.WriteString(s.accent.Render("⫶ daimon — first-run setup"))
+	sb.WriteString("\n\n")
+	sb.WriteString(s.label.Render("Enable RAG (semantic search over your docs/memory)?"))
+	sb.WriteString("\n\n")
+
+	for i, opt := range ragOptLabels {
+		line := "  " + opt
+		if i == m.ragOptIdx {
+			line = s.selected.Render("▶ " + opt)
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(s.hint.Render("↑/↓  toggle • enter  confirm • y  enable • n  skip • esc  back • ctrl+c  quit"))
+	return sb.String()
+}
+
+func (m setupModel) viewRAGProvider() string {
+	s := m.styles
+	var sb strings.Builder
+
+	sb.WriteString(s.accent.Render("⫶ daimon — first-run setup"))
+	sb.WriteString("\n\n")
+	sb.WriteString(s.label.Render("Choose embedding provider:"))
+	sb.WriteString("\n\n")
+
+	for i, p := range m.ragProviders {
+		line := "  " + p
+		if i == m.ragProvIdx {
+			line = s.selected.Render("▶ " + p)
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(s.hint.Render("↑/↓  navigate • enter  select • esc  back • ctrl+c  quit"))
+	return sb.String()
+}
+
+func (m setupModel) viewRAGCreds() string {
+	s := m.styles
+	var sb strings.Builder
+
+	sb.WriteString(s.accent.Render("⫶ daimon — first-run setup"))
+	sb.WriteString("\n\n")
+	sb.WriteString(s.label.Render("Embedding provider: ") + s.accent.Render(m.ragProvider))
+	sb.WriteString("\n\n")
+
+	// Embedding model field (optional).
+	embModelLabel := s.dimLabel.Render("Embedding Model (optional)")
+	if m.fieldIdx == 0 {
+		embModelLabel = s.label.Render("Embedding Model (optional)")
+	}
+	sb.WriteString(embModelLabel + "\n")
+	sb.WriteString(m.embModelInput.View())
+	sb.WriteString("\n\n")
+
+	// Embedding API key field (required).
+	embKeyLabel := s.dimLabel.Render("Embedding API Key")
+	if m.fieldIdx == 1 {
+		embKeyLabel = s.label.Render("Embedding API Key")
+	}
+	sb.WriteString(embKeyLabel + "\n")
+	sb.WriteString(m.embKeyInput.View())
+	sb.WriteString("\n\n")
 
 	if m.validationErr != "" {
 		sb.WriteString(s.errStyle.Render("✗ " + m.validationErr))

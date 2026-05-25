@@ -314,6 +314,76 @@ func minimalConfig() *config.Config {
 }
 
 // ---------------------------------------------------------------------------
+// PR-B2: RAG round-trip test
+// ---------------------------------------------------------------------------
+
+// TestWriteConfig_RAGRoundTrip builds a RAG-enabled config, writes it via
+// WriteConfig, reloads via config.Load, and asserts the RAG embedding fields
+// survived. This test MUST FAIL before buildRAGNode is added to marshalAnnotated
+// (because marshalAnnotated silently drops the rag section) and PASS after.
+func TestWriteConfig_RAGRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := minimalConfig()
+	cfg.RAG.Enabled = true
+	cfg.RAG.Embedding = config.RAGEmbeddingConf{
+		Enabled:  true,
+		Provider: "openai",
+		Model:    "text-embedding-3-small",
+		APIKey:   "sk-emb-test",
+	}
+
+	if err := WriteConfig(path, cfg); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("config.Load after RAG write: %v", err)
+	}
+
+	if !loaded.RAG.Enabled {
+		t.Error("loaded.RAG.Enabled = false, want true — rag section was silently dropped by marshalAnnotated")
+	}
+	if !loaded.RAG.Embedding.Enabled {
+		t.Error("loaded.RAG.Embedding.Enabled = false, want true")
+	}
+	if loaded.RAG.Embedding.Provider != "openai" {
+		t.Errorf("loaded.RAG.Embedding.Provider = %q, want %q", loaded.RAG.Embedding.Provider, "openai")
+	}
+	if loaded.RAG.Embedding.Model != "text-embedding-3-small" {
+		t.Errorf("loaded.RAG.Embedding.Model = %q, want %q", loaded.RAG.Embedding.Model, "text-embedding-3-small")
+	}
+	if loaded.RAG.Embedding.APIKey != "sk-emb-test" {
+		t.Errorf("loaded.RAG.Embedding.APIKey = %q, want %q", loaded.RAG.Embedding.APIKey, "sk-emb-test")
+	}
+}
+
+// TestWriteConfig_RAGDisabled_DoesNotEmitRAGSection asserts that when RAG is
+// disabled, the written YAML does NOT contain a rag: section (keeps file clean).
+func TestWriteConfig_RAGDisabled_DoesNotEmitRAGSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+
+	cfg := minimalConfig() // RAG is zero-value (disabled)
+
+	if err := WriteConfig(path, cfg); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	content := string(data)
+
+	if contains(content, "rag:") {
+		t.Error("rag: section present in YAML for non-RAG config — should be omitted when disabled")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2 rename — daimon config paths
 // ---------------------------------------------------------------------------
 

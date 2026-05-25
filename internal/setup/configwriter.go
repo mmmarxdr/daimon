@@ -106,6 +106,9 @@ func marshalAnnotated(cfg *config.Config) ([]byte, error) {
 	appendSection(root, "channel", channelNode, "# Channel configuration")
 	appendSection(root, "store", storeNode, "# Data store configuration")
 	appendSection(root, "audit", auditNode, "# Audit configuration")
+	if cfg.RAG.Enabled {
+		appendSection(root, "rag", buildRAGNode(cfg), "# RAG / semantic search configuration")
+	}
 
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
@@ -234,6 +237,33 @@ func buildAuditNode(cfg *config.Config) *yaml.Node {
 		strNode("enabled"), boolNode(config.BoolVal(cfg.Audit.Enabled)),
 		strNode("type"), strNode(cfg.Audit.Type),
 		strNode("path"), strNode(auditPath),
+	)
+	return n
+}
+
+// buildRAGNode builds the "rag:" mapping node for annotated YAML output.
+// Mirrors buildStoreNode/buildAuditNode: uses mappingNode/strNode/boolNode.
+// Emits enabled + embedding sub-map (enabled, provider, model, api_key).
+// base_url is omitted when empty to keep the file clean.
+func buildRAGNode(cfg *config.Config) *yaml.Node {
+	embNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	emb := cfg.RAG.Embedding
+	embNode.Content = append(embNode.Content,
+		strNode("enabled"), boolNode(emb.Enabled),
+		strNode("provider"), strNode(emb.Provider),
+		strNode("model"), strNode(emb.Model),
+		strNode("api_key"), strNode(emb.APIKey),
+	)
+	if emb.BaseURL != "" {
+		embNode.Content = append(embNode.Content,
+			strNode("base_url"), strNode(emb.BaseURL),
+		)
+	}
+
+	n := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	n.Content = append(n.Content,
+		strNode("enabled"), boolNode(cfg.RAG.Enabled),
+		strNode("embedding"), embNode,
 	)
 	return n
 }

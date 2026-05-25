@@ -1,6 +1,6 @@
 package tui
 
-// setup_test.go — tests for embedded first-run setup TUI (PR-B1).
+// setup_test.go — tests for embedded first-run setup TUI (PR-B1 + PR-B2).
 // Strict TDD: these tests must FAIL before setup.go exists.
 
 import (
@@ -18,7 +18,7 @@ import (
 // ─── buildSetupConfig table test ───────────────────────────────────────────
 
 func TestBuildSetupConfig_Anthropic(t *testing.T) {
-	cfg := buildSetupConfig("anthropic", "claude-sonnet-4-6", "sk-ant-123", "")
+	cfg := buildSetupConfig("anthropic", "claude-sonnet-4-6", "sk-ant-123", "", ragSetup{})
 
 	// Provider credentials
 	creds, ok := cfg.Providers["anthropic"]
@@ -63,7 +63,7 @@ func TestBuildSetupConfig_Anthropic(t *testing.T) {
 }
 
 func TestBuildSetupConfig_Ollama(t *testing.T) {
-	cfg := buildSetupConfig("ollama", "llama3.2", "", "http://localhost:11434")
+	cfg := buildSetupConfig("ollama", "llama3.2", "", "http://localhost:11434", ragSetup{})
 
 	creds, ok := cfg.Providers["ollama"]
 	if !ok {
@@ -99,16 +99,20 @@ func TestBuildSetupConfig_Ollama(t *testing.T) {
 
 func newTestSetupModel(cfgPath string) setupModel {
 	s := newTuiStyles()
-	providers := config.KnownProviders
+	embKeyIn := textinput.New()
+	embKeyIn.EchoMode = textinput.EchoPassword
 	return setupModel{
-		styles:       s,
-		step:         stepProvider,
-		cfgPath:      cfgPath,
-		providers:    providers,
-		provIdx:      0,
-		modelInput:   textinput.New(),
-		keyInput:     textinput.New(),
-		baseURLInput: textinput.New(),
+		styles:        s,
+		step:          stepProvider,
+		cfgPath:       cfgPath,
+		providers:     config.KnownProviders,
+		provIdx:       0,
+		modelInput:    textinput.New(),
+		keyInput:      textinput.New(),
+		baseURLInput:  textinput.New(),
+		ragProviders:  ragEmbeddingProviders,
+		embModelInput: textinput.New(),
+		embKeyInput:   embKeyIn,
 	}
 }
 
@@ -167,6 +171,10 @@ func TestSetupModel_StepCredentials_EmptyKeyBlocksSubmit(t *testing.T) {
 	}
 }
 
+// TestSetupModel_StepCredentials_ValidSubmitReturnsWriteCmd drives the full
+// no-RAG path: credentials → stepRAGEnable → 'n' → writeConfigCmd.
+// PR-B2 changed the direct-write from stepCredentials to go through stepRAGEnable;
+// this test is updated to reflect the new flow.
 func TestSetupModel_StepCredentials_ValidSubmitReturnsWriteCmd(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
@@ -179,14 +187,18 @@ func TestSetupModel_StepCredentials_ValidSubmitReturnsWriteCmd(t *testing.T) {
 	nm.modelInput.SetValue("claude-sonnet-4-6")
 	nm.keyInput.SetValue("sk-ant-test-key")
 
-	// Submit
-	next2, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Submit credentials → now goes to stepRAGEnable (not direct write).
+	next2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	nm2 := next2.(setupModel)
-	_ = nm2
+	if nm2.step != stepRAGEnable {
+		t.Fatalf("expected stepRAGEnable after credentials submit, got %v", nm2.step)
+	}
 
-	// A cmd must be returned (the write config cmd)
+	// Press 'n' to skip RAG → write cmd issued.
+	next3, cmd := nm2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	_ = next3
 	if cmd == nil {
-		t.Fatal("expected a non-nil Cmd from valid stepCredentials submit")
+		t.Fatal("expected a non-nil Cmd after 'n' at stepRAGEnable")
 	}
 
 	// Execute the cmd to get the message
@@ -413,4 +425,306 @@ func TestSetupModel_StepCredentials_ValidSubmit_StepNotDoneSynchronously(t *test
 	if nm2.step == stepDone {
 		t.Error("step advanced to stepDone synchronously — it must only change via async setupWroteMsg")
 	}
+}
+
+// ─── PR-B2: buildSetupConfig RAG tests ────────────────────────────────────
+
+// TestBuildSetupConfig_RAGEnabled asserts that when ragSetup.enabled is true,
+// cfg.RAG is populated with the embedding fields.
+func TestBuildSetupConfig_RAGEnabled(t *testing.T) {
+	rag := ragSetup{
+		enabled:  true,
+		provider: "openai",
+		model:    "text-embedding-3-small",
+		apiKey:   "sk-x",
+	}
+	cfg := buildSetupConfig("anthropic", "claude-sonnet-4-6", "sk-ant-123", "", rag)
+
+	if !cfg.RAG.Enabled {
+		t.Error("cfg.RAG.Enabled = false, want true")
+	}
+	if !cfg.RAG.Embedding.Enabled {
+		t.Error("cfg.RAG.Embedding.Enabled = false, want true")
+	}
+	if cfg.RAG.Embedding.Provider != "openai" {
+		t.Errorf("cfg.RAG.Embedding.Provider = %q, want %q", cfg.RAG.Embedding.Provider, "openai")
+	}
+	if cfg.RAG.Embedding.Model != "text-embedding-3-small" {
+		t.Errorf("cfg.RAG.Embedding.Model = %q, want %q", cfg.RAG.Embedding.Model, "text-embedding-3-small")
+	}
+	if cfg.RAG.Embedding.APIKey != "sk-x" {
+		t.Errorf("cfg.RAG.Embedding.APIKey = %q, want %q", cfg.RAG.Embedding.APIKey, "sk-x")
+	}
+}
+
+// TestBuildSetupConfig_RAGDisabled asserts that when ragSetup is zero,
+// cfg.RAG stays at its zero value (Enabled==false).
+func TestBuildSetupConfig_RAGDisabled(t *testing.T) {
+	cfg := buildSetupConfig("anthropic", "claude-sonnet-4-6", "sk-ant-123", "", ragSetup{})
+
+	if cfg.RAG.Enabled {
+		t.Error("cfg.RAG.Enabled = true, want false (RAG not requested)")
+	}
+	if cfg.RAG.Embedding.Enabled {
+		t.Error("cfg.RAG.Embedding.Enabled = true, want false")
+	}
+}
+
+// ─── PR-B2: flow tests ─────────────────────────────────────────────────────
+
+// TestSetupModel_CredentialsSubmit_GoesToRAGEnable asserts that after a
+// valid stepCredentials submit the model transitions to stepRAGEnable (NOT
+// directly to a write cmd).
+func TestSetupModel_CredentialsSubmit_GoesToRAGEnable(t *testing.T) {
+	m := newTestSetupModel("")
+	// Advance to credentials (anthropic, index 0)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+
+	nm.modelInput.SetValue("claude-sonnet-4-6")
+	nm.keyInput.SetValue("sk-ant-test-key")
+
+	next2, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm2 := next2.(setupModel)
+
+	if nm2.step != stepRAGEnable {
+		t.Errorf("step = %v, want stepRAGEnable after valid credentials submit", nm2.step)
+	}
+	// cmd must be nil here — no write yet, just advancing step
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(setupWroteMsg); ok {
+			t.Error("writeConfigCmd was issued before RAG enable step — must go to stepRAGEnable first")
+		}
+	}
+}
+
+// TestSetupModel_RAGEnable_N_GoesToWrite asserts that pressing 'n' at
+// stepRAGEnable skips RAG and returns the write cmd (RAG disabled).
+func TestSetupModel_RAGEnable_N_GoesToWrite(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	m := newTestSetupModel(cfgPath)
+	m = advanceToRAGEnable(t, m)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if cmd == nil {
+		t.Fatal("expected a non-nil write cmd after 'n' at stepRAGEnable")
+	}
+	msg := cmd()
+	wroteMsg, ok := msg.(setupWroteMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want setupWroteMsg", msg)
+	}
+	if wroteMsg.err != nil {
+		t.Fatalf("writeConfigCmd error: %v", wroteMsg.err)
+	}
+}
+
+// TestSetupModel_RAGEnable_Y_GoesToRAGProvider asserts that pressing 'y' at
+// stepRAGEnable transitions to stepRAGProvider.
+func TestSetupModel_RAGEnable_Y_GoesToRAGProvider(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGEnable(t, m)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	nm := next.(setupModel)
+
+	if nm.step != stepRAGProvider {
+		t.Errorf("step = %v, want stepRAGProvider after 'y' at stepRAGEnable", nm.step)
+	}
+}
+
+// TestSetupModel_RAGEnable_Enter_Default_GoesToWrite asserts that pressing
+// Enter at stepRAGEnable with default selection (No / RAG disabled) goes to write.
+func TestSetupModel_RAGEnable_Enter_Default_GoesToWrite(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	m := newTestSetupModel(cfgPath)
+	m = advanceToRAGEnable(t, m)
+
+	// Default is No (ragOptIdx == 0). Press Enter.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected write cmd from Enter with default No at stepRAGEnable")
+	}
+	msg := cmd()
+	if _, ok := msg.(setupWroteMsg); !ok {
+		t.Fatalf("cmd returned %T, want setupWroteMsg", msg)
+	}
+}
+
+// TestSetupModel_RAGEnable_Enter_Yes_GoesToProvider asserts that when
+// ragOptIdx is toggled to 1 (Yes) and Enter is pressed, we go to stepRAGProvider.
+func TestSetupModel_RAGEnable_Enter_Yes_GoesToProvider(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGEnable(t, m)
+
+	// Toggle to Yes with Down key.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = next.(setupModel)
+
+	next2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next2.(setupModel)
+
+	if nm.step != stepRAGProvider {
+		t.Errorf("step = %v, want stepRAGProvider after Enter on Yes", nm.step)
+	}
+}
+
+// TestSetupModel_RAGEnable_Esc_BackToCredentials asserts that Esc at
+// stepRAGEnable goes back to stepCredentials.
+func TestSetupModel_RAGEnable_Esc_BackToCredentials(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGEnable(t, m)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm := next.(setupModel)
+
+	if nm.step != stepCredentials {
+		t.Errorf("step = %v, want stepCredentials after Esc at stepRAGEnable", nm.step)
+	}
+}
+
+// TestSetupModel_RAGProvider_EnterGoesToRAGCreds asserts that pressing Enter
+// on a provider at stepRAGProvider advances to stepRAGCreds and prefills embModelInput.
+func TestSetupModel_RAGProvider_EnterGoesToRAGCreds(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGProvider(t, m)
+
+	// Press Enter (first provider is openai by convention).
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+
+	if nm.step != stepRAGCreds {
+		t.Errorf("step = %v, want stepRAGCreds after Enter at stepRAGProvider", nm.step)
+	}
+	// embModelInput should be prefilled with a sensible default.
+	if nm.embModelInput.Value() == "" {
+		t.Error("embModelInput should be prefilled with a default model after stepRAGProvider enter")
+	}
+}
+
+// TestSetupModel_RAGCreds_EmptyKey_Blocks asserts that submitting with an
+// empty embKeyInput at stepRAGCreds does not issue a write cmd.
+func TestSetupModel_RAGCreds_EmptyKey_Blocks(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGCreds(t, m)
+
+	// Leave embKeyInput empty; embModelInput may be prefilled.
+	m.embKeyInput.SetValue("")
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+	_ = nm
+
+	if cmd != nil {
+		msg := cmd()
+		if _, ok := msg.(setupWroteMsg); ok {
+			t.Error("writeConfigCmd issued with empty embKey — gate must block")
+		}
+	}
+}
+
+// TestSetupModel_RAGCreds_WithKey_IssuesWriteCmd asserts that a valid
+// embKeyInput at stepRAGCreds issues the write cmd.
+func TestSetupModel_RAGCreds_WithKey_IssuesWriteCmd(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	m := newTestSetupModel(cfgPath)
+	m = advanceToRAGCreds(t, m)
+
+	m.embKeyInput.SetValue("emb-secret-key")
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected write cmd from valid RAG creds submit")
+	}
+	msg := cmd()
+	wroteMsg, ok := msg.(setupWroteMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want setupWroteMsg", msg)
+	}
+	if wroteMsg.err != nil {
+		t.Fatalf("writeConfigCmd error: %v", wroteMsg.err)
+	}
+}
+
+// ─── PR-B2: RAG creds field-cycling consistency ────────────────────────────
+
+// TestSetupModel_RAGCreds_Tab_FieldIdxNeverExceedsOne asserts that Tab
+// cycling at stepRAGCreds keeps fieldIdx in {0,1} and always focuses a
+// visible field (mirrors the PR-B1 ollama tab test).
+func TestSetupModel_RAGCreds_Tab_FieldIdxNeverExceedsOne(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGCreds(t, m)
+
+	for i := 0; i < 10; i++ {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next.(setupModel)
+		if m.fieldIdx > 1 {
+			t.Errorf("Tab press %d: fieldIdx=%d exceeds max valid index 1", i+1, m.fieldIdx)
+		}
+		switch m.fieldIdx {
+		case 0:
+			if !m.embModelInput.Focused() {
+				t.Errorf("Tab press %d: fieldIdx=0 but embModelInput not focused", i+1)
+			}
+		case 1:
+			if !m.embKeyInput.Focused() {
+				t.Errorf("Tab press %d: fieldIdx=1 but embKeyInput not focused", i+1)
+			}
+		}
+	}
+}
+
+// ─── PR-B2: helpers ────────────────────────────────────────────────────────
+
+// advanceToRAGEnable drives the model from stepProvider through valid
+// stepCredentials to reach stepRAGEnable.
+func advanceToRAGEnable(t *testing.T, m setupModel) setupModel {
+	t.Helper()
+	// Select provider (anthropic, idx 0).
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(setupModel)
+	if m.step != stepCredentials {
+		t.Fatalf("expected stepCredentials, got %v", m.step)
+	}
+	m.modelInput.SetValue("claude-sonnet-4-6")
+	m.keyInput.SetValue("sk-ant-key")
+	next2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next2.(setupModel)
+	if m.step != stepRAGEnable {
+		t.Fatalf("expected stepRAGEnable, got %v (advanceToRAGEnable helper)", m.step)
+	}
+	return m
+}
+
+// advanceToRAGProvider drives the model to stepRAGProvider.
+func advanceToRAGProvider(t *testing.T, m setupModel) setupModel {
+	t.Helper()
+	m = advanceToRAGEnable(t, m)
+	// Select Yes (Down then Enter, or just 'y').
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	m = next.(setupModel)
+	if m.step != stepRAGProvider {
+		t.Fatalf("expected stepRAGProvider, got %v (advanceToRAGProvider helper)", m.step)
+	}
+	return m
+}
+
+// advanceToRAGCreds drives the model to stepRAGCreds (openai embedding provider).
+func advanceToRAGCreds(t *testing.T, m setupModel) setupModel {
+	t.Helper()
+	m = advanceToRAGProvider(t, m)
+	// Press Enter to select first provider (openai).
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(setupModel)
+	if m.step != stepRAGCreds {
+		t.Fatalf("expected stepRAGCreds, got %v (advanceToRAGCreds helper)", m.step)
+	}
+	return m
 }
