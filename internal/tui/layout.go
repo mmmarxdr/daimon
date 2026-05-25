@@ -102,11 +102,13 @@ func renderLayout(m Model) string {
 }
 
 // renderCenter returns the center-column content for the current screen.
-// PR1 only renders welcome; other screens return a placeholder until their PR.
+// PR2 wires chat; other screens return a placeholder until their PR.
 func renderCenter(m Model, width, height int) string {
 	switch m.screen {
 	case screenWelcome:
 		return renderWelcomeCenter(m, width, height)
+	case screenChat:
+		return renderChat(m, width, height)
 	default:
 		// Stub: later PRs replace these with screen-specific render functions.
 		return renderCenterPlaceholder(m.screen, width, height)

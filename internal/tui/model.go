@@ -13,6 +13,23 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// focusRegion — intra-screen focus routing (AD-3, reintroduced in PR2)
+//
+// Declared alongside screenState so both enums live in model.go.
+// Values are frozen per the AD-3 forward-compat contract.
+// ---------------------------------------------------------------------------
+
+// focusRegion identifies which sub-region of the screen has keyboard focus.
+type focusRegion int
+
+const (
+	focusNone   focusRegion = iota // no explicit focus (default)
+	focusEditor                    // input bar (text entry)
+	focusMain                      // center column (thread navigation)
+	focusRail                      // right rail (panel navigation)
+)
+
+// ---------------------------------------------------------------------------
 // screenState — forward-compat FROZEN enum (AD-3)
 //
 // PR1 declares ALL 7 values so later PRs only fill updateXxx/renderXxx bodies.
@@ -71,6 +88,7 @@ type Model struct {
 	width  int
 	height int
 	screen screenState
+	focus  focusRegion // intra-screen focus region (PR2)
 	styles tuiStyles
 
 	// backend handles (injected by RunTUI; never constructed here)
@@ -80,26 +98,44 @@ type Model struct {
 	ch    *TUIChannel  // input-bar → inbox; agent Send → tea.Msg
 	cfg   *config.Config
 
+	// event bridge (PR2): bus handler does non-blocking send here; tea.Cmd drains it.
+	// The channel carries both busEventMsg (from notify.Bus) and agentReplyMsg
+	// (from TUIChannel.out) multiplexed by the goroutine started in Init.
+	events <-chan tea.Msg
+
 	// persistent shell (PR1)
 	topBar topBar
 	footer footerHints
 	input  inputBar // bubbles/textinput-backed; shown per matrix (welcome, chat, error)
 
-	// chat thread, focus, event stream, activeConvID added in PR2
-	rail rail
+	// thread + rail (PR2+)
+	thread thread // ordered list of threadItems for the chat center column
+	rail   rail
 
 	// overlays (PR3): dialog stack drawn last
 	overlays overlayManager
 
 	// session-scoped routing identity (AD-7)
-	channelID string // "tui"
-	senderID  string // "local_user"
+	channelID    string // "tui"
+	senderID     string // "local_user"
+	activeConvID string // tracked for TodoListForConv + sessions (PR2)
 }
 
-// Init implements tea.Model. Returns a nil Cmd; the initial screen is set in
-// the struct literal (run.go / newTestModel). The value-receiver copy is
-// intentionally discarded — Init must not mutate the live model.
+// Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
+// inside RunTUI, not in a unit test), it subscribes to bus events and starts
+// the pumpEvents Cmd so bus events flow into the TUI loop (AD-5).
+//
+// Value-receiver: the Init copy's mutations are intentionally NOT reflected
+// back to the live model — this is safe because Init is called once by
+// bubbletea immediately before the first Update, and the live model receives
+// the pump Cmd via the returned tea.Cmd (not via model field assignment).
+// The events channel is set up in RunTUI before the program starts so the
+// live model already holds it; Init on the copy does not re-create it.
 func (m Model) Init() tea.Cmd {
+	if m.events != nil {
+		// Bus bridge already wired (RunTUI path); just start the pump.
+		return pumpEvents(m.events)
+	}
 	return nil
 }
 
@@ -139,7 +175,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenWelcome:
 		return m.updateWelcomeStub(msg)
 	case screenChat:
-		return m, nil // stub: PR2
+		return m.updateChat(msg) // PR2
 	case screenDiff:
 		return m, nil // stub: PR5
 	case screenSlash:
@@ -182,5 +218,6 @@ func newTestModel() Model {
 		channelID: "tui",
 		senderID:  "local_user",
 		screen:    screenWelcome,
+		focus:     focusEditor,
 	}
 }
