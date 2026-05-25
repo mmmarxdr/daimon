@@ -14,7 +14,6 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -26,9 +25,16 @@ import (
 // collectMsgs — flattens tea.Batch messages recursively.
 //
 // handleBusEvent always wraps its cmds in tea.Batch (via tea.Batch(cmds...)).
-// When executed, tea.Batch returns a tea.BatchMsg ([]tea.Cmd). We execute
-// each inner cmd — skipping nil cmds and guarding against slow/blocking ones
-// with a short timeout — and collect all resulting tea.Msg values.
+// When executed, tea.Batch returns a tea.BatchMsg ([]tea.Cmd). We execute each
+// inner cmd SYNCHRONOUSLY and collect all resulting tea.Msg values.
+//
+// Synchronous execution is leak-free by construction (no goroutine to strand).
+// It is safe here because every cmd these tests produce is non-blocking:
+// fetchTodolist(ag==nil) returns a no-op todolistRefreshMsg{} instantly, and
+// the model's events channel is a CLOSED channel (see the test setup), so
+// pumpEvents(events) reads the zero value immediately instead of blocking on a
+// nil-channel receive. If a future test introduces a genuinely blocking cmd,
+// give it a non-blocking channel rather than reintroducing a timeout goroutine.
 // ---------------------------------------------------------------------------
 
 func collectMsgs(cmd tea.Cmd) []tea.Msg {
@@ -36,24 +42,7 @@ func collectMsgs(cmd tea.Cmd) []tea.Msg {
 		return nil
 	}
 
-	// Execute with a short timeout so tests are deterministic and fast.
-	// pumpEvents(nil) returns a closure that may block; the timeout protects us.
-	type result struct{ msg tea.Msg }
-	ch := make(chan result, 1)
-	go func() {
-		m := cmd()
-		ch <- result{m}
-	}()
-
-	var msg tea.Msg
-	select {
-	case r := <-ch:
-		msg = r.msg
-	case <-time.After(50 * time.Millisecond):
-		// cmd blocked (e.g. pumpEvents on a nil channel) — treat as nil.
-		return nil
-	}
-
+	msg := cmd()
 	if msg == nil {
 		return nil
 	}
@@ -68,6 +57,15 @@ func collectMsgs(cmd tea.Cmd) []tea.Msg {
 	}
 
 	return []tea.Msg{msg}
+}
+
+// closedEventsChan returns a closed tea.Msg channel. handleBusEvent re-arms the
+// pump via pumpEvents(m.events); a closed channel makes that cmd return the zero
+// value immediately, so collectMsgs never blocks (and never leaks a goroutine).
+func closedEventsChan() <-chan tea.Msg {
+	ch := make(chan tea.Msg)
+	close(ch)
+	return ch
 }
 
 // hasTodolistRefreshMsg returns true if any of msgs is a todolistRefreshMsg.
@@ -376,16 +374,18 @@ func TestTelemetryPanel_WithData_RendersTokensAndCost(t *testing.T) {
 // never appended to cmds, so no todolistRefreshMsg can appear in the batch —
 // causing both tests to FAIL (the guard is real).
 //
-// Note: newTestModel sets events=nil; pumpEvents(nil) blocks or returns nil.
-// collectMsgs uses a 50ms timeout so blocked cmds are treated as no-message.
-// fetchTodolist with nil agent returns todolistRefreshMsg{} synchronously, so
-// the happy/no-convID paths are deterministic and instant.
+// The model's events channel is set to a CLOSED channel so the pump cmd that
+// handleBusEvent always re-arms (pumpEvents(m.events)) returns immediately
+// instead of blocking on a nil-channel receive. fetchTodolist with nil agent
+// returns todolistRefreshMsg{} synchronously, so both paths are instant and
+// collectMsgs executes synchronously without stranding any goroutine.
 // ---------------------------------------------------------------------------
 
 func TestHandleBusEvent_TodolistChanged_ReturnsTodoRefreshCmd(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
-	m.activeConvID = "conv-42" // non-empty, so fetchTodolist runs (ag==nil → no-op msg)
+	m.events = closedEventsChan() // pump cmd returns immediately, never blocks
+	m.activeConvID = "conv-42"    // non-empty, so fetchTodolist runs (ag==nil → no-op msg)
 
 	ev := notify.Event{
 		Type:      notify.EventTodolistChanged,
@@ -414,7 +414,8 @@ func TestHandleBusEvent_TodolistChanged_ReturnsTodoRefreshCmd(t *testing.T) {
 func TestHandleBusEvent_TodolistChanged_NoConvID_DoesNotPanic(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
-	m.activeConvID = "" // empty convID → fetchTodolist returns no-op todolistRefreshMsg{}
+	m.events = closedEventsChan() // pump cmd returns immediately, never blocks
+	m.activeConvID = ""           // empty convID → fetchTodolist returns no-op todolistRefreshMsg{}
 
 	ev := notify.Event{Type: notify.EventTodolistChanged}
 	// Must not panic.
