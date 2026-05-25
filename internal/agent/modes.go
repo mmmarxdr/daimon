@@ -17,10 +17,13 @@ package agent
 // Spec coverage: REQ-3, REQ-6, REQ-7, REQ-8.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"daimon/internal/provider"
+	"daimon/internal/tool"
 )
 
 // ---------------------------------------------------------------------------
@@ -257,4 +260,81 @@ func isToolAllowed(toolName string, allowlist []string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// isArgAllowed (AD-2, change #6)
+// ---------------------------------------------------------------------------
+
+// reviewShellRejectMsg is the contract-locked rejection message returned by
+// isArgAllowed for non-allowlisted or metachar-bearing shell commands in review
+// mode. The wording is locked once tests assert it — any change to the allowed
+// set requires updating this constant and all asserting tests.
+const reviewShellRejectMsg = "command not allowed in review mode: only read-only git commands are permitted (git diff, git log, git show, git status, git blame)"
+
+// isArgAllowed reports whether the ARGUMENTS of a tool call pass the mode's
+// arg-level policy. Returns (true, "") when there is no restriction.
+//
+//   - def.ArgAllowlists nil OR no entry for toolName → (true, "")  [fast path, nil-safe]
+//   - shell_exec with an entry: decode {command}, trim; reject ANY shell
+//     metachar (using tool.FirstShellMetachar — single source of truth); then
+//     prefix-match leading 1-2 whitespace-split tokens (AD-4) against the
+//     allowlist. Mismatch → (false, reviewShellRejectMsg).
+//
+// rawParams is the raw tool-call Input (json.RawMessage). On unmarshal failure
+// the call is REJECTED (fail-closed) since we cannot prove the args are safe.
+//
+// Note: the body only handles shell_exec command extraction. A non-shell tool
+// with an entry in ArgAllowlists would need its own decode branch — only
+// shell_exec has an entry today (out of scope for change #6).
+func isArgAllowed(toolName string, rawParams json.RawMessage, def ModeDefinition) (ok bool, reason string) {
+	// Step 1: nil map → no arg restriction for any tool.
+	if def.ArgAllowlists == nil {
+		return true, ""
+	}
+
+	// Step 2: no entry for this tool → no arg restriction for this tool.
+	allowed, has := def.ArgAllowlists[toolName]
+	if !has {
+		return true, ""
+	}
+
+	// Step 3: decode the command field (fail-closed on bad JSON).
+	var p struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(rawParams, &p) != nil {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 4: empty command is always rejected.
+	cmd := strings.TrimSpace(p.Command)
+	if cmd == "" {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 5: metachar check — BEFORE allowlist (AD-2, REQ-4). Uses the
+	// exported tool.FirstShellMetachar — single source of truth (AD-3).
+	if _, found := tool.FirstShellMetachar(cmd); found {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 6: leading-token prefix match (AD-4).
+	// Tokenize with strings.Fields — collapses any run of whitespace and
+	// strips leading/trailing whitespace, so "git  diff" → ["git","diff"].
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false, reviewShellRejectMsg
+	}
+	// Build a 1-or-2-token candidate key.
+	two := parts[0]
+	if len(parts) >= 2 {
+		two = parts[0] + " " + parts[1]
+	}
+	for _, entry := range allowed {
+		if entry == two || entry == parts[0] {
+			return true, ""
+		}
+	}
+	return false, reviewShellRejectMsg
 }

@@ -403,3 +403,262 @@ func TestModeDefinitionArgAllowlists(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// isArgAllowed tests (C4: AD-2, AD-4, AD-7, REQ-2–5, REQ-7)
+// ---------------------------------------------------------------------------
+
+// reviewDef returns the review-mode ModeDefinition for isArgAllowed tests.
+func reviewDef(t *testing.T) ModeDefinition {
+	t.Helper()
+	def, err := LookupMode("review")
+	if err != nil {
+		t.Fatalf("LookupMode(review): %v", err)
+	}
+	return def
+}
+
+// planDef returns the plan-mode ModeDefinition for nil-allowlist passthrough tests.
+func planDef(t *testing.T) ModeDefinition {
+	t.Helper()
+	def, err := LookupMode("plan")
+	if err != nil {
+		t.Fatalf("LookupMode(plan): %v", err)
+	}
+	return def
+}
+
+// shellInput produces a JSON-encoded {"command": cmd} for isArgAllowed tests.
+func shellInput(cmd string) []byte {
+	b, _ := jsonMarshalCmd(cmd)
+	return b
+}
+
+// jsonMarshalCmd marshals {"command": cmd} without importing encoding/json in
+// the test file — uses a simple format since cmd won't contain control chars
+// that need escaping in our test cases (all ASCII printable).
+func jsonMarshalCmd(cmd string) ([]byte, error) {
+	// Use the stdlib — import encoding/json is fine in test files.
+	// We add it to imports separately.
+	return []byte(`{"command":` + `"` + jsonEscapeSimple(cmd) + `"}`), nil
+}
+
+// jsonEscapeSimple escapes only the characters that need it for our test commands.
+func jsonEscapeSimple(s string) string {
+	out := make([]byte, 0, len(s)+4)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			out = append(out, '\\', '"')
+		case '\\':
+			out = append(out, '\\', '\\')
+		case '\n':
+			out = append(out, '\\', 'n')
+		case '\r':
+			out = append(out, '\\', 'r')
+		default:
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
+// TestIsArgAllowed exercises the isArgAllowed gate with the full scenario matrix
+// from the spec (REQ-2 through REQ-5, REQ-7) and design (AD-2, AD-4, AD-7).
+func TestIsArgAllowed(t *testing.T) {
+	rev := reviewDef(t)
+	plan := planDef(t)
+
+	// Helper: a review-mode def but with Read registered instead of shell_exec.
+	revReadDef := ModeDefinition{
+		Name:          "review",
+		ToolAllowlist: rev.ToolAllowlist,
+		ArgAllowlists: rev.ArgAllowlists,
+	}
+
+	cases := []struct {
+		name      string
+		toolName  string
+		rawParams []byte
+		def       ModeDefinition
+		wantOK    bool
+		wantMsg   string // non-empty only when wantOK=false
+	}{
+		// --- Allowed (ok=true, REQ-2) ---
+		{
+			name:     "git diff allowed",
+			toolName: "shell_exec", rawParams: shellInput("git diff HEAD"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git log allowed",
+			toolName: "shell_exec", rawParams: shellInput("git log --oneline -10"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git show allowed",
+			toolName: "shell_exec", rawParams: shellInput("git show HEAD:file.go"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git status allowed",
+			toolName: "shell_exec", rawParams: shellInput("git status --short"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git blame allowed",
+			toolName: "shell_exec", rawParams: shellInput("git blame -L 100,120 f.go"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git diff double-space (AD-4: collapse whitespace)",
+			toolName: "shell_exec", rawParams: shellInput("git  diff"),
+			def: rev, wantOK: true,
+		},
+		{
+			name:     "git status padded (AD-4: trim and collapse)",
+			toolName: "shell_exec", rawParams: shellInput("  git status  "),
+			def: rev, wantOK: true,
+		},
+
+		// --- Rejected non-match (ok=false, REQ-3) ---
+		{
+			name:     "git commit rejected",
+			toolName: "shell_exec", rawParams: shellInput("git commit -m 'wip'"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "git push rejected",
+			toolName: "shell_exec", rawParams: shellInput("git push origin main"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "git checkout rejected",
+			toolName: "shell_exec", rawParams: shellInput("git checkout -b x"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "git reset rejected",
+			toolName: "shell_exec", rawParams: shellInput("git reset --hard HEAD~1"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "git rebase rejected",
+			toolName: "shell_exec", rawParams: shellInput("git rebase -i HEAD~3"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "rm rejected",
+			toolName: "shell_exec", rawParams: shellInput("rm -rf /tmp"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "curl rejected",
+			toolName: "shell_exec", rawParams: shellInput("curl https://example.com"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "cat rejected",
+			toolName: "shell_exec", rawParams: shellInput("cat /etc/passwd"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "bare git rejected (REQ-3.9)",
+			toolName: "shell_exec", rawParams: shellInput("git"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "empty command rejected (REQ-3.10)",
+			toolName: "shell_exec", rawParams: shellInput(""),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "env-prefix injection rejected by allowlist (REQ-4 note)",
+			toolName: "shell_exec", rawParams: shellInput("GIT_SSH_COMMAND=evil git log"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+
+		// --- Rejected metachar (ok=false, REQ-4) — checked BEFORE allowlist ---
+		{
+			name:     "semicolon metachar",
+			toolName: "shell_exec", rawParams: shellInput("git log; rm -rf /"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "double-ampersand metachar",
+			toolName: "shell_exec", rawParams: shellInput("git diff && curl https://evil.com"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "pipe metachar",
+			toolName: "shell_exec", rawParams: shellInput("git log | xargs rm"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "dollar-paren metachar",
+			toolName: "shell_exec", rawParams: shellInput("git log $(rm -rf /)"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "backtick metachar",
+			toolName: "shell_exec", rawParams: shellInput("git log `id`"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "newline metachar",
+			toolName: "shell_exec", rawParams: shellInput("git diff\nrm -rf /"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+
+		// --- Nil-allowlist passthrough (ok=true, REQ-7) ---
+		{
+			name:     "plan mode nil ArgAllowlists passthrough",
+			toolName: "shell_exec", rawParams: shellInput("git commit -m x"),
+			def: plan, wantOK: true,
+		},
+		{
+			name:     "review mode no entry for Read tool passthrough",
+			toolName: "Read", rawParams: []byte(`{"file_path":"/etc/passwd"}`),
+			def: revReadDef, wantOK: true,
+		},
+
+		// --- Malformed params (ok=false, fail-closed) ---
+		{
+			name:     "malformed JSON fail-closed",
+			toolName: "shell_exec", rawParams: []byte("not-json"),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+		{
+			name:     "missing command field fail-closed",
+			toolName: "shell_exec", rawParams: []byte(`{"other":"value"}`),
+			def: rev, wantOK: false, wantMsg: reviewShellRejectMsg,
+		},
+
+		// --- REQ-5: exact rejection message ---
+		{
+			name:      "exact rejection message for git commit",
+			toolName:  "shell_exec",
+			rawParams: shellInput("git commit -m 'x'"),
+			def:       rev,
+			wantOK:    false,
+			wantMsg:   "command not allowed in review mode: only read-only git commands are permitted (git diff, git log, git show, git status, git blame)",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ok, reason := isArgAllowed(tc.toolName, tc.rawParams, tc.def)
+			if ok != tc.wantOK {
+				t.Errorf("isArgAllowed(%q, ...) ok=%v, want %v", tc.toolName, ok, tc.wantOK)
+			}
+			if !tc.wantOK && reason != tc.wantMsg {
+				t.Errorf("isArgAllowed reason = %q, want %q", reason, tc.wantMsg)
+			}
+			if tc.wantOK && reason != "" {
+				t.Errorf("isArgAllowed allowed but returned non-empty reason %q", reason)
+			}
+		})
+	}
+}
