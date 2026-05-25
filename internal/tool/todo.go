@@ -72,7 +72,11 @@ type TodoList struct {
 // Mutate decodes the current list, invokes fn with a pointer to it, then
 // encodes and persists the result. It returns the final list so callers can
 // inspect counts for event payloads.
-type TodoMutator func(convID string, mutate func(list *TodoList) error) (TodoList, error)
+//
+// The mutate closure returns the affected item's ID (the created or modified
+// item); "" means no item was affected (e.g. id not found), which signals the
+// persistence/event layer to skip emitting a change event.
+type TodoMutator func(convID string, mutate func(list *TodoList) (itemID string, err error)) (TodoList, error)
 
 // TodoToolDeps holds the callback dependencies for the todo tool set.
 // Using callback functions avoids import cycles between internal/tool and
@@ -273,10 +277,10 @@ func (t *todoCreateTool) Execute(ctx context.Context, params json.RawMessage) (T
 	var createdID string
 	var createdPos int
 
-	finalList, err := t.deps.Mutate(convID, func(list *TodoList) error {
+	finalList, err := t.deps.Mutate(convID, func(list *TodoList) (string, error) {
 		// AD-5: soft cap on active (non-terminal) items.
 		if countActiveItems(list.Items) >= maxActiveTodos {
-			return fmt.Errorf("todo list full: max %d active items (complete or cancel some first)", maxActiveTodos)
+			return "", fmt.Errorf("todo list full: max %d active items (complete or cancel some first)", maxActiveTodos)
 		}
 
 		id := generateID(t.deps.IDGen, list.Items)
@@ -312,7 +316,7 @@ func (t *todoCreateTool) Execute(ctx context.Context, params json.RawMessage) (T
 
 		createdID = id
 		createdPos = targetPos
-		return nil
+		return id, nil
 	})
 	if err != nil {
 		return ToolResult{IsError: true, Content: err.Error()}, nil
@@ -401,7 +405,7 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 	// item was not found without returning an error (not-found is non-fatal).
 	notFound := false
 
-	_, err := t.deps.Mutate(convID, func(list *TodoList) error {
+	_, err := t.deps.Mutate(convID, func(list *TodoList) (string, error) {
 		var target *TodoItem
 		for i := range list.Items {
 			if list.Items[i].ID == input.ID {
@@ -411,12 +415,12 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 		}
 		if target == nil {
 			notFound = true
-			return nil
+			return "", nil // no item affected; signals bridge to skip event
 		}
 
 		// AD-8: cancelled is terminal — no transition out of cancelled is permitted.
 		if target.Status == "cancelled" && input.Status != nil {
-			return fmt.Errorf("%w (%s)", errCancelledTerminal, input.ID)
+			return "", fmt.Errorf("%w (%s)", errCancelledTerminal, input.ID)
 		}
 
 		if input.Content != nil {
@@ -426,7 +430,7 @@ func (t *todoUpdateTool) Execute(ctx context.Context, params json.RawMessage) (T
 			target.Status = *input.Status
 		}
 		target.UpdatedAt = time.Now().UTC()
-		return nil
+		return input.ID, nil
 	})
 
 	switch {

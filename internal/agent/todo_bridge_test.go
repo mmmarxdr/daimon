@@ -136,13 +136,13 @@ func TestTodoToolDeps_Mutate_MutatesLiveConv(t *testing.T) {
 
 	deps := ag.TodoToolDeps()
 
-	list, err := deps.Mutate("conv-mut-1", func(l *tool.TodoList) error {
+	list, err := deps.Mutate("conv-mut-1", func(l *tool.TodoList) (string, error) {
 		l.Items = append(l.Items, tool.TodoItem{
 			ID:      "td_00000001",
 			Content: "write tests",
 			Status:  "pending",
 		})
-		return nil
+		return "td_00000001", nil
 	})
 	if err != nil {
 		t.Fatalf("Mutate returned error: %v", err)
@@ -179,9 +179,9 @@ func TestTodoToolDeps_Mutate_OtherMetadataPreserved(t *testing.T) {
 	defer ag.unregisterActiveConv(conv.ID)
 
 	deps := ag.TodoToolDeps()
-	_, err := deps.Mutate("conv-meta-1", func(l *tool.TodoList) error {
+	_, err := deps.Mutate("conv-meta-1", func(l *tool.TodoList) (string, error) {
 		l.Items = append(l.Items, tool.TodoItem{ID: "td_00000001", Content: "x", Status: "pending"})
-		return nil
+		return "td_00000001", nil
 	})
 	if err != nil {
 		t.Fatalf("Mutate returned error: %v", err)
@@ -207,9 +207,9 @@ func TestTodoToolDeps_Mutate_NilBus(t *testing.T) {
 	deps := ag.TodoToolDeps()
 
 	// Must not panic.
-	_, err := deps.Mutate("conv-nilbus-1", func(l *tool.TodoList) error {
+	_, err := deps.Mutate("conv-nilbus-1", func(l *tool.TodoList) (string, error) {
 		l.Items = append(l.Items, tool.TodoItem{ID: "td_00000001", Content: "x", Status: "pending"})
-		return nil
+		return "td_00000001", nil
 	})
 	if err != nil {
 		t.Errorf("Mutate returned error when bus is nil: %v", err)
@@ -231,13 +231,13 @@ func TestTodoToolDeps_Mutate_EmitsEvent(t *testing.T) {
 	defer ag.unregisterActiveConv(conv.ID)
 
 	deps := ag.TodoToolDeps()
-	_, err := deps.Mutate("conv-event-1", func(l *tool.TodoList) error {
+	_, err := deps.Mutate("conv-event-1", func(l *tool.TodoList) (string, error) {
 		l.Items = append(l.Items, tool.TodoItem{
 			ID:      "td_aabbccdd",
 			Content: "test",
 			Status:  "pending",
 		})
-		return nil
+		return "td_aabbccdd", nil
 	})
 	if err != nil {
 		t.Fatalf("Mutate error: %v", err)
@@ -283,8 +283,8 @@ func TestTodoToolDeps_Mutate_MutatorError(t *testing.T) {
 
 	deps := ag.TodoToolDeps()
 	sentinel := errors.New("mutate fn failed")
-	_, err := deps.Mutate("conv-errmut-1", func(l *tool.TodoList) error {
-		return sentinel
+	_, err := deps.Mutate("conv-errmut-1", func(l *tool.TodoList) (string, error) {
+		return "", sentinel
 	})
 	if !errors.Is(err, sentinel) {
 		t.Errorf("expected sentinel error, got %v", err)
@@ -366,9 +366,9 @@ func TestTodoToolDeps_Mutate_StoreFallback(t *testing.T) {
 	// Do NOT register the conv — force the store-fallback path.
 
 	deps := ag.TodoToolDeps()
-	_, err := deps.Mutate("conv-fallback-1", func(l *tool.TodoList) error {
+	_, err := deps.Mutate("conv-fallback-1", func(l *tool.TodoList) (string, error) {
 		l.Items = append(l.Items, tool.TodoItem{ID: "td_fallback1", Content: "fb", Status: "pending"})
-		return nil
+		return "td_fallback1", nil
 	})
 	if err != nil {
 		t.Fatalf("Mutate (store-fallback) error: %v", err)
@@ -467,8 +467,8 @@ func TestD4_TodoCreate_SurvivesTurnEnd(t *testing.T) {
 	// Wire todo tools with the agent's own deps.
 	todoTools := tool.BuildTodoTools(ag.TodoToolDeps())
 	ag.toolsMu.Lock()
-	for name, t := range todoTools {
-		ag.tools[name] = t
+	for name, tl := range todoTools {
+		ag.tools[name] = tl
 	}
 	ag.toolsMu.Unlock()
 
@@ -498,6 +498,89 @@ func TestD4_TodoCreate_SurvivesTurnEnd(t *testing.T) {
 	}
 	if list.Items[0].Content != "D4 regression item" {
 		t.Errorf("unexpected item content: %q", list.Items[0].Content)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// REQ-3 event contract — no event on not-found update; correct item_id
+// ---------------------------------------------------------------------------
+
+// TestTodoMutate_NoEventOnNotFound verifies REQ-3: when the mutate closure
+// returns ("", nil) — simulating "item not found" — no agent.todolist.changed
+// event is emitted. This guards against the spurious-event bug where the old
+// code fired an event even when no item was actually mutated.
+func TestTodoMutate_NoEventOnNotFound(t *testing.T) {
+	t.Parallel()
+
+	conv := &store.Conversation{
+		ID:       "conv-noevent-1",
+		Metadata: map[string]string{},
+	}
+	bus := &recordingBus{}
+	ag := newMinimalAgentWithBus(t, bus)
+	ag.registerActiveConv(conv)
+	defer ag.unregisterActiveConv(conv.ID)
+
+	// Invoke todoMutate directly with a closure that returns ("", nil),
+	// simulating the not-found path of todo_update.
+	_, err := ag.todoMutate("conv-noevent-1", func(_ *tool.TodoList) (string, error) {
+		return "", nil // no item affected
+	})
+	if err != nil {
+		t.Fatalf("todoMutate returned unexpected error: %v", err)
+	}
+
+	events := bus.filterByType(notify.EventTodolistChanged)
+	if len(events) != 0 {
+		t.Errorf("expected 0 events when closure returns empty itemID, got %d", len(events))
+	}
+}
+
+// TestTodoMutate_CorrectItemIDForNonLastItem verifies that the emitted event's
+// item_id equals the id returned by the mutate closure — NOT the last item in
+// the list. Seeds a list of 3 items and mutates the FIRST item, asserts
+// item_id == first item's id.
+func TestTodoMutate_CorrectItemIDForNonLastItem(t *testing.T) {
+	t.Parallel()
+
+	items := []tool.TodoItem{
+		{ID: "td_first", Content: "first", Status: "pending", Position: 1},
+		{ID: "td_middle", Content: "middle", Status: "pending", Position: 2},
+		{ID: "td_last", Content: "last", Status: "pending", Position: 3},
+	}
+	encoded, err := tool.EncodeTodoList(tool.TodoList{Version: 1, Items: items})
+	if err != nil {
+		t.Fatalf("encode seed list: %v", err)
+	}
+	conv := &store.Conversation{
+		ID:       "conv-itemid-1",
+		Metadata: map[string]string{tool.TodoMetadataKey: encoded},
+	}
+	bus := &recordingBus{}
+	ag := newMinimalAgentWithBus(t, bus)
+	ag.registerActiveConv(conv)
+	defer ag.unregisterActiveConv(conv.ID)
+
+	// Mutate only the FIRST item; closure returns its id.
+	_, err = ag.todoMutate("conv-itemid-1", func(l *tool.TodoList) (string, error) {
+		for i := range l.Items {
+			if l.Items[i].ID == "td_first" {
+				l.Items[i].Status = "in_progress"
+				return "td_first", nil
+			}
+		}
+		return "", nil
+	})
+	if err != nil {
+		t.Fatalf("todoMutate returned unexpected error: %v", err)
+	}
+
+	events := bus.filterByType(notify.EventTodolistChanged)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if got := events[0].Meta["item_id"]; got != "td_first" {
+		t.Errorf("item_id = %q, want %q (must not be last item)", got, "td_first")
 	}
 }
 

@@ -85,7 +85,7 @@ func (a *Agent) TodoToolDeps() tool.TodoToolDeps {
 }
 
 // todoMutate is the concrete TodoMutator implementation (AD-1, AD-2, AD-6).
-func (a *Agent) todoMutate(convID string, mutate func(list *tool.TodoList) error) (tool.TodoList, error) {
+func (a *Agent) todoMutate(convID string, mutate func(list *tool.TodoList) (string, error)) (tool.TodoList, error) {
 	// Step 1 & 2: locate the live *conv (registry first, store fallback).
 	conv, fromRegistry := a.resolveTodoConv(convID)
 	if conv == nil {
@@ -103,7 +103,10 @@ func (a *Agent) todoMutate(convID string, mutate func(list *tool.TodoList) error
 	after := before
 
 	// Step 4: apply the mutation. Bail out without writing on error.
-	if err := mutate(&after); err != nil {
+	// itemID is the ID of the affected item; "" signals no item was mutated
+	// (e.g. not-found update), in which case no event should be emitted.
+	itemID, err := mutate(&after)
+	if err != nil {
 		return tool.TodoList{}, err
 	}
 
@@ -124,13 +127,16 @@ func (a *Agent) todoMutate(convID string, mutate func(list *tool.TodoList) error
 		}
 	}
 
-	// Step 7: emit event (nil-guard, AD-6).
-	// Infer action from before/after: if items grew it's a "create", otherwise "update".
-	action := "update"
-	if len(after.Items) > beforeCount {
-		action = "create"
+	// Step 7: emit event only when an item was actually mutated (AD-6, REQ-3).
+	// itemID == "" means the closure did not affect any item (e.g. not-found);
+	// in that case no event is emitted.
+	if itemID != "" {
+		action := "update"
+		if len(after.Items) > beforeCount {
+			action = "create"
+		}
+		a.emitTodoChanged(convID, after, action, itemID)
 	}
-	a.emitTodoChanged(convID, after, action)
 
 	return after, nil
 }
@@ -184,16 +190,11 @@ func encodeTodoList(list tool.TodoList) (string, error) {
 
 // emitTodoChanged emits an agent.todolist.changed event on the bus (nil-guarded).
 // action is "create" when items grew, "update" when an existing item changed (AD-6).
-// item_id is the last item's ID (for create: the new item; for update: the mutated item,
-// best-effort since the bridge cannot inspect which item the mutate fn changed).
-func (a *Agent) emitTodoChanged(convID string, list tool.TodoList, action string) {
+// itemID is the ID of the created or mutated item, supplied by the mutate closure
+// so the bridge always reports the exact affected item rather than guessing.
+func (a *Agent) emitTodoChanged(convID string, list tool.TodoList, action, itemID string) {
 	if a.bus == nil {
 		return
-	}
-	// item_id: last item in the mutated list.
-	itemID := ""
-	if len(list.Items) > 0 {
-		itemID = list.Items[len(list.Items)-1].ID
 	}
 	a.bus.Emit(notify.Event{
 		Type:      notify.EventTodolistChanged,
