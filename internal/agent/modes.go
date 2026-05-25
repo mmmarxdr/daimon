@@ -79,7 +79,7 @@ const planPrompt = `You are in PLAN mode. Your job: read, analyze, and propose. 
 
 const buildPrompt = `` // build mode: no extra prompt injection (spec REQ-6 S6-2)
 
-const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, diffs, and behavior. You may read files and run read-only git commands (git diff, git log, git show, git status). You MUST NOT modify files or execute mutating shell commands. Produce findings with severity (CRITICAL / WARNING / SUGGESTION). When asked to fix something, respond: "I'm in review mode — switch to /mode build to apply changes."`
+const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, diffs, and behavior. You may read files and run read-only git commands (git diff, git log, git show, git status, git blame). You MUST NOT modify files or execute mutating shell commands. Produce findings with severity (CRITICAL / WARNING / SUGGESTION). When asked to fix something, respond: "I'm in review mode — switch to /mode build to apply changes."`
 
 // ---------------------------------------------------------------------------
 // Tool allowlists (REQ-7)
@@ -136,10 +136,11 @@ var baseReadOnly = []string{
 // Build from a copy so future appends don't mutate baseReadOnly's backing array.
 var planAllowlist = append(append([]string{}, baseReadOnly...), "todo_create", "todo_update")
 
-// reviewAllowlist is baseReadOnly plus Bash. Review is read-only: it inherits
+// reviewAllowlist is baseReadOnly plus shell_exec. Review is read-only: it inherits
 // todo_list via baseReadOnly but NOT todo_create/todo_update (AD-3).
-// (name-level only; argument-level restriction deferred to change #6 per spec gap note in REQ-7.)
-var reviewAllowlist = append(append([]string{}, baseReadOnly...), "Bash")
+// The argument-level policy (isArgAllowed) further restricts shell_exec to
+// read-only git commands (change #6, AD-5).
+var reviewAllowlist = append(append([]string{}, baseReadOnly...), "shell_exec")
 
 // reviewArgAllowlists is the argument-level allowlist for review mode.
 // Only read-only git sub-commands are permitted for shell_exec.

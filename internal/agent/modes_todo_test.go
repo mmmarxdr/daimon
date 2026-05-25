@@ -102,11 +102,12 @@ func TestReviewAllowlist_DoesNotContainTodoUpdate(t *testing.T) {
 
 // TestReviewAllowlist_PreservesNonTodoTools verifies that the AD-3 restructuring
 // did NOT remove any of the pre-existing read-only tools from reviewAllowlist.
-// Checks a representative sample: Read, Grep, Glob, Bash, and several mem_*/codegraph_* tools.
+// Checks a representative sample: Read, Grep, Glob, shell_exec (real name, not
+// dead alias "Bash" — see bug #438 fix in change #6), and several mem_*/codegraph_* tools.
 func TestReviewAllowlist_PreservesNonTodoTools(t *testing.T) {
 	required := []string{
 		"Read", "Grep", "Glob", "WebFetch", "WebSearch",
-		"Bash", // review gets Bash
+		"shell_exec", // review gets the real shell tool (not the dead alias "Bash" — bug #438)
 		"mem_save", "mem_search", "mem_get_observation",
 		"codegraph_search", "codegraph_context",
 	}
@@ -132,11 +133,11 @@ func TestPlanAllowlist_PreservesNonTodoTools(t *testing.T) {
 	}
 }
 
-// TestPlanAllowlist_DoesNotContainBash asserts Bash is NOT in planAllowlist
-// (plan is read-only for external tools; Bash is only in review).
-func TestPlanAllowlist_DoesNotContainBash(t *testing.T) {
-	if planAllowlistContains("Bash") {
-		t.Error("planAllowlist must NOT contain 'Bash' — plan mode is read-only for shell commands")
+// TestPlanAllowlist_DoesNotContainShellExec asserts shell_exec is NOT in planAllowlist
+// (plan is read-only for external tools; shell_exec is only in review with arg-level restrictions).
+func TestPlanAllowlist_DoesNotContainShellExec(t *testing.T) {
+	if planAllowlistContains("shell_exec") {
+		t.Error("planAllowlist must NOT contain 'shell_exec' — plan mode is read-only for shell commands")
 	}
 }
 

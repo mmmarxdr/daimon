@@ -13,6 +13,7 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"daimon/internal/provider"
@@ -303,6 +304,58 @@ func TestBuildMode_NilAllowlistPassesAll(t *testing.T) {
 // ---------------------------------------------------------------------------
 // ArgAllowlists data-model tests (C2: AD-1, REQ-7)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Bug #438 regression: reviewAllowlist must reference real tool name (C3)
+// ---------------------------------------------------------------------------
+
+// TestReviewAllowlistUsesRealToolName asserts that reviewAllowlist contains
+// "shell_exec" (the real registered name) and does NOT contain "Bash" (the
+// dead alias that caused bug #438). Must fail RED before the fix.
+func TestReviewAllowlistUsesRealToolName(t *testing.T) {
+	def, err := LookupMode("review")
+	if err != nil {
+		t.Fatalf("LookupMode(review): %v", err)
+	}
+
+	hasShellExec := false
+	hasBash := false
+	for _, name := range def.ToolAllowlist {
+		if name == "shell_exec" {
+			hasShellExec = true
+		}
+		if name == "Bash" {
+			hasBash = true
+		}
+	}
+	if !hasShellExec {
+		t.Error("reviewAllowlist must contain \"shell_exec\" — the real registered shell tool name")
+	}
+	if hasBash {
+		t.Error("reviewAllowlist must NOT contain \"Bash\" — that name matches no registered tool (bug #438)")
+	}
+}
+
+// TestReviewPromptSyncWithAllowlist asserts the review-mode system prompt lists
+// exactly the five allowed git commands and does not reference forbidden ones.
+func TestReviewPromptSyncWithAllowlist(t *testing.T) {
+	def, _ := LookupMode("review")
+	prompt := def.SystemPrompt
+
+	required := []string{"git diff", "git log", "git show", "git status", "git blame"}
+	for _, cmd := range required {
+		if !strings.Contains(prompt, cmd) {
+			t.Errorf("reviewPrompt missing %q — must list all allowed commands", cmd)
+		}
+	}
+
+	forbidden := []string{"git commit", "git push", "git rebase", "git checkout", "git reset"}
+	for _, cmd := range forbidden {
+		if strings.Contains(prompt, cmd) {
+			t.Errorf("reviewPrompt must NOT reference %q (not in allowlist)", cmd)
+		}
+	}
+}
 
 // TestModeDefinitionArgAllowlists asserts the ArgAllowlists field is wired
 // correctly on all three mode definitions. Review gets the read-only git set;
