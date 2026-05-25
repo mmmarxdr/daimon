@@ -14,6 +14,8 @@ package tui
 // RULE: busEventMsg handler in Subscribe MUST be non-blocking (bus watchdog: 5s).
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"daimon/internal/notify"
@@ -49,9 +51,10 @@ func pumpEvents(ch <-chan tea.Msg) tea.Cmd {
 // full — telemetry is best-effort). Channel capacity 256 matches AD-5.
 //
 // Agent replies: a goroutine reads from ch.out (cap 64, agent-side buffer) and
-// forwards each agentReplyMsg to evCh. This goroutine exits when ch.out is
-// closed (via Stop or GC).
-func wireEvents(bus notify.Bus, ch *TUIChannel) <-chan tea.Msg {
+// forwards each agentReplyMsg to evCh. FIX 1: the goroutine selects on both
+// ch.done (closed by Stop()) and ctx.Done() to exit cleanly without relying
+// on ch.out being closed (which would panic in-flight Send() callers).
+func wireEvents(ctx context.Context, bus notify.Bus, ch *TUIChannel) <-chan tea.Msg {
 	evCh := make(chan tea.Msg, 256)
 
 	// Thin bus handler — must not block (bus enforces 5s watchdog).
@@ -63,10 +66,28 @@ func wireEvents(bus notify.Bus, ch *TUIChannel) <-chan tea.Msg {
 		}
 	})
 
-	// Forward agent replies from TUIChannel.out onto the same channel.
+	// Forward agent replies from TUIChannel.out onto the same evCh.
+	// FIX 1: never close ch.out; instead select on ch.done / ctx to exit.
 	go func() {
-		for raw := range ch.out {
-			evCh <- raw.(tea.Msg) //nolint:forcetypeassert // out only carries tea.Msg values
+		for {
+			select {
+			case raw, ok := <-ch.out:
+				if !ok {
+					// ch.out closed (defensive: should not happen with FIX 1).
+					return
+				}
+				select {
+				case evCh <- raw.(tea.Msg): //nolint:forcetypeassert // out only carries tea.Msg values
+				case <-ch.done:
+					return
+				case <-ctx.Done():
+					return
+				}
+			case <-ch.done:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 

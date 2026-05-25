@@ -38,24 +38,30 @@ type promptSentMsg struct{}
 //
 // Concurrency contract:
 //   - out is buffered (cap 64) so Send never blocks the agent goroutine.
+//     out is NEVER closed — it is left open and GC'd after the program exits.
+//     Closing out while in-flight Send() goroutines are running causes a panic
+//     (send-on-closed-channel); using a separate done channel avoids this.
 //   - inbox is captured in Start; submit writes to it from a tea.Cmd closure
 //     (which runs on its own goroutine, off the Update path).
 //   - ctx is captured in Start; submit selects on ctx.Done() so it does not
 //     block during shutdown even when inbox is full.
-//   - W2 FIX: Stop() closes c.out exactly once (sync.Once guard against
-//     double-close). The wireEvents goroutine ranges over c.out and exits
-//     cleanly when the channel is closed.
+//   - FIX 1: Stop() closes the separate done channel exactly once (sync.Once
+//     guard for idempotency). wireEvents goroutines select on done to exit.
+//     Send() keeps its ctx.Done() branch — on shutdown ctx is cancelled so
+//     Send takes the ctx.Done() branch rather than blocking on out.
 type TUIChannel struct {
 	inbox    chan<- channel.IncomingMessage // captured in Start; nil until Start is called
-	out      chan interface{}               // agent Send pushes agentReplyMsg here; tea.Cmd drains
+	out      chan interface{}               // agent Send pushes agentReplyMsg here; NEVER closed
+	done     chan struct{}                  // closed by Stop() exactly once; signals goroutine exit
 	ctx      context.Context                // captured in Start; guards submit send against shutdown
-	stopOnce sync.Once                      // guards against double-close of out
+	stopOnce sync.Once                      // guards against double-close of done
 }
 
 // newTUIChannel constructs a TUIChannel ready for use (package-internal).
 func newTUIChannel() *TUIChannel {
 	return &TUIChannel{
-		out: make(chan interface{}, 64),
+		out:  make(chan interface{}, 64),
+		done: make(chan struct{}),
 	}
 }
 
@@ -89,12 +95,14 @@ func (c *TUIChannel) Send(ctx context.Context, msg channel.OutgoingMessage) erro
 	return nil
 }
 
-// Stop implements channel.Channel. Closes c.out exactly once so the
-// wireEvents goroutine (which ranges over c.out) exits cleanly (W2 fix).
-// A sync.Once guard prevents a panic on double-close.
+// Stop implements channel.Channel. Closes the done channel exactly once,
+// signalling wireEvents goroutines to exit. c.out is deliberately left open
+// so that any in-flight Send() calls do not panic (send-on-closed-channel).
+// c.out will be GC'd when the program exits. A sync.Once guard ensures
+// idempotency.
 func (c *TUIChannel) Stop() error {
 	c.stopOnce.Do(func() {
-		close(c.out)
+		close(c.done)
 	})
 	return nil
 }

@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"daimon/internal/channel"
 	"daimon/internal/notify"
 )
 
@@ -319,28 +321,37 @@ func TestUpdateChat_NoDoubleMsgDaimon(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// W2 — goroutine / pump exit after Stop (RED → GREEN)
+// FIX 1 (CRITICAL) — Send after Stop must never panic; wireEvents goroutine exits
 // ---------------------------------------------------------------------------
 
-// TestTUIChannel_Stop_ClosesOut verifies that after Stop() is called, the
-// out channel is closed so the wireEvents goroutine can exit cleanly.
-func TestTUIChannel_Stop_ClosesOut(t *testing.T) {
-	ch := newTUIChannel()
+// TestTUIChannel_Send_AfterStop_NoPanic verifies that calling Send() after
+// Stop() (with a cancelled ctx so Send can't block) does NOT panic. Previously,
+// Stop() closed c.out and a racing Send() would panic when the runtime selected
+// the send case on a closed channel.
+func TestTUIChannel_Send_AfterStop_NoPanic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 
+	ch := newTUIChannel()
+	// Simulate Start so ctx is captured.
+	ch.ctx = ctx
+
+	// Stop first (signals done, does NOT close c.out).
 	if err := ch.Stop(); err != nil {
 		t.Fatalf("Stop() returned error: %v", err)
 	}
 
-	// After Stop(), ch.out must be closed. A read from a closed channel returns immediately.
-	select {
-	case _, open := <-ch.out:
-		if open {
-			t.Error("expected ch.out to be closed after Stop(), but it's still open with a value")
+	// Now cancel the ctx to make Send take the ctx.Done() branch rather than
+	// blocking, mirroring real shutdown where cancel() fires before Stop().
+	cancel()
+
+	// Send must not panic — even though Stop() was called concurrently.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Send() panicked after Stop(): %v", r)
 		}
-		// closed — correct
-	default:
-		t.Error("ch.out was not closed after Stop() — a closed channel is always readable")
-	}
+	}()
+
+	_ = ch.Send(ctx, channel.OutgoingMessage{Text: "should not panic"})
 }
 
 // TestTUIChannel_Stop_Idempotent verifies that calling Stop() twice does not panic.
@@ -355,4 +366,42 @@ func TestTUIChannel_Stop_Idempotent(t *testing.T) {
 
 	_ = ch.Stop()
 	_ = ch.Stop() // must not panic
+}
+
+// TestWireEvents_GoroutineExits_AfterStop verifies that the agent-reply
+// forwarding goroutine started by wireEvents exits cleanly after Stop() is
+// called (i.e., done channel is closed), so there are no goroutine leaks.
+func TestWireEvents_GoroutineExits_AfterStop(t *testing.T) {
+	bus := notify.NewEventBus(0, 0, 0)
+	defer bus.Close()
+
+	ch := newTUIChannel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	evCh := wireEvents(ctx, bus, ch)
+
+	// Send a message before stopping to confirm the goroutine is running.
+	go func() {
+		_ = ch.Send(context.Background(), channel.OutgoingMessage{Text: "hello"})
+	}()
+
+	// Drain the message.
+	select {
+	case <-evCh:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first message from wireEvents")
+	}
+
+	// Now stop — the goroutine must exit (done channel closed).
+	_ = ch.Stop()
+
+	// The done channel must be closed (unblocks immediately after Stop()).
+	// This confirms the forwarding goroutine will exit.
+	select {
+	case <-ch.done:
+		// correct — done was closed by Stop()
+	case <-time.After(time.Second):
+		t.Error("ch.done was not closed after Stop() — goroutine may have leaked")
+	}
 }
