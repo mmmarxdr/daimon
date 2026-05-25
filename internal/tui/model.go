@@ -145,6 +145,10 @@ func (m Model) Init() tea.Cmd {
 //
 // CONTRACT (AD-3): all 7 screenState cases are present here from PR1.
 // Later PRs replace the stub bodies with real handlers (updateChat, etc.).
+//
+// C3 FIX: busEventMsg and agentReplyMsg are handled GLOBALLY here, before
+// the screen switch. This guarantees the pump is ALWAYS re-armed even when
+// the active screen is not screenChat — events never stop flowing mid-session.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// 1. Global messages.
 	switch msg := msg.(type) {
@@ -157,6 +161,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+
+	// C3: Handle bus/reply messages globally so the pump is re-armed regardless
+	// of which screen is active. The chat screen handler also processes these
+	// for thread mutations when screen == screenChat.
+	case busEventMsg:
+		if m.screen == screenChat {
+			return m.updateChat(msg) // full handler including thread mutations
+		}
+		// Non-chat screen: apply no thread mutations but always re-arm the pump.
+		if m.events != nil {
+			return m, pumpEvents(m.events)
+		}
+		return m, nil
+
+	case agentReplyMsg:
+		if m.screen == screenChat {
+			return m.updateChat(msg) // full handler including thread append
+		}
+		// Non-chat screen: re-arm the pump so replies aren't lost.
+		if m.events != nil {
+			return m, pumpEvents(m.events)
+		}
+		return m, nil
 	}
 
 	// 2. Overlays intercept ALL messages before screen routing (AD-9 / PR3).
