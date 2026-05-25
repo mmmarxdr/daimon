@@ -1,0 +1,454 @@
+package tui
+
+// setup.go — embedded first-run setup TUI (PR-B1).
+//
+// RunSetupTUI launches a self-contained bubbletea program that collects
+// provider + model + API key (+ base_url for ollama), writes the config,
+// then returns the loaded *config.Config so tui_cmd.go can continue
+// into the main chat TUI without a second process.
+//
+// Architecture:
+//   runTUICommand → config.Load → ErrNoConfig → RunSetupTUI(cfgPath)
+//   RunSetupTUI → requireTTY → tea.NewProgram(setupModel) → done
+//   → config written → config.Load → returns *config.Config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"daimon/internal/config"
+	"daimon/internal/setup"
+)
+
+// errSetupAborted is the sentinel returned when the user quits before completing.
+var errSetupAborted = errors.New("setup cancelled")
+
+// setupStep is the multi-step flow state.
+type setupStep int
+
+const (
+	stepProvider    setupStep = iota // choose provider from list
+	stepCredentials                  // enter model + API key (+ base_url for ollama)
+	stepDone                         // write completed or errored
+)
+
+// setupWroteMsg is returned by writeConfigCmd after the write attempt.
+type setupWroteMsg struct {
+	path string
+	err  error
+}
+
+// setupModel is the root tea.Model for the setup program.
+// It is a SINGLE root model (no nested Elm sub-models).
+type setupModel struct {
+	styles tuiStyles
+
+	step      setupStep
+	cfgPath   string
+	providers []string // = config.KnownProviders
+	provIdx   int      // selected index into providers
+
+	provider string // locked in when leaving stepProvider
+
+	modelInput   textinput.Model // free-text model ID
+	keyInput     textinput.Model // EchoPassword for API key
+	baseURLInput textinput.Model // ollama base URL
+
+	fieldIdx int // 0=model, 1=key, 2=baseURL (ollama only)
+
+	width  int
+	height int
+
+	writtenPath string
+	writeErr    error
+	done        bool
+	aborted     bool
+
+	validationErr string // inline field validation message
+}
+
+// RunSetupTUI launches the embedded setup program.
+// If the user aborts (ctrl+c before completing), it returns errSetupAborted.
+// On success, the config has been written to disk; it is reloaded via config.Load.
+func RunSetupTUI(cfgPath string) (*config.Config, error) {
+	if err := requireTTY(os.Stdin); err != nil {
+		return nil, err
+	}
+
+	s := newTuiStyles()
+	modelIn := textinput.New()
+	modelIn.Placeholder = "model ID"
+	modelIn.CharLimit = 128
+
+	keyIn := textinput.New()
+	keyIn.Placeholder = "API key"
+	keyIn.EchoMode = textinput.EchoPassword
+	keyIn.CharLimit = 256
+
+	baseIn := textinput.New()
+	baseIn.Placeholder = "http://localhost:11434"
+	baseIn.SetValue("http://localhost:11434")
+	baseIn.CharLimit = 256
+
+	m := setupModel{
+		styles:       s,
+		step:         stepProvider,
+		cfgPath:      cfgPath,
+		providers:    config.KnownProviders,
+		provIdx:      0,
+		modelInput:   modelIn,
+		keyInput:     keyIn,
+		baseURLInput: baseIn,
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	finalRaw, err := p.Run()
+	if err != nil {
+		return nil, fmt.Errorf("setup tui: %w", err)
+	}
+
+	final := finalRaw.(setupModel)
+
+	if final.aborted {
+		return nil, errSetupAborted
+	}
+	if final.writeErr != nil {
+		return nil, fmt.Errorf("setup tui: write config: %w", final.writeErr)
+	}
+
+	return config.Load(final.writtenPath)
+}
+
+// IsSetupAborted reports whether the error is the user-abort sentinel.
+func IsSetupAborted(err error) bool {
+	return errors.Is(err, errSetupAborted)
+}
+
+// ─── tea.Model interface ────────────────────────────────────────────────────
+
+func (m setupModel) Init() tea.Cmd {
+	return textinput.Blink
+}
+
+func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case setupWroteMsg:
+		if msg.err != nil {
+			m.writeErr = msg.err
+			m.step = stepDone
+			return m, nil
+		}
+		m.writtenPath = msg.path
+		m.done = true
+		return m, tea.Quit
+
+	case tea.KeyMsg:
+		// Global: ctrl+c always aborts
+		if msg.Type == tea.KeyCtrlC {
+			m.aborted = true
+			return m, tea.Quit
+		}
+
+		switch m.step {
+		case stepProvider:
+			return m.updateProvider(msg)
+		case stepCredentials:
+			return m.updateCredentials(msg)
+		case stepDone:
+			// Any key on the error screen quits
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m setupModel) updateProvider(msg tea.KeyMsg) (setupModel, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.provIdx > 0 {
+			m.provIdx--
+		}
+	case tea.KeyDown:
+		if m.provIdx < len(m.providers)-1 {
+			m.provIdx++
+		}
+	case tea.KeyRunes:
+		switch string(msg.Runes) {
+		case "k":
+			if m.provIdx > 0 {
+				m.provIdx--
+			}
+		case "j":
+			if m.provIdx < len(m.providers)-1 {
+				m.provIdx++
+			}
+		}
+	case tea.KeyEnter:
+		m.provider = m.providers[m.provIdx]
+
+		// Prefill model with the first catalog entry (if any)
+		models := setup.ModelsForProvider(m.provider)
+		if len(models) > 0 {
+			m.modelInput.SetValue(models[0].ID)
+		} else {
+			m.modelInput.SetValue("")
+		}
+		m.fieldIdx = 0
+		m.modelInput.Focus()
+		m.keyInput.Blur()
+		m.baseURLInput.Blur()
+		m.validationErr = ""
+		m.step = stepCredentials
+	}
+	return m, nil
+}
+
+func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
+	// visibleFields returns the set of active fields for the current provider
+	ollama := m.provider == "ollama"
+	fieldCount := 2 // model + key
+	if ollama {
+		fieldCount = 3 // model + baseURL (no key for ollama)
+	}
+
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.step = stepProvider
+		m.modelInput.Blur()
+		m.keyInput.Blur()
+		m.baseURLInput.Blur()
+		return m, nil
+
+	case tea.KeyTab, tea.KeyShiftTab:
+		delta := 1
+		if msg.Type == tea.KeyShiftTab {
+			delta = -1
+		}
+		m.fieldIdx = (m.fieldIdx + delta + fieldCount) % fieldCount
+		m = m.focusField(ollama)
+		return m, textinput.Blink
+
+	case tea.KeyEnter:
+		model := strings.TrimSpace(m.modelInput.Value())
+		key := strings.TrimSpace(m.keyInput.Value())
+		baseURL := strings.TrimSpace(m.baseURLInput.Value())
+
+		if model == "" {
+			m.validationErr = "model ID cannot be empty"
+			return m, nil
+		}
+		if !ollama && key == "" {
+			m.validationErr = "API key cannot be empty"
+			return m, nil
+		}
+
+		m.validationErr = ""
+		cfgPath := m.cfgPath
+		provider := m.provider
+		return m, writeConfigCmd(provider, model, key, baseURL, cfgPath)
+	}
+
+	// Route keystrokes to the focused input
+	var cmd tea.Cmd
+	switch m.fieldIdx {
+	case 0:
+		m.modelInput, cmd = m.modelInput.Update(msg)
+	case 1:
+		if ollama {
+			m.baseURLInput, cmd = m.baseURLInput.Update(msg)
+		} else {
+			m.keyInput, cmd = m.keyInput.Update(msg)
+		}
+	case 2:
+		// only reachable when ollama (fieldCount==3) and fieldIdx==2
+		m.keyInput, cmd = m.keyInput.Update(msg)
+	}
+	return m, cmd
+}
+
+// focusField applies Focus/Blur to the three text inputs based on fieldIdx.
+// For ollama: fields are model(0), baseURL(1); key is hidden.
+// For others: fields are model(0), key(1).
+func (m setupModel) focusField(ollama bool) setupModel {
+	m.modelInput.Blur()
+	m.keyInput.Blur()
+	m.baseURLInput.Blur()
+
+	switch m.fieldIdx {
+	case 0:
+		m.modelInput.Focus()
+	case 1:
+		if ollama {
+			m.baseURLInput.Focus()
+		} else {
+			m.keyInput.Focus()
+		}
+	case 2:
+		// fieldIdx==2 only when ollama; currently unused (ollama has no key field)
+		// kept for forward compatibility
+	}
+	return m
+}
+
+// writeConfigCmd is the IO Cmd — runs outside the model, returns a setupWroteMsg.
+func writeConfigCmd(provider, model, apiKey, baseURL, cfgPath string) tea.Cmd {
+	return func() tea.Msg {
+		cfg := buildSetupConfig(provider, model, apiKey, baseURL)
+
+		writePath := cfgPath
+		if writePath == "" {
+			p, err := setup.DefaultConfigPath()
+			if err != nil {
+				return setupWroteMsg{err: err}
+			}
+			writePath = p
+		}
+
+		if err := setup.WriteConfig(writePath, cfg); err != nil {
+			return setupWroteMsg{err: err}
+		}
+		return setupWroteMsg{path: writePath}
+	}
+}
+
+// buildSetupConfig builds a *config.Config from the collected setup values.
+// Pure function — no IO, fully unit-testable.
+// Hardcodes channel.type="cli" and store.type="sqlite" (fixes file-vs-sqlite divergence).
+func buildSetupConfig(provider, model, apiKey, baseURL string) *config.Config {
+	cfg := &config.Config{}
+
+	creds := config.ProviderCredentials{APIKey: apiKey}
+	if baseURL != "" {
+		creds.BaseURL = baseURL
+	}
+	cfg.Providers = map[string]config.ProviderCredentials{
+		provider: creds,
+	}
+
+	cfg.Models = config.ModelsConfig{
+		Default: config.ModelRef{
+			Provider: provider,
+			Model:    model,
+		},
+	}
+
+	cfg.Channel.Type = "cli"
+
+	cfg.Store.Type = "sqlite"
+	cfg.Store.Path = "~/.daimon/data"
+
+	auditEnabled := true
+	cfg.Audit.Enabled = &auditEnabled
+	cfg.Audit.Type = "sqlite"
+	cfg.Audit.Path = "~/.daimon/audit"
+
+	return cfg
+}
+
+// ─── View ──────────────────────────────────────────────────────────────────
+
+func (m setupModel) View() string {
+	switch m.step {
+	case stepProvider:
+		return m.viewProvider()
+	case stepCredentials:
+		return m.viewCredentials()
+	case stepDone:
+		return m.viewDone()
+	default:
+		return ""
+	}
+}
+
+func (m setupModel) viewProvider() string {
+	s := m.styles
+	var sb strings.Builder
+
+	sb.WriteString(s.accent.Render("⫶ daimon — first-run setup"))
+	sb.WriteString("\n\n")
+	sb.WriteString(s.label.Render("Choose a provider:"))
+	sb.WriteString("\n\n")
+
+	for i, p := range m.providers {
+		line := "  " + p
+		if i == m.provIdx {
+			line = s.selected.Render("▶ " + p)
+		}
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(s.hint.Render("↑/↓  navigate • enter  select • ctrl+c  quit"))
+	return sb.String()
+}
+
+func (m setupModel) viewCredentials() string {
+	s := m.styles
+	ollama := m.provider == "ollama"
+
+	var sb strings.Builder
+	sb.WriteString(s.accent.Render("⫶ daimon — first-run setup"))
+	sb.WriteString("\n\n")
+	sb.WriteString(s.label.Render("Provider: ") + s.accent.Render(m.provider))
+	sb.WriteString("\n\n")
+
+	// Model field
+	label := s.dimLabel.Render("Model ID")
+	if m.fieldIdx == 0 {
+		label = s.label.Render("Model ID")
+	}
+	sb.WriteString(label + "\n")
+	sb.WriteString(m.modelInput.View())
+	sb.WriteString("\n\n")
+
+	if ollama {
+		// Base URL field
+		label2 := s.dimLabel.Render("Base URL")
+		if m.fieldIdx == 1 {
+			label2 = s.label.Render("Base URL")
+		}
+		sb.WriteString(label2 + "\n")
+		sb.WriteString(m.baseURLInput.View())
+		sb.WriteString("\n\n")
+	} else {
+		// API key field
+		label2 := s.dimLabel.Render("API Key")
+		if m.fieldIdx == 1 {
+			label2 = s.label.Render("API Key")
+		}
+		sb.WriteString(label2 + "\n")
+		sb.WriteString(m.keyInput.View())
+		sb.WriteString("\n\n")
+	}
+
+	if m.validationErr != "" {
+		sb.WriteString(s.errStyle.Render("✗ " + m.validationErr))
+		sb.WriteString("\n\n")
+	}
+
+	sb.WriteString(s.hint.Render("tab  next field • shift+tab  prev field • enter  save • esc  back • ctrl+c  quit"))
+	return sb.String()
+}
+
+func (m setupModel) viewDone() string {
+	s := m.styles
+	if m.writeErr != nil {
+		return s.errStyle.Render("✗ setup failed: "+m.writeErr.Error()) +
+			"\n\n" + s.hint.Render("any key to quit")
+	}
+	// success path — tea.Quit is sent immediately, so this is rarely shown
+	return s.accent.Render("✓ config written to "+m.writtenPath) +
+		"\n" + s.hint.Render("starting daimon…")
+}
