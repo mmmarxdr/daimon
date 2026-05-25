@@ -23,6 +23,7 @@ import (
 	"daimon/internal/channel"
 	"daimon/internal/config"
 	"daimon/internal/content"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/skill"
 	"daimon/internal/store"
@@ -521,5 +522,99 @@ func TestReviewModeShellArgGate_RejectionInConvMessages(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("REQ-6: rejection must flow through conv.Messages to provider; got: %v", prov.toolResults)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// W-1: Scenario 4.7 — metachar rejected even when shell Execute would otherwise
+// run unconditionally (AllowAll-independence, REQ-4 Scenario 4.7)
+// ---------------------------------------------------------------------------
+
+// TestReviewModeShellArgGate_AllowAll_MetacharStillRejected pins Spec REQ-4
+// Scenario 4.7: the arg gate in modes.go rejects a metacharacter command in
+// review mode regardless of whether the underlying shell tool would execute it
+// unconditionally (i.e., regardless of ShellToolConfig.AllowAll).
+//
+// Structural guarantee: isArgAllowed operates on ModeDefinition alone — it has
+// no reference to ShellToolConfig and therefore cannot be overridden by AllowAll.
+// ShellToolConfig.AllowAll only affects shell.go's Execute path, which the gate
+// runs BEFORE (loop.go:728). shellExecStub.Execute represents the Execute path
+// of an AllowAll=true shell: it executes any command without further checks.
+// If the gate were bypassed, stub.calls would be nonzero and the test would fail.
+func TestReviewModeShellArgGate_AllowAll_MetacharStillRejected(t *testing.T) {
+	t.Parallel()
+
+	// shellExecStub.Execute unconditionally executes (mirrors AllowAll=true shell).
+	stub := &shellExecStub{result: tool.ToolResult{Content: "would execute if gate bypassed"}}
+	// Use a metachar command that would pass the prefix-allowlist if the metachar
+	// check were skipped: "git diff; echo pwned" — leading two tokens are "git diff"
+	// (in allowlist), but the semicolon MUST be caught first (REQ-4, AD-2 Step 1).
+	prov := &shellArgGateProvider{command: "git diff; echo pwned"}
+	ag := newShellArgGateAgent(t, "review", "conv-shell-allowall-meta-1", prov, stub)
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "conv-shell-allowall-meta-1-ch",
+		SenderID:  "u1",
+		Content:   content.TextBlock("show diff"),
+	})
+
+	// Gate MUST have blocked: Execute should never have been called.
+	if stub.calls != 0 {
+		t.Errorf("REQ-4/Scenario-4.7: arg gate did not block metachar command; Execute was called %d time(s) (AllowAll-independence violated)", stub.calls)
+	}
+
+	// The rejection message MUST appear in the tool result seen by the provider.
+	found := false
+	for _, r := range prov.toolResults {
+		if strings.Contains(r, reviewShellRejectMsg) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("REQ-4/Scenario-4.7: expected rejection message %q; got: %v", reviewShellRejectMsg, prov.toolResults)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S-1: Scenario 6.2 — bus tool.end event emitted on arg-rejected call (REQ-6)
+// ---------------------------------------------------------------------------
+
+// TestReviewModeShellArgGate_BusEventEmitted_OnArgRejection pins Spec REQ-6
+// Scenario 6.2: a shell_exec call rejected by the arg gate STILL emits a
+// notify.EventToolEnd bus event with IsError=true. The event flows through the
+// unconditional bus-emit path in loop.go, identical to name-level blocks.
+func TestReviewModeShellArgGate_BusEventEmitted_OnArgRejection(t *testing.T) {
+	t.Parallel()
+
+	rb := &recordingBus{}
+	stub := &shellExecStub{}
+	prov := &shellArgGateProvider{command: "git commit -m 'audit this'"}
+	ag := newShellArgGateAgent(t, "review", "conv-shell-bus-event-1", prov, stub).withBus(rb)
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "conv-shell-bus-event-1-ch",
+		SenderID:  "u1",
+		Content:   content.TextBlock("commit"),
+	})
+
+	// Execute must NOT have been called (gate blocked).
+	if stub.calls != 0 {
+		t.Errorf("REQ-6/S6-2: Execute should not be called on rejected arg; got calls=%d", stub.calls)
+	}
+
+	// The bus MUST have received at least one EventToolEnd with IsError=true.
+	ends := rb.filterByType(notify.EventToolEnd)
+	if len(ends) == 0 {
+		t.Fatal("REQ-6/S6-2: no EventToolEnd emitted on bus for arg-rejected shell_exec call")
+	}
+	var foundError bool
+	for _, ev := range ends {
+		if ev.ToolName == "shell_exec" && ev.IsError {
+			foundError = true
+			break
+		}
+	}
+	if !foundError {
+		t.Errorf("REQ-6/S6-2: expected EventToolEnd with ToolName=shell_exec and IsError=true; got events: %+v", ends)
 	}
 }
