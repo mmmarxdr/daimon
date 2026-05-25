@@ -29,7 +29,7 @@ func TestWireTodo_RegistersAllThreeTools(t *testing.T) {
 	}{
 		{"BuildTodoTools(", "constructs the three todo tools from deps"},
 		{"TodoToolDeps()", "builds callback deps from the agent"},
-		{"exists", "first-writer-wins guard must check for pre-existing entries before registering"},
+		{"if _, exists := toolsRegistry[name]", "first-writer-wins guard must check for pre-existing entries before registering"},
 	}
 	for _, req := range required {
 		if !strings.Contains(content, req.call) {

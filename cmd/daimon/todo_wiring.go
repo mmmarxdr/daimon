@@ -4,7 +4,6 @@ import (
 	"log/slog"
 
 	"daimon/internal/agent"
-	"daimon/internal/notify"
 	"daimon/internal/tool"
 )
 
@@ -18,9 +17,9 @@ import (
 // Call this after agent.New, alongside wireSmartMemory, in BOTH startup paths
 // (cmd/daimon/main.go and cmd/daimon/web_cmd.go).
 //
-// The bus parameter is only used for event emission inside the Mutate callback;
-// it may be nil in tests (the bridge nil-guards every emit).
-func wireTodo(ag *agent.Agent, _ notify.Bus, toolsRegistry map[string]tool.Tool) {
+// Event emission uses the bus already wired into ag.bus; no bus parameter
+// is needed here.
+func wireTodo(ag *agent.Agent, toolsRegistry map[string]tool.Tool) {
 	deps := ag.TodoToolDeps()
 	todoTools := tool.BuildTodoTools(deps)
 	for name, t := range todoTools {

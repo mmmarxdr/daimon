@@ -379,7 +379,7 @@ func runWebCommand(args []string, cfgPath string) error {
 		}
 	}
 	wireSmartMemory(ag, prov, st, cfg, toolsRegistry)
-	wireTodo(ag, notifyBus, toolsRegistry)
+	wireTodo(ag, toolsRegistry)
 	ragWiring := wireRAG(cfg, st, prov, ag, toolsRegistry)
 	if ragWiring.Worker != nil {
 		ragWiring.Worker.Start(ctx)
