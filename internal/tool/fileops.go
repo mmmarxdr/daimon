@@ -61,6 +61,18 @@ func NewReadFileTool(cfg config.FileToolConfig) *ReadFileTool {
 }
 
 func (t *ReadFileTool) Name() string { return "read_file" }
+
+// Inspect implements ToolInspector. read_file only reads; it does not mutate
+// the filesystem — read-only/file/none.
+func (t *ReadFileTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatFile,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *ReadFileTool) Description() string {
 	return fmt.Sprintf("Read the contents of a file. Path is relative to base_path (%s).", t.config.BasePath)
 }
@@ -186,6 +198,18 @@ func NewListFilesTool(cfg config.FileToolConfig) *ListFilesTool {
 }
 
 func (t *ListFilesTool) Name() string { return "list_files" }
+
+// Inspect implements ToolInspector. list_files only reads directory entries —
+// read-only/file/none.
+func (t *ListFilesTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatFile,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *ListFilesTool) Description() string {
 	return fmt.Sprintf("List files and directories at the given path. Path is relative to base_path (%s).", t.config.BasePath)
 }

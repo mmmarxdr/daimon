@@ -55,8 +55,8 @@ func ConvIDFromContext(ctx context.Context) string {
 // Using callback functions avoids import cycles between internal/tool and internal/agent.
 type MemoryToolDeps struct {
 	Store         store.Store
-	EnqueueEnrich func(entry store.MemoryEntry)    // nil if enricher disabled
-	EnqueueEmbed  func(id, scope, content string)  // nil if embedding disabled
+	EnqueueEnrich func(entry store.MemoryEntry)   // nil if enricher disabled
+	EnqueueEmbed  func(id, scope, content string) // nil if embedding disabled
 }
 
 // BuildMemoryTools constructs the four memory tools and returns them keyed by name.
@@ -106,6 +106,17 @@ type saveMemoryTool struct {
 }
 
 func (t *saveMemoryTool) Name() string { return "save_memory" }
+
+// Inspect implements ToolInspector. save_memory persists a new entry —
+// side-effects/memory/user.
+func (t *saveMemoryTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatMemory,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
 
 func (t *saveMemoryTool) Description() string {
 	return "Save an important fact, preference, or decision to long-term memory. Use when the user tells you something worth remembering."
@@ -188,6 +199,17 @@ type searchMemoryTool struct {
 }
 
 func (t *searchMemoryTool) Name() string { return "search_memory" }
+
+// Inspect implements ToolInspector. search_memory only reads; it never mutates
+// any stored entry — read-only/memory/none.
+func (t *searchMemoryTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatMemory,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
 
 func (t *searchMemoryTool) Description() string {
 	return "Search your long-term memory for facts, preferences, or past context. Use to recall information from previous conversations."
@@ -284,6 +306,17 @@ type updateMemoryTool struct {
 
 func (t *updateMemoryTool) Name() string { return "update_memory" }
 
+// Inspect implements ToolInspector. update_memory mutates an existing entry —
+// side-effects/memory/user.
+func (t *updateMemoryTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatMemory,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *updateMemoryTool) Description() string {
 	return "Update an existing memory with new or corrected information. Use the memory ID from search_memory results."
 }
@@ -370,6 +403,17 @@ type forgetMemoryTool struct {
 }
 
 func (t *forgetMemoryTool) Name() string { return "forget_memory" }
+
+// Inspect implements ToolInspector. forget_memory archives/deletes an entry —
+// destructive/memory/user.
+func (t *forgetMemoryTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskDestructive,
+		Category:   CatMemory,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
 
 func (t *forgetMemoryTool) Description() string {
 	return "Forget/archive a memory that is no longer relevant. Use the memory ID from search_memory results."

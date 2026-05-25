@@ -27,6 +27,17 @@ func NewSkillLoaderTool(skills map[string]SkillContent) *SkillLoaderTool {
 
 func (t *SkillLoaderTool) Name() string { return "load_skill" }
 
+// Inspect implements ToolInspector. load_skill only reads skill prose; it never
+// mutates any state — read-only/meta/none.
+func (t *SkillLoaderTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatMeta,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *SkillLoaderTool) Description() string {
 	return "Load the full instructions for a skill by name. " +
 		"Call this when you need detailed guidance from a skill listed in the Available Skills index. " +

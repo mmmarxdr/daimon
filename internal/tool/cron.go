@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 	robfigcron "github.com/robfig/cron/v3"
 
-	cronpkg "daimon/internal/cron"
 	"daimon/internal/content"
+	cronpkg "daimon/internal/cron"
 	"daimon/internal/provider"
 	"daimon/internal/store"
 )
@@ -113,6 +113,17 @@ type scheduleTaskTool struct {
 }
 
 func (t *scheduleTaskTool) Name() string { return "schedule_task" }
+
+// Inspect implements ToolInspector. schedule_task creates a new recurring job —
+// side-effects/scheduling/user.
+func (t *scheduleTaskTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatScheduling,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
 
 func (t *scheduleTaskTool) Description() string {
 	return "Schedule a recurring task. Provide a natural language schedule (e.g. 'every morning at 10am') or a 5-field cron expression. The task prompt will be executed at the scheduled time and results sent to the specified channel."
@@ -315,6 +326,17 @@ type listCronsTool struct {
 
 func (t *listCronsTool) Name() string { return "list_crons" }
 
+// Inspect implements ToolInspector. list_crons only reads scheduled jobs —
+// read-only/scheduling/none.
+func (t *listCronsTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatScheduling,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *listCronsTool) Description() string {
 	return "List all scheduled recurring tasks. Returns a table with job IDs, schedules, next run times, and prompts."
 }
@@ -372,6 +394,17 @@ type deleteCronTool struct {
 }
 
 func (t *deleteCronTool) Name() string { return "delete_cron" }
+
+// Inspect implements ToolInspector. delete_cron permanently removes a scheduled
+// job — destructive/scheduling/user.
+func (t *deleteCronTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskDestructive,
+		Category:   CatScheduling,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
 
 func (t *deleteCronTool) Description() string {
 	return "Delete a scheduled recurring task by its job ID. The job will be immediately removed and will not fire again."

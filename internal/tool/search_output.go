@@ -24,6 +24,17 @@ func (t *SearchOutputTool) Name() string {
 	return "search_output"
 }
 
+// Inspect implements ToolInspector. search_output only reads indexed outputs —
+// read-only/meta/none.
+func (t *SearchOutputTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatMeta,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
+
 // Description returns the tool description.
 func (t *SearchOutputTool) Description() string {
 	return "Search previously executed tool outputs using full-text search. Use this to find command outputs by keywords, tool names, or command patterns."
