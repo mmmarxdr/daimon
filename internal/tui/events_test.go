@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -38,8 +37,12 @@ var _ tea.Msg = busEventMsg{}
 // TestSpinnerTickMsg_IsTeaMsg verifies spinnerTickMsg satisfies tea.Msg.
 var _ tea.Msg = spinnerTickMsg{}
 
+// ---------------------------------------------------------------------------
+// W4 — non-vacuous update tests (REAL assertions on RETURNED model)
+// ---------------------------------------------------------------------------
+
 // TestUpdateChat_ToolStart_AddsToolLine verifies that receiving a busEventMsg
-// with EventToolStart inserts a ToolLine into the model thread.
+// with EventToolStart inserts a ToolLine into the RETURNED model's thread.
 func TestUpdateChat_ToolStart_AddsToolLine(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
@@ -49,12 +52,13 @@ func TestUpdateChat_ToolStart_AddsToolLine(t *testing.T) {
 		ToolCallID: "call-abc",
 		ToolName:   "bash",
 	}
-	m2, _ := m.Update(busEventMsg{event: ev})
+	m2, cmd := m.Update(busEventMsg{event: ev})
 	got := m2.(Model)
 
+	// Assert on the RETURNED model — not via pointer aliasing.
 	tl := got.thread.findToolLine("call-abc")
 	if tl == nil {
-		t.Fatal("after EventToolStart, thread should have a ToolLine with the given callID")
+		t.Fatal("after EventToolStart, returned model thread should have a ToolLine with the given callID")
 	}
 	if tl.state != toolRunning {
 		t.Errorf("ToolLine.state = %v, want toolRunning", tl.state)
@@ -62,10 +66,14 @@ func TestUpdateChat_ToolStart_AddsToolLine(t *testing.T) {
 	if tl.name != "bash" {
 		t.Errorf("ToolLine.name = %q, want %q", tl.name, "bash")
 	}
+	// Cmd must be non-nil: spinner tick + pump re-arm.
+	if cmd == nil {
+		t.Error("Update must return non-nil cmd (spinner + pump)")
+	}
 }
 
 // TestUpdateChat_ToolEnd_TransitionsState verifies EventToolEnd moves a ToolLine
-// from toolRunning to toolDone.
+// from toolRunning to toolDone ON THE RETURNED model (not via pointer aliasing).
 func TestUpdateChat_ToolEnd_TransitionsState(t *testing.T) {
 	s := newTuiStyles()
 	m := newTestModel()
@@ -82,12 +90,13 @@ func TestUpdateChat_ToolEnd_TransitionsState(t *testing.T) {
 		DurationMs: 123,
 		IsError:    false,
 	}
-	m2, _ := m.Update(busEventMsg{event: ev})
+	m2, cmd := m.Update(busEventMsg{event: ev})
 	got := m2.(Model)
 
+	// Assert on RETURNED model.
 	found := got.thread.findToolLine("call-xyz")
 	if found == nil {
-		t.Fatal("ToolLine should still be present after EventToolEnd")
+		t.Fatal("ToolLine should still be present in returned model after EventToolEnd")
 	}
 	if found.state != toolDone {
 		t.Errorf("ToolLine.state = %v, want toolDone after EventToolEnd", found.state)
@@ -95,10 +104,14 @@ func TestUpdateChat_ToolEnd_TransitionsState(t *testing.T) {
 	if found.stats.duration != 123*time.Millisecond {
 		t.Errorf("ToolLine.stats.duration = %v, want 123ms", found.stats.duration)
 	}
+	// Pump must be re-armed.
+	if cmd == nil {
+		t.Error("Update must return non-nil cmd (pump re-arm)")
+	}
 }
 
 // TestUpdateChat_ToolEnd_Error_SetsErrorState verifies EventToolEnd with IsError=true
-// transitions the ToolLine to toolError.
+// transitions the ToolLine to toolError on the RETURNED model.
 func TestUpdateChat_ToolEnd_Error_SetsErrorState(t *testing.T) {
 	s := newTuiStyles()
 	m := newTestModel()
@@ -115,18 +128,20 @@ func TestUpdateChat_ToolEnd_Error_SetsErrorState(t *testing.T) {
 	m2, _ := m.Update(busEventMsg{event: ev})
 	got := m2.(Model)
 
+	// Assert on RETURNED model.
 	found := got.thread.findToolLine("call-err")
 	if found == nil {
-		t.Fatal("ToolLine should remain in thread after error")
+		t.Fatal("ToolLine should remain in returned model after error")
 	}
 	if found.state != toolError {
 		t.Errorf("ToolLine.state = %v, want toolError after IsError=true EventToolEnd", found.state)
 	}
 }
 
-// TestUpdateChat_TurnCompleted_AppendsMsgDaimon verifies EventTurnCompleted
-// appends a MsgDaimon to the thread.
-func TestUpdateChat_TurnCompleted_AppendsMsgDaimon(t *testing.T) {
+// TestUpdateChat_TurnCompleted_IsSignalOnly verifies that EventTurnCompleted
+// does NOT append a MsgDaimon to the thread (C4 fix: agentReplyMsg is the
+// single source of truth for thread appends; EventTurnCompleted is telemetry only).
+func TestUpdateChat_TurnCompleted_IsSignalOnly(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
 
@@ -134,37 +149,53 @@ func TestUpdateChat_TurnCompleted_AppendsMsgDaimon(t *testing.T) {
 		Type: notify.EventTurnCompleted,
 		Text: "Here is the answer.",
 	}
-	m2, _ := m.Update(busEventMsg{event: ev})
+	m2, cmd := m.Update(busEventMsg{event: ev})
 	got := m2.(Model)
 
-	rendered := got.thread.Render(80)
-	if rendered == "" {
-		t.Fatal("thread should not be empty after EventTurnCompleted")
+	// Thread must remain EMPTY — EventTurnCompleted does NOT append text.
+	if len(got.thread.items) != 0 {
+		t.Errorf("EventTurnCompleted must NOT append to thread (C4 fix); got %d items", len(got.thread.items))
 	}
-	if !strings.Contains(rendered, "Here is the answer.") {
-		t.Errorf("thread render should contain turn text\ngot: %q", rendered)
-	}
-	if len(got.thread.items) == 0 {
-		t.Error("thread.items should have at least one item after EventTurnCompleted")
+	// But the pump must still be re-armed.
+	if cmd == nil {
+		t.Error("EventTurnCompleted must still return non-nil cmd (pump re-arm)")
 	}
 }
 
 // TestUpdateChat_AgentReplyMsg_AppendsMsgDaimon verifies that an agentReplyMsg
-// from TUIChannel.Send is appended to the thread.
+// from TUIChannel.Send is appended to the returned model's thread.
 func TestUpdateChat_AgentReplyMsg_AppendsMsgDaimon(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
 
-	m2, _ := m.Update(agentReplyMsg{text: "pong from agent"})
+	m2, cmd := m.Update(agentReplyMsg{text: "pong from agent"})
 	got := m2.(Model)
 
+	// Assert on RETURNED model — not via aliasing.
 	if len(got.thread.items) == 0 {
-		t.Error("thread.items should have at least one item after agentReplyMsg")
+		t.Error("thread.items in RETURNED model should have at least one item after agentReplyMsg")
+	}
+	// Verify it's a MsgDaimon with correct text.
+	foundDaimon := false
+	for _, item := range got.thread.items {
+		if md, ok := item.(*MsgDaimon); ok {
+			if md.text == "pong from agent" {
+				foundDaimon = true
+				break
+			}
+		}
+	}
+	if !foundDaimon {
+		t.Error("returned model should have a MsgDaimon with text 'pong from agent'")
+	}
+	// Pump must be re-armed.
+	if cmd == nil {
+		t.Error("agentReplyMsg handler must return non-nil cmd (pump re-arm)")
 	}
 }
 
 // TestUpdateChat_Enter_SubmitsText verifies that pressing Enter on the chat
-// screen with text in the input bar returns a non-nil Cmd (the submit Cmd).
+// screen with text returns a non-nil Cmd AND appends a MsgUser to the returned model.
 func TestUpdateChat_Enter_SubmitsText(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
@@ -173,23 +204,155 @@ func TestUpdateChat_Enter_SubmitsText(t *testing.T) {
 	// Simulate text in input bar.
 	m.input.ti.SetValue("hello agent")
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := m2.(Model)
+
+	// Must return a cmd (the submit cmd).
 	if cmd == nil {
 		t.Error("pressing Enter with text in input bar must return a non-nil Cmd (submit)")
+	}
+
+	// The returned model must have a MsgUser appended (optimistic append).
+	foundUser := false
+	for _, item := range got.thread.items {
+		if mu, ok := item.(*MsgUser); ok {
+			if mu.text == "hello agent" {
+				foundUser = true
+				break
+			}
+		}
+	}
+	if !foundUser {
+		t.Error("returned model must have MsgUser with entered text appended to thread")
+	}
+
+	// Executing the cmd must eventually yield promptSentMsg (synchronous path: inbox==nil).
+	msg := cmd()
+	if _, ok := msg.(promptSentMsg); !ok {
+		t.Errorf("submit cmd returned %T, want promptSentMsg", msg)
 	}
 }
 
 // TestUpdateChat_Enter_EmptyInput_NoSubmit verifies that pressing Enter with
-// empty input does NOT submit.
+// empty input does NOT append a MsgUser.
 func TestUpdateChat_Enter_EmptyInput_NoSubmit(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
 	m.focus = focusEditor
 
 	m.input.ti.SetValue("") // empty
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	// cmd may be nil or just a blink cmd — we verify it doesn't send a message.
-	// The key check: thread should be empty (no MsgUser appended without text).
-	// (Submit cmd executes async, so we just confirm no immediate thread mutation.)
-	_ = cmd
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := m2.(Model)
+
+	// RETURNED model must NOT have any MsgUser.
+	for _, item := range got.thread.items {
+		if _, ok := item.(*MsgUser); ok {
+			t.Error("empty Enter must NOT append MsgUser to thread")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C3 — busEventMsg on non-chat screen must re-arm pump (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestUpdate_BusEventMsg_NonChatScreen_RearmsPump verifies that a busEventMsg
+// arriving while screen != screenChat still re-arms the pump (non-nil cmd)
+// so events never stop flowing after a screen transition.
+func TestUpdate_BusEventMsg_NonChatScreen_RearmsPump(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenWelcome // NOT the chat screen
+
+	// Wire a real events channel so the model can re-arm.
+	evCh := make(chan tea.Msg, 1)
+	m.events = evCh
+
+	ev := notify.Event{Type: notify.EventToolStart, ToolCallID: "c3-call", ToolName: "bash"}
+	_, cmd := m.Update(busEventMsg{event: ev})
+
+	// The pump MUST be re-armed regardless of screen.
+	if cmd == nil {
+		t.Fatal("busEventMsg on non-chat screen must return non-nil cmd (pump re-arm)")
+	}
+
+	// Feed another event and verify the pump cmd can still receive it.
+	nextEv := busEventMsg{event: notify.Event{Type: notify.EventTurnCompleted, Text: "hello"}}
+	evCh <- nextEv
+	result := cmd()
+	if result == nil {
+		t.Error("re-armed pump cmd must return a non-nil msg from the channel")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C4 — duplicate MsgDaimon deduplication (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestUpdateChat_NoDoubleMsgDaimon verifies that driving both an agentReplyMsg
+// and an EventTurnCompleted with text for one turn results in EXACTLY ONE
+// MsgDaimon in the thread (not two).
+func TestUpdateChat_NoDoubleMsgDaimon(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+
+	// Step 1: agent reply arrives via TUIChannel.Send path.
+	m2, _ := m.Update(agentReplyMsg{text: "the answer"})
+	got1 := m2.(Model)
+
+	// Step 2: EventTurnCompleted also arrives with the same text (bus path).
+	ev := notify.Event{Type: notify.EventTurnCompleted, Text: "the answer"}
+	m3, _ := got1.Update(busEventMsg{event: ev})
+	got2 := m3.(Model)
+
+	// Count MsgDaimon items with the matching text.
+	count := 0
+	for _, item := range got2.thread.items {
+		if md, ok := item.(*MsgDaimon); ok {
+			if md.text == "the answer" {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected EXACTLY 1 MsgDaimon with text 'the answer', got %d", count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// W2 — goroutine / pump exit after Stop (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestTUIChannel_Stop_ClosesOut verifies that after Stop() is called, the
+// out channel is closed so the wireEvents goroutine can exit cleanly.
+func TestTUIChannel_Stop_ClosesOut(t *testing.T) {
+	ch := newTUIChannel()
+
+	if err := ch.Stop(); err != nil {
+		t.Fatalf("Stop() returned error: %v", err)
+	}
+
+	// After Stop(), ch.out must be closed. A read from a closed channel returns immediately.
+	select {
+	case _, open := <-ch.out:
+		if open {
+			t.Error("expected ch.out to be closed after Stop(), but it's still open with a value")
+		}
+		// closed — correct
+	default:
+		t.Error("ch.out was not closed after Stop() — a closed channel is always readable")
+	}
+}
+
+// TestTUIChannel_Stop_Idempotent verifies that calling Stop() twice does not panic.
+func TestTUIChannel_Stop_Idempotent(t *testing.T) {
+	ch := newTUIChannel()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Stop() panicked on second call: %v", r)
+		}
+	}()
+
+	_ = ch.Stop()
+	_ = ch.Stop() // must not panic
 }
