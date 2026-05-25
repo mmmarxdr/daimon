@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // inputBarScreens is the set of screens where the InputBar is shown.
@@ -138,10 +139,10 @@ func renderCenterPlaceholder(s screenState, width, _ int) string {
 }
 
 // centerText centers `s` within `width` columns using space padding.
-// Uses raw string length for padding (ANSI-stripped content), so callers
-// should pass pre-stripped or plain strings for accurate centering.
+// Uses ansi.StringWidth so ANSI-escaped strings (e.g. lipgloss-rendered
+// colored text) are measured by their visible column width, not raw rune count.
 func centerText(s string, width int) string {
-	slen := len([]rune(s))
+	slen := ansi.StringWidth(s)
 	if slen >= width {
 		return s
 	}
