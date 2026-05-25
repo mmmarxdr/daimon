@@ -4,6 +4,7 @@ package tui
 // Strict TDD: these tests must FAIL before setup.go exists.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -234,5 +235,169 @@ func TestSetupModel_CtrlC_SetsAborted(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Errorf("ctrl+c cmd returned %T, want tea.QuitMsg", msg)
+	}
+}
+
+// ─── Fix 1: ollama Tab phantom field ───────────────────────────────────────
+
+// TestSetupModel_OllamaTab_FieldIdxNeverExceedsOne drives provider=ollama to
+// stepCredentials then presses Tab 10 times, asserting that fieldIdx never
+// exceeds 1 (the valid field range for ollama: 0=model, 1=baseURL).
+// Before the fix this MUST FAIL because fieldCount was 3 for ollama, making
+// fieldIdx reach 2 — a dead state with no focused input.
+func TestSetupModel_OllamaTab_FieldIdxNeverExceedsOne(t *testing.T) {
+	m := newTestSetupModel("")
+
+	// Navigate to ollama: it is the last provider; press Down until we reach it.
+	// Use KeyRunes "j" to move down until provider == "ollama".
+	for m.provider != "ollama" {
+		next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+		nm := next.(setupModel)
+		if nm.provIdx == m.provIdx {
+			// We hit the bottom without finding ollama — fail fast.
+			t.Fatalf("could not navigate to ollama; providers: %v", m.providers)
+		}
+		m = nm
+		if m.provIdx == len(m.providers)-1 {
+			break // at the bottom; enter selects it
+		}
+	}
+
+	// Select ollama with Enter.
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(setupModel)
+	if m.step != stepCredentials {
+		t.Fatalf("expected stepCredentials after Enter on ollama, got %v", m.step)
+	}
+	if m.provider != "ollama" {
+		t.Fatalf("expected provider=ollama, got %q", m.provider)
+	}
+
+	// Press Tab 10 times; fieldIdx must never exceed 1.
+	for i := 0; i < 10; i++ {
+		next2, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		m = next2.(setupModel)
+		if m.fieldIdx > 1 {
+			t.Errorf("Tab press %d: fieldIdx=%d exceeds max valid index 1 (ollama has 2 fields)", i+1, m.fieldIdx)
+		}
+		// Also assert the focused field is never the hidden keyInput.
+		// After focusField, keyInput must be blurred when ollama.
+		if m.keyInput.Focused() {
+			t.Errorf("Tab press %d: keyInput is focused for ollama (it is a hidden field)", i+1)
+		}
+	}
+}
+
+// ─── Fix 3: writeErr takes precedence over aborted ─────────────────────────
+
+// TestResolveSetupError_WriteErrBeatsAborted asserts that when both writeErr
+// and aborted are set, resolveSetupError returns the writeErr — not the abort
+// sentinel. This tests the error-precedence logic extracted from RunSetupTUI.
+func TestResolveSetupError_WriteErrBeatsAborted(t *testing.T) {
+	writeErr := errors.New("disk full")
+
+	final := setupModel{
+		aborted:  true,
+		writeErr: writeErr,
+	}
+
+	got := resolveSetupError(final)
+	if got == nil {
+		t.Fatal("resolveSetupError returned nil, want writeErr")
+	}
+	if !errors.Is(got, writeErr) {
+		t.Errorf("resolveSetupError returned %v, want an error wrapping %v", got, writeErr)
+	}
+	if errors.Is(got, errSetupAborted) {
+		t.Error("resolveSetupError returned the abort sentinel, writeErr should take precedence")
+	}
+}
+
+// TestResolveSetupError_AbortedOnly asserts that when only aborted is set,
+// resolveSetupError returns errSetupAborted.
+func TestResolveSetupError_AbortedOnly(t *testing.T) {
+	final := setupModel{aborted: true}
+	got := resolveSetupError(final)
+	if !errors.Is(got, errSetupAborted) {
+		t.Errorf("resolveSetupError returned %v, want errSetupAborted", got)
+	}
+}
+
+// TestResolveSetupError_Success asserts that when writtenPath is set and no
+// error, resolveSetupError returns nil.
+func TestResolveSetupError_Success(t *testing.T) {
+	final := setupModel{writtenPath: "/tmp/config.yaml"}
+	got := resolveSetupError(final)
+	if got != nil {
+		t.Errorf("resolveSetupError returned %v, want nil", got)
+	}
+}
+
+// ─── Fix 4: non-vacuous gate tests ─────────────────────────────────────────
+
+// TestSetupModel_StepCredentials_EmptyModelBlocksSubmit asserts that an empty
+// model field (with non-empty key, non-ollama provider) blocks submission:
+// step stays at stepCredentials and no cmd is returned.
+func TestSetupModel_StepCredentials_EmptyModelBlocksSubmit(t *testing.T) {
+	m := newTestSetupModel("")
+	// Advance to stepCredentials (anthropic, provIdx=0)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+
+	// Empty model, non-empty key
+	nm.modelInput.SetValue("")
+	nm.keyInput.SetValue("sk-ant-some-key")
+
+	next2, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm2 := next2.(setupModel)
+
+	if nm2.step == stepDone {
+		t.Error("step advanced to stepDone with empty model — gate failed")
+	}
+	if nm2.step != stepCredentials {
+		t.Errorf("step = %v, want stepCredentials (empty model should block)", nm2.step)
+	}
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil when empty model blocks submit", cmd)
+	}
+}
+
+// TestSetupModel_StepCredentials_EmptyKeyBlocksSubmit_CmdNil strengthens the
+// existing empty-key gate test by asserting cmd==nil (not just step check).
+// Without this, the gate could be silently removed and a write cmd returned.
+func TestSetupModel_StepCredentials_EmptyKeyBlocksSubmit_CmdNil(t *testing.T) {
+	m := newTestSetupModel("")
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+
+	nm.modelInput.SetValue("claude-sonnet-4-6")
+	nm.keyInput.SetValue("")
+
+	_, cmd := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil when empty key blocks submit (write cmd must not be issued)", cmd)
+	}
+}
+
+// TestSetupModel_StepCredentials_ValidSubmit_StepNotDoneSynchronously asserts
+// that a valid submit does NOT advance step to stepDone synchronously — step
+// only changes via the async setupWroteMsg, so immediately after Update the
+// step must still be stepCredentials.
+func TestSetupModel_StepCredentials_ValidSubmit_StepNotDoneSynchronously(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+
+	m := newTestSetupModel(cfgPath)
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+
+	nm.modelInput.SetValue("claude-sonnet-4-6")
+	nm.keyInput.SetValue("sk-ant-test-key")
+
+	next2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm2 := next2.(setupModel)
+
+	if nm2.step == stepDone {
+		t.Error("step advanced to stepDone synchronously — it must only change via async setupWroteMsg")
 	}
 }

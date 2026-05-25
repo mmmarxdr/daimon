@@ -56,17 +56,18 @@ type setupModel struct {
 	provider string // locked in when leaving stepProvider
 
 	modelInput   textinput.Model // free-text model ID
-	keyInput     textinput.Model // EchoPassword for API key
-	baseURLInput textinput.Model // ollama base URL
+	keyInput     textinput.Model // EchoPassword for API key (non-ollama only)
+	baseURLInput textinput.Model // ollama base URL (ollama only)
 
-	fieldIdx int // 0=model, 1=key, 2=baseURL (ollama only)
+	// fieldIdx: 0=model (both providers), 1=key (non-ollama) OR baseURL (ollama).
+	// fieldCount is always 2; the second field's identity depends on the provider.
+	fieldIdx int
 
 	width  int
 	height int
 
 	writtenPath string
 	writeErr    error
-	done        bool
 	aborted     bool
 
 	validationErr string // inline field validation message
@@ -114,11 +115,8 @@ func RunSetupTUI(cfgPath string) (*config.Config, error) {
 
 	final := finalRaw.(setupModel)
 
-	if final.aborted {
-		return nil, errSetupAborted
-	}
-	if final.writeErr != nil {
-		return nil, fmt.Errorf("setup tui: write config: %w", final.writeErr)
+	if err := resolveSetupError(final); err != nil {
+		return nil, err
 	}
 
 	return config.Load(final.writtenPath)
@@ -127,6 +125,19 @@ func RunSetupTUI(cfgPath string) (*config.Config, error) {
 // IsSetupAborted reports whether the error is the user-abort sentinel.
 func IsSetupAborted(err error) bool {
 	return errors.Is(err, errSetupAborted)
+}
+
+// resolveSetupError selects the appropriate error from the final setup model.
+// writeErr always takes precedence over aborted: if WriteConfig failed and the
+// user pressed ctrl+c on the error screen, the real cause is the write failure.
+func resolveSetupError(final setupModel) error {
+	if final.writeErr != nil {
+		return fmt.Errorf("setup tui: write config: %w", final.writeErr)
+	}
+	if final.aborted {
+		return errSetupAborted
+	}
+	return nil
 }
 
 // ─── tea.Model interface ────────────────────────────────────────────────────
@@ -150,7 +161,6 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.writtenPath = msg.path
-		m.done = true
 		return m, tea.Quit
 
 	case tea.KeyMsg:
@@ -215,12 +225,11 @@ func (m setupModel) updateProvider(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 }
 
 func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
-	// visibleFields returns the set of active fields for the current provider
+	// Both providers show exactly 2 fields:
+	//   non-ollama: 0=model, 1=key
+	//   ollama:     0=model, 1=baseURL
 	ollama := m.provider == "ollama"
-	fieldCount := 2 // model + key
-	if ollama {
-		fieldCount = 3 // model + baseURL (no key for ollama)
-	}
+	const fieldCount = 2
 
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -259,7 +268,8 @@ func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 		return m, writeConfigCmd(provider, model, key, baseURL, cfgPath)
 	}
 
-	// Route keystrokes to the focused input
+	// Route keystrokes to the focused input.
+	// fieldIdx is always in {0,1}; case 0=model, case 1=key(non-ollama)|baseURL(ollama).
 	var cmd tea.Cmd
 	switch m.fieldIdx {
 	case 0:
@@ -270,16 +280,16 @@ func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 		} else {
 			m.keyInput, cmd = m.keyInput.Update(msg)
 		}
-	case 2:
-		// only reachable when ollama (fieldCount==3) and fieldIdx==2
-		m.keyInput, cmd = m.keyInput.Update(msg)
 	}
 	return m, cmd
 }
 
-// focusField applies Focus/Blur to the three text inputs based on fieldIdx.
-// For ollama: fields are model(0), baseURL(1); key is hidden.
-// For others: fields are model(0), key(1).
+// focusField applies Focus/Blur to the text inputs based on fieldIdx.
+// fieldIdx is always in {0, 1}:
+//   - 0 = model (both providers)
+//   - 1 = key (non-ollama) OR baseURL (ollama)
+//
+// keyInput is never focused for ollama; baseURLInput is never focused for non-ollama.
 func (m setupModel) focusField(ollama bool) setupModel {
 	m.modelInput.Blur()
 	m.keyInput.Blur()
@@ -294,14 +304,14 @@ func (m setupModel) focusField(ollama bool) setupModel {
 		} else {
 			m.keyInput.Focus()
 		}
-	case 2:
-		// fieldIdx==2 only when ollama; currently unused (ollama has no key field)
-		// kept for forward compatibility
 	}
 	return m
 }
 
 // writeConfigCmd is the IO Cmd — runs outside the model, returns a setupWroteMsg.
+// Note: if the user sends ctrl+c while this cmd is in flight, the file may be
+// written but RunSetupTUI returns errSetupAborted. This is an accepted
+// bubbletea-v1 limitation; it self-heals on the next run (config.Load succeeds).
 func writeConfigCmd(provider, model, apiKey, baseURL, cfgPath string) tea.Cmd {
 	return func() tea.Msg {
 		cfg := buildSetupConfig(provider, model, apiKey, baseURL)
@@ -444,11 +454,7 @@ func (m setupModel) viewCredentials() string {
 
 func (m setupModel) viewDone() string {
 	s := m.styles
-	if m.writeErr != nil {
-		return s.errStyle.Render("✗ setup failed: "+m.writeErr.Error()) +
-			"\n\n" + s.hint.Render("any key to quit")
-	}
-	// success path — tea.Quit is sent immediately, so this is rarely shown
-	return s.accent.Render("✓ config written to "+m.writtenPath) +
-		"\n" + s.hint.Render("starting daimon…")
+	// stepDone is only reached on write error (success sends tea.Quit immediately).
+	return s.errStyle.Render("✗ setup failed: "+m.writeErr.Error()) +
+		"\n\n" + s.hint.Render("any key to quit")
 }
