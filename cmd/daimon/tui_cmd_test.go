@@ -1,28 +1,25 @@
 package main
 
 import (
-	"os"
+	"strings"
 	"testing"
 )
 
-// TestRunTUICommand_RejectsNonTTY verifies that runTUICommand returns a non-nil
-// error when stdin is not a TTY, matching the TTY guard in RunTUI.
-// In CI / test environments stdin is always a non-TTY pipe, so this always runs.
-func TestRunTUICommand_RejectsNonTTY(t *testing.T) {
-	// Use /dev/null as explicit non-TTY stdin.
-	f, err := os.Open(os.DevNull)
-	if err != nil {
-		t.Skipf("cannot open /dev/null: %v", err)
-	}
-	defer f.Close()
-
-	// Redirect stdin to /dev/null for the duration of this test.
-	orig := os.Stdin
-	os.Stdin = f
-	defer func() { os.Stdin = orig }()
-
-	err = runTUICommand([]string{}, "")
+// TestRunTUICommand_MissingConfig verifies that runTUICommand returns a
+// descriptive error when no config file is found (the most common failure
+// mode for new users). The TTY guard is hit AFTER config load, so this test
+// exercises the config-not-found path, not the TTY path.
+//
+// The real TTY-guard test lives in internal/tui/run_test.go (TestRunTUI_RejectsNonTTY)
+// which tests runTUIWithStdin directly with a /dev/null stdin.
+func TestRunTUICommand_MissingConfig(t *testing.T) {
+	err := runTUICommand([]string{}, "")
 	if err == nil {
-		t.Fatal("runTUICommand returned nil error on non-TTY stdin, want error")
+		t.Fatal("runTUICommand returned nil error with no config, want error")
+	}
+	// Must mention config / setup so the user knows how to fix it.
+	msg := err.Error()
+	if !strings.Contains(msg, "config") && !strings.Contains(msg, "setup") {
+		t.Errorf("error %q does not mention 'config' or 'setup' — want a helpful config-missing message", msg)
 	}
 }
