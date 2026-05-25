@@ -11,6 +11,7 @@ package tui
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,10 +42,14 @@ type promptSentMsg struct{}
 //     (which runs on its own goroutine, off the Update path).
 //   - ctx is captured in Start; submit selects on ctx.Done() so it does not
 //     block during shutdown even when inbox is full.
+//   - W2 FIX: Stop() closes c.out exactly once (sync.Once guard against
+//     double-close). The wireEvents goroutine ranges over c.out and exits
+//     cleanly when the channel is closed.
 type TUIChannel struct {
-	inbox chan<- channel.IncomingMessage // captured in Start; nil until Start is called
-	out   chan interface{}               // agent Send pushes agentReplyMsg here; tea.Cmd drains
-	ctx   context.Context                // captured in Start; guards submit send against shutdown
+	inbox    chan<- channel.IncomingMessage // captured in Start; nil until Start is called
+	out      chan interface{}               // agent Send pushes agentReplyMsg here; tea.Cmd drains
+	ctx      context.Context                // captured in Start; guards submit send against shutdown
+	stopOnce sync.Once                      // guards against double-close of out
 }
 
 // newTUIChannel constructs a TUIChannel ready for use (package-internal).
@@ -84,8 +89,15 @@ func (c *TUIChannel) Send(ctx context.Context, msg channel.OutgoingMessage) erro
 	return nil
 }
 
-// Stop implements channel.Channel. No goroutines to stop — returns nil.
-func (c *TUIChannel) Stop() error { return nil }
+// Stop implements channel.Channel. Closes c.out exactly once so the
+// wireEvents goroutine (which ranges over c.out) exits cleanly (W2 fix).
+// A sync.Once guard prevents a panic on double-close.
+func (c *TUIChannel) Stop() error {
+	c.stopOnce.Do(func() {
+		close(c.out)
+	})
+	return nil
+}
 
 // submit returns a tea.Cmd that enqueues an IncomingMessage on the agent inbox
 // and returns promptSentMsg to the TUI event loop.
