@@ -70,7 +70,9 @@ func runTUICommand(args []string, cfgPath string) error {
 	}
 
 	// 6. TUIChannel — wired as the agent's user-facing channel.
-	// defer Stop() so wireEvents goroutine exits deterministically when RunTUI returns.
+	// defer Stop() is defense-in-depth: the goroutine already exits via
+	// ag.Shutdown() → mux.Stop() → tuiCh.Stop() (sync.Once-guarded), so this
+	// defer is a harmless belt-and-suspenders call, not the primary exit path.
 	tuiCh := tui.NewTUIChannel()
 	defer tuiCh.Stop() //nolint:errcheck // Stop() always returns nil
 

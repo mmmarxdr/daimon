@@ -70,7 +70,7 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	// Inner width accounts for a 1-char left margin we manually add.
+	// Inner width: no manual margin is prepended; just clamp to a minimum.
 	inner := width - 1
 	if inner < 4 {
 		inner = 4
@@ -87,6 +87,13 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		ansi.Truncate(p.styles.dimLabel.Render(costLine), inner, "…"),
 		ansi.Truncate(p.styles.dimLabel.Render(toolLine), inner, "…"),
 	}
+
+	// Render error count only when non-zero, using errStyle (no inline hex).
+	if p.toolErrors > 0 {
+		errLine := fmt.Sprintf("errors  %d", p.toolErrors)
+		rows = append(rows, ansi.Truncate(p.styles.errStyle.Render(errLine), inner, "…"))
+	}
+
 	return strings.Join(rows, "\n")
 }
 
@@ -147,14 +154,15 @@ func (p *todolistPanel) Render(width, _ int) string {
 
 // contextMeterPanel renders a visual indicator of how much of the context
 // window is consumed. In V1 the data source is EventTokensUsage.TokenCount —
-// the total tokens accumulated this turn. A model-limit heuristic (200k for
-// Claude models) is used to compute the percentage bar.
+// cumulative output tokens accumulated across ALL turns in this session (NOT
+// the live context-window fill, which is not exposed by the backend in V1).
+// A 200k heuristic (Claude 3/4 flagship) is used to compute the percentage bar.
 //
 // If there is no live source for context-window limits, the panel still shows
 // the raw token count so it is always useful without a backend change.
 type contextMeterPanel struct {
 	styles    tuiStyles
-	tokenUsed int // total tokens from EventTokensUsage accumulation
+	tokenUsed int // cumulative output tokens from all EventTokensUsage events this session
 	hasData   bool
 }
 

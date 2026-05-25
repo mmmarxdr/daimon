@@ -1,86 +1,280 @@
 package tui
 
-// rail_panels_test.go — RED tests for PR2b rail panel structs (tasks 2.14 + 2.16).
+// rail_panels_test.go — tests for PR2b rail panel structs (tasks 2.14–2.17).
 //
 // Test strategy:
-//   - Task 2.14 (RED): telemetry / todolist / context-meter Panel structs exist,
+//   - Task 2.14: telemetry / todolist / context-meter Panel structs exist,
 //     implement Panel interface, and return "" when no data.
-//   - Task 2.16 (RED): EventTodolistChanged triggers a TodoListForConv re-read
+//   - Task 2.16: EventTodolistChanged triggers a TodoListForConv re-read
 //     via a tea.Cmd (not inline in Update); the todolist panel is refreshed.
+//   - Table-driven throughout; each behaviour variant is a named sub-test.
 //
 // All tests use newTestModel() — hermetic, no real agent/bus/store.
 
 import (
 	"strings"
 	"testing"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 
 	"daimon/internal/notify"
 	"daimon/internal/tool"
 )
 
 // ---------------------------------------------------------------------------
-// Task 2.14 — telemetry panel
+// collectMsgs — flattens tea.Batch messages recursively.
+//
+// handleBusEvent always wraps its cmds in tea.Batch (via tea.Batch(cmds...)).
+// When executed, tea.Batch returns a tea.BatchMsg ([]tea.Cmd). We execute
+// each inner cmd — skipping nil cmds and guarding against slow/blocking ones
+// with a short timeout — and collect all resulting tea.Msg values.
 // ---------------------------------------------------------------------------
 
-// TestTelemetryPanel_NoData_ReturnsEmpty verifies that a telemetry panel with
-// zero accumulated values renders as "" (zero-height, per rail contract).
-func TestTelemetryPanel_NoData_ReturnsEmpty(t *testing.T) {
-	p := newTelemetryPanel(newTuiStyles())
-	got := p.Render(32, 20)
-	if got != "" {
-		t.Errorf("telemetryPanel.Render with no data: got %q, want empty string", got)
+func collectMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
 	}
+
+	// Execute with a short timeout so tests are deterministic and fast.
+	// pumpEvents(nil) returns a closure that may block; the timeout protects us.
+	type result struct{ msg tea.Msg }
+	ch := make(chan result, 1)
+	go func() {
+		m := cmd()
+		ch <- result{m}
+	}()
+
+	var msg tea.Msg
+	select {
+	case r := <-ch:
+		msg = r.msg
+	case <-time.After(50 * time.Millisecond):
+		// cmd blocked (e.g. pumpEvents on a nil channel) — treat as nil.
+		return nil
+	}
+
+	if msg == nil {
+		return nil
+	}
+
+	// Flatten a BatchMsg one level deep (tea.Batch wraps cmds, not msgs).
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var msgs []tea.Msg
+		for _, inner := range batch {
+			msgs = append(msgs, collectMsgs(inner)...)
+		}
+		return msgs
+	}
+
+	return []tea.Msg{msg}
 }
 
-// TestTelemetryPanel_WithData_RendersTokensAndCost verifies that after
-// accumulating token/cost data, Render returns a non-empty string that
-// contains the token count and cost.
-func TestTelemetryPanel_WithData_RendersTokensAndCost(t *testing.T) {
-	p := newTelemetryPanel(newTuiStyles())
-	p.accumulate(notify.Event{
-		Type:       notify.EventTokensUsage,
-		TokenCount: 1500,
-		CostUSD:    0.0023,
-	})
-	got := p.Render(32, 20)
-	if got == "" {
-		t.Fatal("telemetryPanel.Render with data: got empty string, want non-empty")
+// hasTodolistRefreshMsg returns true if any of msgs is a todolistRefreshMsg.
+func hasTodolistRefreshMsg(msgs []tea.Msg) bool {
+	for _, m := range msgs {
+		if _, ok := m.(todolistRefreshMsg); ok {
+			return true
+		}
 	}
-	if !strings.Contains(got, "1500") {
-		t.Errorf("telemetryPanel.Render: expected token count '1500' in output, got:\n%s", got)
-	}
+	return false
 }
 
-// TestTelemetryPanel_ImplementsPanel verifies the interface at compile time.
-func TestTelemetryPanel_ImplementsPanel(t *testing.T) {
-	var _ Panel = newTelemetryPanel(newTuiStyles())
-}
+// ---------------------------------------------------------------------------
+// Task 2.14 — "no data → returns empty" table (three panels, one table)
+// ---------------------------------------------------------------------------
 
-// TestTelemetryPanel_ToolCallCount_Increments verifies that EventToolStart/End
-// are counted and appear in the render output.
-func TestTelemetryPanel_ToolCallCount_Increments(t *testing.T) {
-	p := newTelemetryPanel(newTuiStyles())
-	// Need at least one token event to make the panel non-empty.
-	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100, CostUSD: 0.001})
-	p.accumulate(notify.Event{Type: notify.EventToolStart})
-	p.accumulate(notify.Event{Type: notify.EventToolEnd})
-	got := p.Render(32, 20)
-	if got == "" {
-		t.Fatal("telemetryPanel.Render after tool events: got empty string, want content")
+func TestPanels_NoData_ReturnsEmpty(t *testing.T) {
+	s := newTuiStyles()
+	tests := []struct {
+		name   string
+		render func() string
+	}{
+		{
+			name: "telemetryPanel",
+			render: func() string {
+				return newTelemetryPanel(s).Render(32, 20)
+			},
+		},
+		{
+			name: "todolistPanel",
+			render: func() string {
+				return newTodolistPanel(s).Render(32, 20)
+			},
+		},
+		{
+			name: "contextMeterPanel",
+			render: func() string {
+				return newContextMeterPanel(s).Render(32, 20)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.render()
+			if got != "" {
+				t.Errorf("%s.Render with no data: got %q, want empty string", tt.name, got)
+			}
+		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.14 — todolist panel
+// Task 2.14 — interface compliance (compile-time)
 // ---------------------------------------------------------------------------
 
-// TestTodolistPanel_NoData_ReturnsEmpty verifies that a todolist panel with
-// no items renders as "" (zero-height).
-func TestTodolistPanel_NoData_ReturnsEmpty(t *testing.T) {
-	p := newTodolistPanel(newTuiStyles())
-	got := p.Render(32, 20)
-	if got != "" {
-		t.Errorf("todolistPanel.Render with no data: got %q, want empty string", got)
+func TestPanels_ImplementPanel(t *testing.T) {
+	s := newTuiStyles()
+	var _ Panel = newTelemetryPanel(s)
+	var _ Panel = newTodolistPanel(s)
+	var _ Panel = newContextMeterPanel(s)
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.14 — telemetry panel render variants (table-driven)
+// ---------------------------------------------------------------------------
+
+func TestTelemetryPanel_Render(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(p *telemetryPanel)
+		wantEmpty   bool
+		wantContain []string
+		wantAbsent  []string
+	}{
+		{
+			name:      "no data returns empty",
+			setup:     func(_ *telemetryPanel) {},
+			wantEmpty: true,
+		},
+		{
+			name: "tokens and cost appear after EventTokensUsage",
+			setup: func(p *telemetryPanel) {
+				p.accumulate(notify.Event{
+					Type:       notify.EventTokensUsage,
+					TokenCount: 1500,
+					CostUSD:    0.0023,
+				})
+			},
+			wantContain: []string{"1500", "0.0023"},
+		},
+		{
+			name: "tool calls counted; no error line when zero errors",
+			setup: func(p *telemetryPanel) {
+				p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100, CostUSD: 0.001})
+				p.accumulate(notify.Event{Type: notify.EventToolStart})
+				p.accumulate(notify.Event{Type: notify.EventToolEnd}) // no error
+			},
+			wantContain: []string{"1"},      // tools line has count
+			wantAbsent:  []string{"errors"}, // errors line must NOT appear when toolErrors == 0
+		},
+		{
+			name: "error count line appears when toolErrors > 0",
+			setup: func(p *telemetryPanel) {
+				p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 200, CostUSD: 0.002})
+				p.accumulate(notify.Event{Type: notify.EventToolStart})
+				p.accumulate(notify.Event{Type: notify.EventToolEnd, IsError: true})
+			},
+			wantContain: []string{"errors", "1"},
+		},
+		{
+			name: "multiple errors counted correctly",
+			setup: func(p *telemetryPanel) {
+				p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 300, CostUSD: 0.003})
+				for i := 0; i < 3; i++ {
+					p.accumulate(notify.Event{Type: notify.EventToolStart})
+					p.accumulate(notify.Event{Type: notify.EventToolEnd, IsError: true})
+				}
+			},
+			wantContain: []string{"errors", "3"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newTelemetryPanel(newTuiStyles())
+			tt.setup(p)
+			got := p.Render(40, 20)
+
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("Render: got %q, want empty string", got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatal("Render: got empty string, want non-empty")
+			}
+			for _, want := range tt.wantContain {
+				if !strings.Contains(got, want) {
+					t.Errorf("Render: expected %q in output:\n%s", want, got)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Errorf("Render: expected %q to be absent from output:\n%s", absent, got)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.14 — todolist panel: all four status markers (table-driven)
+// ---------------------------------------------------------------------------
+
+func TestTodolistPanel_StatusMarkers(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      string
+		wantMarkers []string // at least one of these characters must appear in the item line
+	}{
+		{
+			name:        "done shows check mark",
+			status:      "done",
+			wantMarkers: []string{"✓"},
+		},
+		{
+			name:        "completed shows check mark",
+			status:      "completed",
+			wantMarkers: []string{"✓"},
+		},
+		{
+			name:        "in_progress shows filled circle",
+			status:      "in_progress",
+			wantMarkers: []string{"●"},
+		},
+		{
+			name:        "pending shows empty circle",
+			status:      "pending",
+			wantMarkers: []string{"○"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newTodolistPanel(newTuiStyles())
+			p.setList(tool.TodoList{
+				Items: []tool.TodoItem{
+					{ID: "1", Content: "test item", Status: tt.status},
+				},
+			})
+			got := p.Render(40, 20)
+			if got == "" {
+				t.Fatal("Render: got empty string, want content")
+			}
+			found := false
+			for _, marker := range tt.wantMarkers {
+				if strings.Contains(got, marker) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("status=%q: expected one of %v in output:\n%s", tt.status, tt.wantMarkers, got)
+			}
+		})
 	}
 }
 
@@ -103,27 +297,10 @@ func TestTodolistPanel_WithItems_RendersContent(t *testing.T) {
 	}
 }
 
-// TestTodolistPanel_ImplementsPanel verifies the interface at compile time.
-func TestTodolistPanel_ImplementsPanel(t *testing.T) {
-	var _ Panel = newTodolistPanel(newTuiStyles())
-}
-
 // ---------------------------------------------------------------------------
 // Task 2.14 — context-meter panel
 // ---------------------------------------------------------------------------
 
-// TestContextMeterPanel_NoData_ReturnsEmpty verifies that a context-meter
-// panel with no data renders as "" (zero-height).
-func TestContextMeterPanel_NoData_ReturnsEmpty(t *testing.T) {
-	p := newContextMeterPanel(newTuiStyles())
-	got := p.Render(32, 20)
-	if got != "" {
-		t.Errorf("contextMeterPanel.Render with no data: got %q, want empty string", got)
-	}
-}
-
-// TestContextMeterPanel_WithData_RendersContent verifies that after setting
-// context usage data, Render returns non-empty output.
 func TestContextMeterPanel_WithData_RendersContent(t *testing.T) {
 	p := newContextMeterPanel(newTuiStyles())
 	p.accumulate(notify.Event{
@@ -134,11 +311,6 @@ func TestContextMeterPanel_WithData_RendersContent(t *testing.T) {
 	if got == "" {
 		t.Fatal("contextMeterPanel.Render with data: got empty string, want non-empty")
 	}
-}
-
-// TestContextMeterPanel_ImplementsPanel verifies the interface at compile time.
-func TestContextMeterPanel_ImplementsPanel(t *testing.T) {
-	var _ Panel = newContextMeterPanel(newTuiStyles())
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +326,6 @@ func TestRail_ChatScreen_PanelsRegistered(t *testing.T) {
 	m.height = 24
 	m.screen = screenChat
 
-	// Verify the rail has panels for all three chat panel IDs.
 	for _, id := range []panelID{panelTodolist, panelContextMeter, panelTelemetry} {
 		if _, ok := m.rail.panels[id]; !ok {
 			t.Errorf("rail.panels[%q] not registered — must be wired in newTestModel/RunTUI", id)
@@ -174,22 +345,47 @@ func TestRail_Render_ChatScreen_NoData_ReturnsEmpty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Task 2.16 — EventTodolistChanged triggers a TodoListForConv re-read Cmd
+// Task 2.14 — cost line assertion (was missing from the token+cost test)
 // ---------------------------------------------------------------------------
 
-// TestHandleBusEvent_TodolistChanged_ReturnsTodoRefreshCmd verifies that
-// receiving EventTodolistChanged in handleBusEvent returns a tea.Cmd
-// (not nil — it must schedule the re-read) rather than inlining the IO.
+func TestTelemetryPanel_WithData_RendersTokensAndCost(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 1500,
+		CostUSD:    0.0023,
+	})
+	got := p.Render(40, 20)
+	if got == "" {
+		t.Fatal("telemetryPanel.Render with data: got empty string, want non-empty")
+	}
+	if !strings.Contains(got, "1500") {
+		t.Errorf("telemetryPanel.Render: expected token count '1500' in output:\n%s", got)
+	}
+	if !strings.Contains(got, "0.0023") {
+		t.Errorf("telemetryPanel.Render: expected cost '0.0023' in output:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.16 — EventTodolistChanged triggers a TodoListForConv re-read Cmd
 //
-// We cannot assert the cmd READS the agent (no real agent in unit tests),
-// but we CAN assert:
-//  1. The returned model is valid (not panicking).
-//  2. A non-nil Cmd is returned (signals that IO is deferred to a Cmd, not inline).
-//  3. The model screen has not changed (no spurious screen switch).
+// These tests are NON-VACUOUS: they execute the returned Cmd and assert that
+// a todolistRefreshMsg is produced among the resulting messages. If the
+// EventTodolistChanged case is removed from handleBusEvent, fetchTodolist is
+// never appended to cmds, so no todolistRefreshMsg can appear in the batch —
+// causing both tests to FAIL (the guard is real).
+//
+// Note: newTestModel sets events=nil; pumpEvents(nil) blocks or returns nil.
+// collectMsgs uses a 50ms timeout so blocked cmds are treated as no-message.
+// fetchTodolist with nil agent returns todolistRefreshMsg{} synchronously, so
+// the happy/no-convID paths are deterministic and instant.
+// ---------------------------------------------------------------------------
+
 func TestHandleBusEvent_TodolistChanged_ReturnsTodoRefreshCmd(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
-	m.activeConvID = "conv-42"
+	m.activeConvID = "conv-42" // non-empty, so fetchTodolist runs (ag==nil → no-op msg)
 
 	ev := notify.Event{
 		Type:      notify.EventTodolistChanged,
@@ -198,33 +394,40 @@ func TestHandleBusEvent_TodolistChanged_ReturnsTodoRefreshCmd(t *testing.T) {
 	result, cmd := m.handleBusEvent(ev)
 	rm := result.(Model)
 
-	// The model must still be on the chat screen.
+	// Model must still be on the chat screen — no spurious screen switch.
 	if rm.screen != screenChat {
 		t.Errorf("screen after EventTodolistChanged = %v, want screenChat", rm.screen)
 	}
 
-	// A Cmd MUST be returned (the todolist re-read + pumpEvents at minimum).
-	// We cannot run the cmd in a unit test (no real agent), but nil means the
-	// IO happened inline in Update — that violates the Cmd discipline.
-	if cmd == nil {
-		t.Error("handleBusEvent(EventTodolistChanged): returned nil Cmd; expected non-nil (IO must be in a Cmd, not inline)")
+	// Execute the returned Cmd and collect all messages it produces.
+	msgs := collectMsgs(cmd)
+
+	// A todolistRefreshMsg MUST appear — it is produced by fetchTodolist.
+	// If the EventTodolistChanged case is deleted, fetchTodolist is never
+	// scheduled and no todolistRefreshMsg can appear in the batch.
+	if !hasTodolistRefreshMsg(msgs) {
+		t.Errorf("handleBusEvent(EventTodolistChanged): no todolistRefreshMsg in batch messages %T %v; "+
+			"the EventTodolistChanged case may be missing from handleBusEvent", msgs, msgs)
 	}
 }
 
-// TestHandleBusEvent_TodolistChanged_NoConvID_DoesNotPanic verifies that when
-// activeConvID is empty, EventTodolistChanged is handled without panicking.
 func TestHandleBusEvent_TodolistChanged_NoConvID_DoesNotPanic(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
-	m.activeConvID = "" // no active conversation
+	m.activeConvID = "" // empty convID → fetchTodolist returns no-op todolistRefreshMsg{}
 
 	ev := notify.Event{Type: notify.EventTodolistChanged}
 	// Must not panic.
-	result, cmd := m.handleBusEvent(ev)
-	_ = result
-	// Pump cmd is always issued; nil would be wrong.
-	if cmd == nil {
-		t.Error("handleBusEvent(EventTodolistChanged) with empty convID: returned nil Cmd")
+	_, cmd := m.handleBusEvent(ev)
+
+	// Execute the returned Cmd and collect messages.
+	msgs := collectMsgs(cmd)
+
+	// Even with an empty convID, fetchTodolist still returns a todolistRefreshMsg{}
+	// (zero-value, no-op). The EventTodolistChanged case must still produce it.
+	if !hasTodolistRefreshMsg(msgs) {
+		t.Errorf("handleBusEvent(EventTodolistChanged) with empty convID: " +
+			"no todolistRefreshMsg in batch; EventTodolistChanged case may be missing")
 	}
 }
 
@@ -247,7 +450,6 @@ func TestModel_TodolistRefreshMsg_UpdatesPanel(t *testing.T) {
 	result, _ := m.Update(msg)
 	rm := result.(Model)
 
-	// The todolist panel must now have data and render non-empty.
 	tp, ok := rm.rail.panels[panelTodolist].(*todolistPanel)
 	if !ok {
 		t.Fatal("rail.panels[panelTodolist] is not a *todolistPanel after todolistRefreshMsg")
@@ -257,6 +459,6 @@ func TestModel_TodolistRefreshMsg_UpdatesPanel(t *testing.T) {
 		t.Error("todolistPanel.Render after todolistRefreshMsg: got empty string, want non-empty")
 	}
 	if !strings.Contains(got, "Refactor rail panels") {
-		t.Errorf("todolistPanel.Render: expected 'Refactor rail panels' in output, got:\n%s", got)
+		t.Errorf("todolistPanel.Render: expected 'Refactor rail panels' in output:\n%s", got)
 	}
 }
