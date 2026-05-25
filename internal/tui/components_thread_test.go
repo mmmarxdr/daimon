@@ -307,16 +307,63 @@ func TestWrapLine_MultibyteAndANSI(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// FIX 2 — wrapLine must not produce a spurious zero-width trailing segment
+// ---------------------------------------------------------------------------
+
+// TestWrapLine_ANSI_NoTrailingZeroWidthSegment verifies that wrapLine does not
+// append a spurious zero-width trailing segment when ansi.Truncate leaves a
+// residual ANSI reset sequence (\x1b[0m) as the remainder. All returned lines
+// must have visible width > 0.
+func TestWrapLine_ANSI_NoTrailingZeroWidthSegment(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		width int
+	}{
+		{
+			name:  "bold styled wrapping string",
+			input: "\x1b[1msome bold text that wraps at ten\x1b[0m",
+			width: 10,
+		},
+		{
+			name:  "red foreground styled",
+			input: "\x1b[31mred text that is long enough to wrap here\x1b[0m",
+			width: 12,
+		},
+		{
+			name:  "nested styles",
+			input: "\x1b[1;32mbright green bold text that should definitely wrap\x1b[0m",
+			width: 15,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := wrapLine(tc.input, tc.width)
+			if len(lines) == 0 {
+				t.Fatal("wrapLine returned empty slice for non-empty input")
+			}
+			for i, line := range lines {
+				w := ansi.StringWidth(line)
+				if w == 0 {
+					t.Errorf("line %d has zero visible width (spurious trailing segment): %q", i, line)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // W3 — 'r' key must toggle the most-recent Reasoning (RED → GREEN)
 // ---------------------------------------------------------------------------
 
-// TestHandleChatKey_R_ExpandsReasoning verifies that pressing 'r' on the chat
-// screen with a collapsed Reasoning item toggles it to expanded on the
+// TestHandleChatKey_R_ExpandsReasoning verifies that pressing 'r' when focus
+// is on the thread (focusMain) toggles the most-recent Reasoning on the
 // RETURNED model (not via pointer aliasing).
 func TestHandleChatKey_R_ExpandsReasoning(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
-	m.focus = focusEditor
+	m.focus = focusMain // FIX 3: 'r' only toggles when focus is on thread
 
 	// Insert a collapsed Reasoning item.
 	r := &Reasoning{text: "some reasoning", styles: m.styles}
@@ -338,7 +385,7 @@ func TestHandleChatKey_R_ExpandsReasoning(t *testing.T) {
 		t.Fatal("no Reasoning item found in returned model after 'r' key press")
 	}
 	if !foundReasoning.Expanded() {
-		t.Error("Reasoning should be expanded after pressing 'r'")
+		t.Error("Reasoning should be expanded after pressing 'r' with focusMain")
 	}
 
 	// Press 'r' again — should collapse.
@@ -356,5 +403,71 @@ func TestHandleChatKey_R_ExpandsReasoning(t *testing.T) {
 	}
 	if foundReasoning2.Expanded() {
 		t.Error("Reasoning should be collapsed after pressing 'r' again (toggle)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FIX 3 — 'r' key must not steal from input bar when focusEditor is active
+// ---------------------------------------------------------------------------
+
+// TestHandleChatKey_R_FocusEditor_GoesToInput verifies that pressing 'r' when
+// focus is on the editor (focusEditor) appends 'r' to the input bar and does
+// NOT toggle any Reasoning item. After Esc (→ focusMain), 'r' DOES toggle.
+func TestHandleChatKey_R_FocusEditor_GoesToInput(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.focus = focusEditor
+	// newTestModel already initializes input via newInputBar(); focus is set above.
+
+	// Insert a collapsed Reasoning item so we can assert it is NOT toggled.
+	r := &Reasoning{text: "some reasoning", styles: m.styles}
+	m.thread.append(r)
+
+	// Press 'r' — must NOT toggle reasoning.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	got := m2.(Model)
+
+	// The Reasoning in the returned model must still be collapsed.
+	var foundReasoning *Reasoning
+	for _, item := range got.thread.items {
+		if rr, ok := item.(*Reasoning); ok {
+			foundReasoning = rr
+			break
+		}
+	}
+	if foundReasoning == nil {
+		t.Fatal("Reasoning item missing from returned model")
+	}
+	if foundReasoning.Expanded() {
+		t.Error("FIX 3: pressing 'r' with focusEditor must NOT expand Reasoning (input bar owns 'r')")
+	}
+
+	// The input bar must contain 'r'.
+	if got.input.Value() != "r" {
+		t.Errorf("FIX 3: pressing 'r' with focusEditor must append 'r' to input, got %q", got.input.Value())
+	}
+
+	// Now press Esc to switch to focusMain.
+	m3, _ := got.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	got3 := m3.(Model)
+	if got3.focus != focusMain {
+		t.Errorf("Esc must switch focus to focusMain, got %v", got3.focus)
+	}
+
+	// Now 'r' must toggle reasoning.
+	m4, _ := got3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	got4 := m4.(Model)
+	var foundReasoning4 *Reasoning
+	for _, item := range got4.thread.items {
+		if rr, ok := item.(*Reasoning); ok {
+			foundReasoning4 = rr
+			break
+		}
+	}
+	if foundReasoning4 == nil {
+		t.Fatal("Reasoning item missing from model after Esc + 'r'")
+	}
+	if !foundReasoning4.Expanded() {
+		t.Error("FIX 3: pressing 'r' with focusMain must expand Reasoning")
 	}
 }

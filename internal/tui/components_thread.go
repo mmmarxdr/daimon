@@ -381,7 +381,10 @@ func wrapLine(line string, maxWidth int) []string {
 		// we never re-process the same bytes (safe: Truncate preserves UTF-8).
 		line = line[len(segment):]
 	}
-	if line != "" {
+	// FIX 2: ansi.Truncate may leave a residual ANSI reset sequence (\x1b[0m)
+	// as the remainder, which has zero visible width. Skip it to avoid a
+	// spurious zero-width trailing segment in the output.
+	if line != "" && ansi.StringWidth(line) > 0 {
 		out = append(out, line)
 	}
 	return out
