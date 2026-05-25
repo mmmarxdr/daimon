@@ -32,13 +32,21 @@ import (
 // args are the remaining os.Args after "tui"; cfgPath is the pre-extracted
 // --config value (may be empty → default discovery).
 func runTUICommand(args []string, cfgPath string) error {
-	// 1. Config.
+	// 1. Config — on first run launch the embedded setup TUI.
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		if errors.Is(err, config.ErrNoConfig) {
-			return fmt.Errorf("tui: no config file found — run `daimon setup` first")
+			var setupErr error
+			cfg, setupErr = tui.RunSetupTUI(cfgPath)
+			if setupErr != nil {
+				if tui.IsSetupAborted(setupErr) {
+					return fmt.Errorf("tui: setup cancelled")
+				}
+				return fmt.Errorf("tui: setup failed: %w", setupErr)
+			}
+		} else {
+			return fmt.Errorf("tui: failed to load config: %w", err)
 		}
-		return fmt.Errorf("tui: failed to load config: %w", err)
 	}
 
 	// 2. Store.
