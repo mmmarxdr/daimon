@@ -618,13 +618,40 @@ func TestSetupModel_RAGCreds_EmptyKey_Blocks(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	nm := next.(setupModel)
-	_ = nm
 
+	// The gate must return NO command (mirrors the B1 _CmdNil gate test). A bare
+	// `cmd != nil → inspect` check passes vacuously; assert cmd==nil directly so
+	// the test fails if the gate is ever removed and a write cmd leaks through.
 	if cmd != nil {
-		msg := cmd()
-		if _, ok := msg.(setupWroteMsg); ok {
-			t.Error("writeConfigCmd issued with empty embKey — gate must block")
-		}
+		t.Errorf("expected cmd==nil when embKey is empty (gate must block), got non-nil")
+	}
+	// And the step must stay on stepRAGCreds with the validation error set.
+	if nm.step != stepRAGCreds {
+		t.Errorf("step = %v, want stepRAGCreds (empty embKey must not advance)", nm.step)
+	}
+	if nm.validationErr == "" {
+		t.Error("expected a validationErr message when embKey is empty")
+	}
+}
+
+// TestSetupModel_RAGCreds_EscClearsValidationErr guards W1: an embedding
+// validation error set at stepRAGCreds must NOT survive an Esc back to a prior
+// step (otherwise it bleeds into viewCredentials, a different step's context).
+func TestSetupModel_RAGCreds_EscClearsValidationErr(t *testing.T) {
+	m := newTestSetupModel("")
+	m = advanceToRAGCreds(t, m)
+	m.embKeyInput.SetValue("") // empty → triggers validationErr on submit
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := next.(setupModel)
+	if nm.validationErr == "" {
+		t.Fatal("precondition: expected validationErr set after empty-key submit")
+	}
+
+	next2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm2 := next2.(setupModel)
+	if nm2.validationErr != "" {
+		t.Errorf("validationErr = %q after Esc, want cleared (must not bleed across steps)", nm2.validationErr)
 	}
 }
 

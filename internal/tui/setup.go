@@ -281,6 +281,7 @@ func (m setupModel) updateCredentials(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyEsc:
+		m.validationErr = "" // clear so a stale error never bleeds across steps
 		m.step = stepProvider
 		m.modelInput.Blur()
 		m.keyInput.Blur()
@@ -434,6 +435,7 @@ func buildSetupConfig(provider, model, apiKey, baseURL string, rag ragSetup) *co
 func (m setupModel) updateRAGEnable(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
+		m.validationErr = "" // clear: the embedding error must not show on the credentials step (W1)
 		m.step = stepCredentials
 		// Re-focus the last active field in credentials.
 		m.fieldIdx = 0
@@ -505,6 +507,7 @@ func (m setupModel) updateRAGProvider(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 		m.step = stepRAGCreds
 		return m, textinput.Blink
 	case tea.KeyEsc:
+		m.validationErr = "" // clear so a stale error never bleeds across steps
 		m.step = stepRAGEnable
 		return m, nil
 	}
@@ -519,6 +522,7 @@ func (m setupModel) updateRAGCreds(msg tea.KeyMsg) (setupModel, tea.Cmd) {
 
 	switch msg.Type {
 	case tea.KeyEsc:
+		m.validationErr = "" // clear so a stale error never bleeds across steps
 		m.step = stepRAGProvider
 		m.embModelInput.Blur()
 		m.embKeyInput.Blur()

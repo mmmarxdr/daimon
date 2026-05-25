@@ -251,9 +251,15 @@ func buildRAGNode(cfg *config.Config) *yaml.Node {
 	embNode.Content = append(embNode.Content,
 		strNode("enabled"), boolNode(emb.Enabled),
 		strNode("provider"), strNode(emb.Provider),
-		strNode("model"), strNode(emb.Model),
 		strNode("api_key"), strNode(emb.APIKey),
 	)
+	// model is optional (empty = provider's hardcoded default); omit when blank
+	// so the YAML doesn't carry a confusing `model: ""`.
+	if emb.Model != "" {
+		embNode.Content = append(embNode.Content,
+			strNode("model"), strNode(emb.Model),
+		)
+	}
 	if emb.BaseURL != "" {
 		embNode.Content = append(embNode.Content,
 			strNode("base_url"), strNode(emb.BaseURL),
