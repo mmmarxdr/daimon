@@ -83,6 +83,17 @@ func FirstShellMetachar(s string) (rune, bool) {
 	return 0, false
 }
 
+// Inspect implements ToolInspector. shell_exec executes arbitrary commands and
+// is therefore destructive/shell/admin.
+func (t *ShellTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskDestructive,
+		Category:   CatShell,
+		Permission: PermAdmin,
+		Source:     SourceBuiltin,
+	}
+}
+
 func (t *ShellTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {
 	var input shellParams
 	if err := json.Unmarshal(params, &input); err != nil {

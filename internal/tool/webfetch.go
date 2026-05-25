@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	readability "github.com/go-shiori/go-readability"
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	readability "github.com/go-shiori/go-readability"
 
 	"daimon/internal/config"
 )
@@ -65,6 +65,17 @@ func (t *WebFetchTool) Schema() json.RawMessage {
 type webFetchParams struct {
 	URL            string `json:"url"`
 	ExtractContent *bool  `json:"extract_content"`
+}
+
+// Inspect implements ToolInspector. web_fetch makes outbound network calls:
+// side-effects/network/user.
+func (t *WebFetchTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatNetwork,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
 }
 
 func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (ToolResult, error) {

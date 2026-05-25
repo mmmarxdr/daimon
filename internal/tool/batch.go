@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"daimon/internal/store"
+	"github.com/google/uuid"
 )
 
 // BatchExecToolConfig configures the BatchExecTool.
@@ -72,6 +72,17 @@ func (t *BatchExecTool) Schema() json.RawMessage {
 type batchExecParams struct {
 	Commands    []string `json:"commands"`
 	StopOnError bool     `json:"stop_on_error"`
+}
+
+// Inspect implements ToolInspector. batch_exec runs multiple shell commands and
+// is therefore destructive/shell/admin.
+func (t *BatchExecTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskDestructive,
+		Category:   CatShell,
+		Permission: PermAdmin,
+		Source:     SourceBuiltin,
+	}
 }
 
 // Execute runs the commands sequentially via BoundedExec, indexes each output,
