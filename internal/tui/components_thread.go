@@ -61,6 +61,8 @@ func (t *thread) Render(width int) string {
 }
 
 // findToolLine returns the first ToolLine with the given callID, or nil.
+// NOTE: callers that mutate the returned ToolLine MUST use findToolLineIdx
+// and copy-on-write to avoid pointer-aliasing into the prior model's slice.
 func (t *thread) findToolLine(callID string) *ToolLine {
 	for _, item := range t.items {
 		if tl, ok := item.(*ToolLine); ok {
@@ -70,6 +72,19 @@ func (t *thread) findToolLine(callID string) *ToolLine {
 		}
 	}
 	return nil
+}
+
+// findToolLineIdx returns the slice index of the first ToolLine with the given
+// callID, or -1 if not found. Use this for copy-on-write mutations.
+func (t *thread) findToolLineIdx(callID string) int {
+	for i, item := range t.items {
+		if tl, ok := item.(*ToolLine); ok {
+			if tl.callID == callID {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // ---------------------------------------------------------------------------
@@ -216,13 +231,14 @@ type spinnerTickMsg struct {
 }
 
 // Tick implements Animatable. Returns a tea.Cmd that fires spinnerTickMsg
-// for this ToolLine, advancing the spinner frame on the next Update.
+// for this ToolLine after a 100ms delay, advancing the spinner frame on the
+// next Update. The delay is essential — without it the pump spins at 100% CPU.
 // Only meaningful when state == toolRunning.
 func (tl *ToolLine) Tick() tea.Cmd {
 	id := tl.callID
-	return func() tea.Msg {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
 		return spinnerTickMsg{callID: id}
-	}
+	})
 }
 
 // AdvanceSpinner increments the spinner frame (called from Update on spinnerTickMsg).
@@ -357,17 +373,13 @@ func wrapLine(line string, maxWidth int) []string {
 	}
 	var out []string
 	for ansi.StringWidth(line) > maxWidth {
-		cut := maxWidth
-		// Back up to not split in the middle of a multi-byte char.
-		for cut > 0 {
-			_, size := utf8.DecodeRuneInString(line[cut:])
-			if size > 0 {
-				break
-			}
-			cut--
-		}
-		out = append(out, line[:cut])
-		line = line[cut:]
+		// ansi.Truncate takes the first maxWidth VISUAL columns without cutting
+		// mid-rune or mid-ANSI-escape sequence.
+		segment := ansi.Truncate(line, maxWidth, "")
+		out = append(out, segment)
+		// Advance the remainder by the byte length of the consumed segment so
+		// we never re-process the same bytes (safe: Truncate preserves UTF-8).
+		line = line[len(segment):]
 	}
 	if line != "" {
 		out = append(out, line)

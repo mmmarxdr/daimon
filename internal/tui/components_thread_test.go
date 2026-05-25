@@ -4,6 +4,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestThreadItem_Interface verifies that all concrete thread item types
@@ -243,5 +247,114 @@ func TestThread_FindToolLine_ByCallID(t *testing.T) {
 	}
 	if found.callID != "call-42" {
 		t.Errorf("found.callID = %q, want %q", found.callID, "call-42")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// C1 — wrapLine must not corrupt UTF-8 or mid-ANSI-escape (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestWrapLine_MultibyteAndANSI verifies that wrapLine never cuts mid-rune
+// (CJK, emoji) and never produces a line whose visible width exceeds maxWidth.
+// Also verifies ANSI-styled strings are handled correctly.
+func TestWrapLine_MultibyteAndANSI(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		maxWidth int
+	}{
+		{
+			name:     "CJK long string",
+			input:    "日本語が長い文字列テスト",
+			maxWidth: 8,
+		},
+		{
+			name:     "emoji sequence",
+			input:    "🎉🚀💡🔥🎯🏆✨🌟",
+			maxWidth: 6,
+		},
+		{
+			name:     "mixed ASCII and CJK",
+			input:    "hello日本語world",
+			maxWidth: 10,
+		},
+		{
+			name:     "ANSI styled — lipgloss bold",
+			input:    "\x1b[1msome bold text here and more\x1b[0m",
+			maxWidth: 10,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := wrapLine(tc.input, tc.maxWidth)
+			if len(lines) == 0 {
+				t.Fatal("wrapLine returned empty slice for non-empty input")
+			}
+			for i, line := range lines {
+				// Every line must be valid UTF-8.
+				if !utf8.ValidString(line) {
+					t.Errorf("line %d is not valid UTF-8: %q", i, line)
+				}
+				// Every line must have visible width <= maxWidth.
+				w := ansi.StringWidth(line)
+				if w > tc.maxWidth {
+					t.Errorf("line %d visual width %d > maxWidth %d: %q", i, w, tc.maxWidth, line)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// W3 — 'r' key must toggle the most-recent Reasoning (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestHandleChatKey_R_ExpandsReasoning verifies that pressing 'r' on the chat
+// screen with a collapsed Reasoning item toggles it to expanded on the
+// RETURNED model (not via pointer aliasing).
+func TestHandleChatKey_R_ExpandsReasoning(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.focus = focusEditor
+
+	// Insert a collapsed Reasoning item.
+	r := &Reasoning{text: "some reasoning", styles: m.styles}
+	m.thread.append(r)
+
+	// Press 'r'.
+	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	got := m2.(Model)
+
+	// Find the Reasoning in the returned model's thread.
+	var foundReasoning *Reasoning
+	for _, item := range got.thread.items {
+		if rr, ok := item.(*Reasoning); ok {
+			foundReasoning = rr
+			break
+		}
+	}
+	if foundReasoning == nil {
+		t.Fatal("no Reasoning item found in returned model after 'r' key press")
+	}
+	if !foundReasoning.Expanded() {
+		t.Error("Reasoning should be expanded after pressing 'r'")
+	}
+
+	// Press 'r' again — should collapse.
+	m3, _ := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	got2 := m3.(Model)
+	var foundReasoning2 *Reasoning
+	for _, item := range got2.thread.items {
+		if rr, ok := item.(*Reasoning); ok {
+			foundReasoning2 = rr
+			break
+		}
+	}
+	if foundReasoning2 == nil {
+		t.Fatal("no Reasoning item found in returned model after second 'r' key press")
+	}
+	if foundReasoning2.Expanded() {
+		t.Error("Reasoning should be collapsed after pressing 'r' again (toggle)")
 	}
 }
