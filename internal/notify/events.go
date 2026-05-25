@@ -38,6 +38,11 @@ const (
 	EventSubagentCompleted = "agent.subagent.completed"
 	EventSubagentFailed    = "agent.subagent.failed"
 
+	// Todolist mutation event (todolist-tool change, REQ-7).
+	// Emitted by the agent Mutate callback after a successful create or update.
+	// Never emitted by todo_list (read-only). Must NOT be in StreamingSkipSet.
+	EventTodolistChanged = "agent.todolist.changed"
+
 	// Streaming / tool-lifecycle event types (agent-stream-events change, REQ-12).
 	//
 	// Bus-routed events (structured boundaries, ~5–50 per turn):
@@ -70,6 +75,9 @@ var KnownEventTypes = map[string]bool{
 	EventSubagentSpawned:   true,
 	EventSubagentCompleted: true,
 	EventSubagentFailed:    true,
+
+	// Todolist mutation event (todolist-tool, REQ-7).
+	EventTodolistChanged: true,
 
 	// Bus-routed streaming boundary events (REQ-12).
 	// These are registered for completeness / validation tooling but are
