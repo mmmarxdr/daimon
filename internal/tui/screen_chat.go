@@ -44,10 +44,20 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Spinner tick for a running ToolLine
 	// ------------------------------------------------------------------
 	case spinnerTickMsg:
-		tl := m.thread.findToolLine(msg.callID)
-		if tl != nil && tl.state == toolRunning {
-			tl.AdvanceSpinner()
-			return m, tl.Tick()
+		// W1 FIX: copy-on-write — never mutate the shared backing array
+		// through a pointer into the prior model's slice.
+		idx := m.thread.findToolLineIdx(msg.callID)
+		if idx >= 0 {
+			oldTL := m.thread.items[idx].(*ToolLine) //nolint:forcetypeassert // findToolLineIdx guarantees *ToolLine
+			if oldTL.state == toolRunning {
+				tlCopy := *oldTL
+				tlCopy.AdvanceSpinner()
+				newItems := make([]threadItem, len(m.thread.items))
+				copy(newItems, m.thread.items)
+				newItems[idx] = &tlCopy
+				m.thread.items = newItems
+				return m, tlCopy.Tick()
+			}
 		}
 		return m, nil
 
@@ -100,25 +110,33 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 
 	case notify.EventToolEnd:
 		// Transition existing ToolLine to done or error.
-		tl := m.thread.findToolLine(ev.ToolCallID)
-		if tl != nil {
+		// W1 FIX: copy-on-write — build a new items slice with the updated ToolLine
+		// value so we never mutate through a pointer into the prior model's slice.
+		idx := m.thread.findToolLineIdx(ev.ToolCallID)
+		if idx >= 0 {
+			oldTL := m.thread.items[idx].(*ToolLine) //nolint:forcetypeassert // findToolLineIdx guarantees *ToolLine
+			tlCopy := *oldTL                         // value copy
 			if ev.IsError {
-				tl.state = toolError
+				tlCopy.state = toolError
 			} else {
-				tl.state = toolDone
+				tlCopy.state = toolDone
 			}
-			tl.stats.duration = time.Duration(ev.DurationMs) * time.Millisecond
+			tlCopy.stats.duration = time.Duration(ev.DurationMs) * time.Millisecond
 			if ev.TokenCount > 0 {
-				tl.stats.tokens = ev.TokenCount
+				tlCopy.stats.tokens = ev.TokenCount
 			}
+			newItems := make([]threadItem, len(m.thread.items))
+			copy(newItems, m.thread.items)
+			newItems[idx] = &tlCopy
+			m.thread.items = newItems
 		}
 
 	case notify.EventTurnCompleted:
-		// Append a completed assistant message to the thread.
-		if ev.Text != "" {
-			md := &MsgDaimon{text: ev.Text, styles: m.styles}
-			m.thread.append(md)
-		}
+		// C4 FIX: agentReplyMsg (TUIChannel.Send path) is the SINGLE source of
+		// truth for thread appends. Consuming ev.Text here for telemetry only —
+		// do NOT append a MsgDaimon. Doing so would produce a duplicate whenever
+		// both agentReplyMsg and EventTurnCompleted arrive for the same turn.
+		_ = ev.Text // turn-complete signal consumed; text already in thread via agentReplyMsg
 
 	case notify.EventSubagentSpawned:
 		// Insert a new Subagent mini-thread.
@@ -136,10 +154,17 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 
 	case notify.EventReasoningEnd:
 		// Update the most recent Reasoning block with the completed text.
+		// W1 FIX: copy-on-write — build a new items slice with the updated
+		// Reasoning value; never mutate through a pointer into the prior model's slice.
 		if ev.Text != "" {
 			for i := len(m.thread.items) - 1; i >= 0; i-- {
 				if r, ok := m.thread.items[i].(*Reasoning); ok {
-					r.text = ev.Text
+					rCopy := *r
+					rCopy.text = ev.Text
+					newItems := make([]threadItem, len(m.thread.items))
+					copy(newItems, m.thread.items)
+					newItems[i] = &rCopy
+					m.thread.items = newItems
 					break
 				}
 			}
@@ -183,6 +208,28 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			submitCmd := m.ch.submit(text)
 			return m, submitCmd
 		}
+
+	case "r":
+		// Toggle the most-recent Reasoning item's expanded state.
+		// The collapsed view shows "press r to expand" as the affordance.
+		// Copy-on-write: build a new items slice with the updated Reasoning value.
+		newItems := make([]threadItem, len(m.thread.items))
+		copy(newItems, m.thread.items)
+		for i := len(newItems) - 1; i >= 0; i-- {
+			if r, ok := newItems[i].(*Reasoning); ok {
+				// Copy the Reasoning value so we don't mutate the prior model.
+				rCopy := *r
+				if rCopy.Expanded() {
+					rCopy.Collapse()
+				} else {
+					rCopy.Expand()
+				}
+				newItems[i] = &rCopy
+				break
+			}
+		}
+		m.thread.items = newItems
+		return m, nil
 
 	case "tab":
 		// Switch focus between editor and main (thread navigation).
