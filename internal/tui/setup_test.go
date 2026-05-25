@@ -285,6 +285,19 @@ func TestSetupModel_OllamaTab_FieldIdxNeverExceedsOne(t *testing.T) {
 		if m.keyInput.Focused() {
 			t.Errorf("Tab press %d: keyInput is focused for ollama (it is a hidden field)", i+1)
 		}
+		// Positive focus: every reachable index must focus a VISIBLE field, so a
+		// regression that blurs everything at index 1 (the original dead-state bug)
+		// is caught. ollama: 0=model, 1=baseURL.
+		switch m.fieldIdx {
+		case 0:
+			if !m.modelInput.Focused() {
+				t.Errorf("Tab press %d: fieldIdx=0 but modelInput not focused", i+1)
+			}
+		case 1:
+			if !m.baseURLInput.Focused() {
+				t.Errorf("Tab press %d: fieldIdx=1 (ollama) but baseURLInput not focused", i+1)
+			}
+		}
 	}
 }
 
