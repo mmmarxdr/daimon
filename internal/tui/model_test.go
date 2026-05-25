@@ -60,13 +60,30 @@ func TestPanelsFor_ContractMatrix(t *testing.T) {
 	}
 }
 
-// TestModel_InitialScreen_IsWelcome verifies that a freshly initialized Model
-// starts on the welcome screen (screenWelcome).
+// TestModel_InitialScreen_IsWelcome verifies that a Model built via
+// newTestModel (the constructor/struct-literal path) starts on screenWelcome.
+//
+// NOTE: Init() uses a value receiver and intentionally does not set the screen;
+// the screen is set in the struct literal. This test verifies the constructor
+// contract, NOT the post-Init state (which would be a dead-mutation check).
 func TestModel_InitialScreen_IsWelcome(t *testing.T) {
 	m := newTestModel()
-	// Init returns a cmd; we don't need to run it for this test.
-	_ = m.Init()
 	if m.screen != screenWelcome {
-		t.Errorf("initial screen = %v, want screenWelcome", m.screen)
+		t.Errorf("newTestModel().screen = %v, want screenWelcome", m.screen)
+	}
+}
+
+// TestModel_Init_ReturnsNilCmd verifies that Init() returns nil (no startup Cmd).
+// It also confirms that calling Init() does not accidentally change the screen
+// on the caller's copy (value receiver — mutation is on the copy, not the caller).
+func TestModel_Init_ReturnsNilCmd(t *testing.T) {
+	m := newTestModel()
+	cmd := m.Init()
+	if cmd != nil {
+		t.Errorf("Init() returned non-nil Cmd, want nil")
+	}
+	// The caller's copy must be unchanged after Init.
+	if m.screen != screenWelcome {
+		t.Errorf("after Init(), caller screen = %v, want screenWelcome (value-receiver must not mutate caller)", m.screen)
 	}
 }

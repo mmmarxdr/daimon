@@ -119,10 +119,10 @@ type Model struct {
 	activeConvID string // tracked for TodoListForConv + sessions
 }
 
-// Init implements tea.Model. It sets the initial screen to welcome and returns
-// a nil Cmd (bus bridge and data loads are wired in PR2/PR4 respectively).
+// Init implements tea.Model. Returns a nil Cmd; the initial screen is set in
+// the struct literal (run.go / newTestModel). The value-receiver copy is
+// intentionally discarded — Init must not mutate the live model.
 func (m Model) Init() tea.Cmd {
-	m.screen = screenWelcome
 	return nil
 }
 
