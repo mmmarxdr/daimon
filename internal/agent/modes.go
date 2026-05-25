@@ -17,10 +17,13 @@ package agent
 // Spec coverage: REQ-3, REQ-6, REQ-7, REQ-8.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"daimon/internal/provider"
+	"daimon/internal/tool"
 )
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,13 @@ type ModeDefinition struct {
 	//   []string{}  → NONE: all tools blocked (use case: future read-only posture).
 	//   non-empty   → only the listed tool names are allowed.
 	ToolAllowlist []string
+	// ArgAllowlists gates tool ARGUMENTS keyed by tool name. Values are allowed
+	// command prefixes (1-2 leading whitespace-split tokens). Semantics:
+	//   nil map        → no arg restriction for ANY tool (plan/build default)
+	//   no entry/tool  → no arg restriction for THAT tool
+	//   entry present  → only commands whose leading tokens match are allowed,
+	//                    and any shell metachar is rejected unconditionally.
+	ArgAllowlists map[string][]string
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +82,7 @@ const planPrompt = `You are in PLAN mode. Your job: read, analyze, and propose. 
 
 const buildPrompt = `` // build mode: no extra prompt injection (spec REQ-6 S6-2)
 
-const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, diffs, and behavior. You may read files and run read-only git commands (git diff, git log, git show, git status). You MUST NOT modify files or execute mutating shell commands. Produce findings with severity (CRITICAL / WARNING / SUGGESTION). When asked to fix something, respond: "I'm in review mode — switch to /mode build to apply changes."`
+const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, diffs, and behavior. You may read files and run read-only git commands (git diff, git log, git show, git status, git blame). You MUST NOT modify files or execute mutating shell commands. Produce findings with severity (CRITICAL / WARNING / SUGGESTION). When asked to fix something, respond: "I'm in review mode — switch to /mode build to apply changes."`
 
 // ---------------------------------------------------------------------------
 // Tool allowlists (REQ-7)
@@ -129,10 +139,19 @@ var baseReadOnly = []string{
 // Build from a copy so future appends don't mutate baseReadOnly's backing array.
 var planAllowlist = append(append([]string{}, baseReadOnly...), "todo_create", "todo_update")
 
-// reviewAllowlist is baseReadOnly plus Bash. Review is read-only: it inherits
+// reviewAllowlist is baseReadOnly plus shell_exec. Review is read-only: it inherits
 // todo_list via baseReadOnly but NOT todo_create/todo_update (AD-3).
-// (name-level only; argument-level restriction deferred to change #6 per spec gap note in REQ-7.)
-var reviewAllowlist = append(append([]string{}, baseReadOnly...), "Bash")
+// The argument-level policy (isArgAllowed) further restricts shell_exec to
+// read-only git commands (change #6, AD-5).
+var reviewAllowlist = append(append([]string{}, baseReadOnly...), "shell_exec")
+
+// reviewArgAllowlists is the argument-level allowlist for review mode.
+// Only read-only git sub-commands are permitted for shell_exec.
+// Indexed by tool name; each entry is a list of allowed leading-token prefixes
+// (1-2 whitespace-split tokens — see isArgAllowed for matching semantics).
+var reviewArgAllowlists = map[string][]string{
+	"shell_exec": {"git diff", "git log", "git show", "git status", "git blame"},
+}
 
 // ---------------------------------------------------------------------------
 // Mode definitions table (package-private)
@@ -155,6 +174,7 @@ var modes = map[string]ModeDefinition{
 		Name:          "review",
 		SystemPrompt:  reviewPrompt,
 		ToolAllowlist: reviewAllowlist,
+		ArgAllowlists: reviewArgAllowlists,
 	},
 }
 
@@ -240,4 +260,95 @@ func isToolAllowed(toolName string, allowlist []string) bool {
 		}
 	}
 	return false
+}
+
+// ---------------------------------------------------------------------------
+// isArgAllowed (AD-2, change #6)
+// ---------------------------------------------------------------------------
+
+// reviewShellRejectMsg is the contract-locked rejection message returned by
+// isArgAllowed for non-allowlisted or metachar-bearing shell commands in review
+// mode. The wording is locked once tests assert it — any change to the allowed
+// set requires updating this constant and all asserting tests.
+const reviewShellRejectMsg = "command not allowed in review mode: only read-only git commands are permitted (git diff, git log, git show, git status, git blame)"
+
+// isArgAllowed reports whether the ARGUMENTS of a tool call pass the mode's
+// arg-level policy. Returns (true, "") when there is no restriction.
+//
+//   - def.ArgAllowlists nil OR no entry for toolName → (true, "")  [fast path, nil-safe]
+//   - shell_exec with an entry: decode {command}, trim; reject ANY shell
+//     metachar (using tool.FirstShellMetachar — single source of truth); then
+//     prefix-match leading 1-2 whitespace-split tokens (AD-4) against the
+//     allowlist. Mismatch → (false, reviewShellRejectMsg).
+//
+// rawParams is the raw tool-call Input (json.RawMessage). On unmarshal failure
+// the call is REJECTED (fail-closed) since we cannot prove the args are safe.
+//
+// Note: the body only handles shell_exec command extraction. A non-shell tool
+// with an entry in ArgAllowlists would need its own decode branch — only
+// shell_exec has an entry today (out of scope for change #6).
+func isArgAllowed(toolName string, rawParams json.RawMessage, def ModeDefinition) (ok bool, reason string) {
+	// Step 1: nil map → no arg restriction for any tool.
+	if def.ArgAllowlists == nil {
+		return true, ""
+	}
+
+	// Step 2: no entry for this tool → no arg restriction for this tool.
+	allowed, has := def.ArgAllowlists[toolName]
+	if !has {
+		return true, ""
+	}
+
+	// Step 3: decode the command field (fail-closed on bad JSON).
+	var p struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(rawParams, &p) != nil {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 4: empty command is always rejected.
+	cmd := strings.TrimSpace(p.Command)
+	if cmd == "" {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 5: metachar check — BEFORE allowlist (AD-2, REQ-4). Uses the
+	// exported tool.FirstShellMetachar — single source of truth (AD-3).
+	if _, found := tool.FirstShellMetachar(cmd); found {
+		return false, reviewShellRejectMsg
+	}
+
+	// Step 6: leading-token prefix match (AD-4).
+	// Tokenize with strings.Fields — collapses any run of whitespace and
+	// strips leading/trailing whitespace, so "git  diff" → ["git","diff"].
+	parts := strings.Fields(cmd)
+	if len(parts) == 0 {
+		return false, reviewShellRejectMsg
+	}
+	// Build a 1-or-2-token candidate key.
+	two := parts[0]
+	if len(parts) >= 2 {
+		two = parts[0] + " " + parts[1]
+	}
+	for _, entry := range allowed {
+		if entry == two || entry == parts[0] {
+			// Step 7: --output denylist (file-write bypass, security fix).
+			// git diff/log/show --output=<file> and --output <file> both WRITE/
+			// overwrite the target file — violating the read-only contract.
+			// Scan ALL tokens; reject on "--output" (space form) or any token
+			// whose prefix is "--output=" (inline-value form).
+			// Threat model (D2): honest-model accident prevention; this is a
+			// targeted denylist of the one write-capable flag in the read-only
+			// git family, not a complete sandbox.
+			// NOTE: -o is NOT blocked (git rejects it as ambiguous; not a vector).
+			for _, tok := range parts {
+				if tok == "--output" || strings.HasPrefix(tok, "--output=") {
+					return false, reviewShellRejectMsg
+				}
+			}
+			return true, ""
+		}
+	}
+	return false, reviewShellRejectMsg
 }

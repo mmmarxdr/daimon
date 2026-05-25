@@ -891,11 +891,11 @@ Session-only (no config.yaml write). Files: `internal/agent/set_provider.go`,
 Hardcoded 3-mode system (`plan` / `build` / `review`) controlled by the `/mode` slash command.
 Each mode is a `(SystemPrompt, ToolAllowlist)` tuple defined in `internal/agent/modes.go`.
 
-| Mode     | Tool allowlist                              | Behavior                                                                     |
-| -------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
-| `plan`   | Read, Grep, Glob, web, mem*\*, codegraph*\* | Read-only analysis and proposals; model directed to STOP before implementing |
-| `build`  | `nil` (all tools)                           | Default; all tools available; implements, refactors, executes                |
-| `review` | plan allowlist + Bash                       | Diff and audit; read-only execution; model directed not to modify files      |
+| Mode     | Tool allowlist                                       | Behavior                                                                                                                                                          |
+| -------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan`   | Read, Grep, Glob, web, mem*\*, codegraph*\*          | Read-only analysis and proposals; model directed to STOP before implementing                                                                                      |
+| `build`  | `nil` (all tools)                                    | Default; all tools available; implements, refactors, executes                                                                                                     |
+| `review` | base read-only tools + `shell_exec` (arg-restricted) | Diff and audit; `shell_exec` limited to read-only git commands (`git diff`, `git log`, `git show`, `git status`, `git blame`); model directed not to modify files |
 
 **Behavioral contract:**
 
