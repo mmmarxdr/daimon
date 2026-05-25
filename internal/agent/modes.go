@@ -81,6 +81,12 @@ const reviewPrompt = `You are in REVIEW mode. Your job: audit existing code, dif
 // baseReadOnly is the set of read-only tools shared by BOTH plan and review modes.
 // todo_list is read-only (no mutation, no event) so it lives here — both modes
 // inherit it. (AD-3: extract shared base to prevent todo write-tool leakage into review.)
+//
+// WARNING: baseReadOnly, planAllowlist, and reviewAllowlist are all initialized
+// once at package load via var-block append calls. Appending to baseReadOnly
+// AFTER package init will NOT propagate into planAllowlist or reviewAllowlist —
+// those were built from a copy at init time. Add new shared tools directly to
+// the baseReadOnly literal below.
 var baseReadOnly = []string{
 	"Read",
 	"Grep",
