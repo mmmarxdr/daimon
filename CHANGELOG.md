@@ -43,6 +43,42 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
   before mutation. Shell-tool integration lands in WU6 (PR3) — the override exists
   in process memory ahead of the wiring. (PR2, REQ-5, REQ-23)
 
+- **Enriched `GET /api/tools` response**: the endpoint now returns a JSON object
+  instead of a bare array. The new shape is `{ tools, summary }` where `tools` is
+  the existing array (each entry extended with four metadata fields) and `summary`
+  is a static count breakdown:
+
+  ```json
+  {
+    "tools": [
+      {
+        "name": "read_file",
+        "description": "...",
+        "schema": { ... },
+        "risk": "read-only",
+        "category": "file",
+        "permission": "none",
+        "source": "builtin"
+      }
+    ],
+    "summary": {
+      "total": 24,
+      "by_risk": { "read-only": 12, "side-effects": 9, "destructive": 3 },
+      "by_category": { "file": 3, "memory": 4, "shell": 2, "meta": 4, ... }
+    }
+  }
+  ```
+
+  Per-tool metadata fields:
+  - `risk`: `read-only` | `side-effects` | `destructive`
+  - `category`: `shell` | `file` | `network` | `memory` | `scheduling` | `knowledge` | `meta` | `mcp` | `unknown`
+  - `permission`: `none` | `user` | `admin` (descriptive only — not enforced)
+  - `source`: `builtin` | `mcp` | `skill`
+
+  Tools that do not implement `ToolInspector` fall back to
+  `{ side-effects, unknown, none, builtin }`.
+  (change tools-mcp-inspector-data #8, PR1 + PR2)
+
 ### Fixed
 
 - **Review-mode `shell_exec` arg-restricted to read-only git**: `shell_exec` is now
