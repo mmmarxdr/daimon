@@ -57,22 +57,6 @@ func (s screenState) String() string {
 }
 
 // ---------------------------------------------------------------------------
-// focusRegion — forward-compat FROZEN enum (AD-3)
-//
-// Identifies the intra-screen focus target. Locked alongside screenState.
-// ---------------------------------------------------------------------------
-
-// focusRegion identifies which region of the screen has keyboard focus.
-type focusRegion int
-
-const (
-	focusNone   focusRegion = iota // no explicit focus (welcome initial state)
-	focusEditor                    // input bar / text-entry region
-	focusMain                      // center thread / list region
-	focusRail                      // right rail panel
-)
-
-// ---------------------------------------------------------------------------
 // Model — single root tea.Model (AD-2)
 //
 // Only Model implements tea.Model. Sub-components (topBar, footerHints,
@@ -87,7 +71,6 @@ type Model struct {
 	width  int
 	height int
 	screen screenState
-	focus  focusRegion
 	styles tuiStyles
 
 	// backend handles (injected by RunTUI; never constructed here)
@@ -97,26 +80,20 @@ type Model struct {
 	ch    *TUIChannel  // input-bar → inbox; agent Send → tea.Msg
 	cfg   *config.Config
 
-	// event bridge (PR2): bus handler does non-blocking send here; tea.Cmd drains it.
-	// Set to non-nil in Init when the bus bridge is wired.
-	events <-chan tea.Msg
-
 	// persistent shell (PR1)
 	topBar topBar
 	footer footerHints
 	input  inputBar // bubbles/textinput-backed; shown per matrix (welcome, chat, error)
 
-	// thread + rail (PR2+): zero values are safe no-ops on Render
-	thread thread
-	rail   rail
+	// chat thread, focus, event stream, activeConvID added in PR2
+	rail rail
 
 	// overlays (PR3): dialog stack drawn last
 	overlays overlayManager
 
 	// session-scoped routing identity (AD-7)
-	channelID    string // "tui"
-	senderID     string // "local_user"
-	activeConvID string // tracked for TodoListForConv + sessions
+	channelID string // "tui"
+	senderID  string // "local_user"
 }
 
 // Init implements tea.Model. Returns a nil Cmd; the initial screen is set in
