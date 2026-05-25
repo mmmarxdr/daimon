@@ -221,6 +221,17 @@ type todoCreateTool struct {
 
 func (t *todoCreateTool) Name() string { return "todo_create" }
 
+// Inspect implements ToolInspector. todo_create adds a new item to the list —
+// side-effects/meta/user.
+func (t *todoCreateTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatMeta,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
+
 // Description returns the tool's human-readable description for the LLM.
 func (t *todoCreateTool) Description() string {
 	return "Create a new todo item in the conversation's todo list. Use to track tasks, sub-goals, or action items."
@@ -339,6 +350,17 @@ type todoUpdateTool struct {
 
 func (t *todoUpdateTool) Name() string { return "todo_update" }
 
+// Inspect implements ToolInspector. todo_update mutates an existing item —
+// side-effects/meta/user.
+func (t *todoUpdateTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskSideEffects,
+		Category:   CatMeta,
+		Permission: PermUser,
+		Source:     SourceBuiltin,
+	}
+}
+
 // Description returns the tool's human-readable description for the LLM.
 func (t *todoUpdateTool) Description() string {
 	return "Update an existing todo item's content or status. Use the todo ID from todo_list results."
@@ -456,6 +478,17 @@ type todoListTool struct {
 }
 
 func (t *todoListTool) Name() string { return "todo_list" }
+
+// Inspect implements ToolInspector. todo_list only reads the list, never mutates
+// it — read-only/meta/none.
+func (t *todoListTool) Inspect() ToolMeta {
+	return ToolMeta{
+		Risk:       RiskReadOnly,
+		Category:   CatMeta,
+		Permission: PermNone,
+		Source:     SourceBuiltin,
+	}
+}
 
 // Description returns the tool's human-readable description for the LLM.
 func (t *todoListTool) Description() string {

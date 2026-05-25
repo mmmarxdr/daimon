@@ -17,9 +17,9 @@ type RAGToolDeps struct {
 	Store         DocumentStore
 	EmbedFn       func(ctx context.Context, text string) ([]float32, error) // nil = FTS-only search
 	HypothesisFn  func(ctx context.Context, query string) (string, error)   // nil = HyDE disabled
-	HydeConf      HydeSearchConfig                                           // zero = HyDE disabled
-	RetrievalConf RetrievalSearchConfig                                      // zero = default limit
-	Recorder      metrics.Recorder                                           // nil-safe
+	HydeConf      HydeSearchConfig                                          // zero = HyDE disabled
+	RetrievalConf RetrievalSearchConfig                                     // zero = default limit
+	Recorder      metrics.Recorder                                          // nil-safe
 }
 
 // ToolResult is an alias to tool.ToolResult for ergonomic use in tests.
@@ -43,6 +43,17 @@ type indexDocTool struct {
 }
 
 func (t *indexDocTool) Name() string { return "index_doc" }
+
+// Inspect implements tool.ToolInspector. index_doc enqueues a document for
+// ingestion, which mutates the knowledge store — side-effects/knowledge/user.
+func (t *indexDocTool) Inspect() tool.ToolMeta {
+	return tool.ToolMeta{
+		Risk:       tool.RiskSideEffects,
+		Category:   tool.CatKnowledge,
+		Permission: tool.PermUser,
+		Source:     tool.SourceBuiltin,
+	}
+}
 
 func (t *indexDocTool) Description() string {
 	return "Index a document into the RAG knowledge base for later retrieval. " +
@@ -132,6 +143,17 @@ type searchDocsTool struct {
 }
 
 func (t *searchDocsTool) Name() string { return "search_docs" }
+
+// Inspect implements tool.ToolInspector. search_docs only reads the knowledge
+// store — read-only/knowledge/none.
+func (t *searchDocsTool) Inspect() tool.ToolMeta {
+	return tool.ToolMeta{
+		Risk:       tool.RiskReadOnly,
+		Category:   tool.CatKnowledge,
+		Permission: tool.PermNone,
+		Source:     tool.SourceBuiltin,
+	}
+}
 
 func (t *searchDocsTool) Description() string {
 	return "Search indexed documents for content relevant to the given query. " +

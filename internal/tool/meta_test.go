@@ -239,13 +239,18 @@ func TestConstants(t *testing.T) {
 
 // TestBuiltinInspect is a table-driven test asserting that real built-in tool
 // constructors return the exact ToolMeta declared in AD-5. Phase 2 covers the
-// high-risk subset included in PR1.
+// high-risk subset included in PR1; Phase 5 (WU-2) extends with the remaining
+// read-only / low-risk built-ins.
 func TestBuiltinInspect(t *testing.T) {
+	memDeps := MemoryToolDeps{}
+	todoDeps := TodoToolDeps{}
+
 	tests := []struct {
 		name     string
 		tool     Tool
 		wantMeta ToolMeta
 	}{
+		// Phase 2 (PR1) — high-risk built-ins
 		{
 			name:     "shell_exec",
 			tool:     NewShellTool(defaultShellCfg()),
@@ -270,6 +275,88 @@ func TestBuiltinInspect(t *testing.T) {
 			name:     "web_fetch",
 			tool:     NewWebFetchTool(defaultWebCfg()),
 			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatNetwork, Permission: PermUser, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — fileops read-only tools (task 5.2)
+		{
+			name:     "read_file",
+			tool:     NewReadFileTool(defaultFileCfg()),
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatFile, Permission: PermNone, Source: SourceBuiltin},
+		},
+		{
+			name:     "list_files",
+			tool:     NewListFilesTool(defaultFileCfg()),
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatFile, Permission: PermNone, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — memory tools (task 5.3)
+		{
+			name:     "search_memory",
+			tool:     &searchMemoryTool{deps: memDeps},
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatMemory, Permission: PermNone, Source: SourceBuiltin},
+		},
+		{
+			name:     "save_memory",
+			tool:     &saveMemoryTool{deps: memDeps},
+			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatMemory, Permission: PermUser, Source: SourceBuiltin},
+		},
+		{
+			name:     "update_memory",
+			tool:     &updateMemoryTool{deps: memDeps},
+			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatMemory, Permission: PermUser, Source: SourceBuiltin},
+		},
+		{
+			name:     "forget_memory",
+			tool:     &forgetMemoryTool{deps: memDeps},
+			wantMeta: ToolMeta{Risk: RiskDestructive, Category: CatMemory, Permission: PermUser, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — todo tools (task 5.4)
+		{
+			name:     "todo_list",
+			tool:     &todoListTool{deps: todoDeps},
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatMeta, Permission: PermNone, Source: SourceBuiltin},
+		},
+		{
+			name:     "todo_create",
+			tool:     &todoCreateTool{deps: todoDeps},
+			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatMeta, Permission: PermUser, Source: SourceBuiltin},
+		},
+		{
+			name:     "todo_update",
+			tool:     &todoUpdateTool{deps: todoDeps},
+			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatMeta, Permission: PermUser, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — cron tools (task 5.5)
+		{
+			name:     "list_crons",
+			tool:     &listCronsTool{},
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatScheduling, Permission: PermNone, Source: SourceBuiltin},
+		},
+		{
+			name:     "schedule_task",
+			tool:     &scheduleTaskTool{},
+			wantMeta: ToolMeta{Risk: RiskSideEffects, Category: CatScheduling, Permission: PermUser, Source: SourceBuiltin},
+		},
+		{
+			name:     "delete_cron",
+			tool:     &deleteCronTool{},
+			wantMeta: ToolMeta{Risk: RiskDestructive, Category: CatScheduling, Permission: PermUser, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — search_output (task 5.6)
+		{
+			name:     "search_output",
+			tool:     NewSearchOutputTool(nil),
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatMeta, Permission: PermNone, Source: SourceBuiltin},
+		},
+
+		// Phase 5 (PR2) — skill_loader (task 5.7)
+		{
+			name:     "load_skill",
+			tool:     NewSkillLoaderTool(nil),
+			wantMeta: ToolMeta{Risk: RiskReadOnly, Category: CatMeta, Permission: PermNone, Source: SourceBuiltin},
 		},
 	}
 

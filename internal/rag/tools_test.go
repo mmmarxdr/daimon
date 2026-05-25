@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"daimon/internal/rag"
+	"daimon/internal/tool"
 )
 
 // searchableStore extends trackingStore with configurable SearchChunks result.
@@ -195,4 +196,34 @@ func TestSearchDocsTool_NoResults(t *testing.T) {
 type Tool = interface {
 	Name() string
 	Execute(ctx context.Context, params json.RawMessage) (rag.ToolResult, error)
+}
+
+// ---------------------------------------------------------------------------
+// Task 5.1 (WU-2) — TestRAGToolsInspect
+// ---------------------------------------------------------------------------
+
+// TestRAGToolsInspect asserts that index_doc and search_docs implement
+// ToolInspector and return the expected per-spec metadata.
+func TestRAGToolsInspect(t *testing.T) {
+	deps := rag.RAGToolDeps{Store: newSearchableStore()}
+	tools := rag.BuildRAGTools(deps)
+
+	wantMeta := map[string]tool.ToolMeta{
+		"index_doc":   {Risk: tool.RiskSideEffects, Category: tool.CatKnowledge, Permission: tool.PermUser, Source: tool.SourceBuiltin},
+		"search_docs": {Risk: tool.RiskReadOnly, Category: tool.CatKnowledge, Permission: tool.PermNone, Source: tool.SourceBuiltin},
+	}
+
+	for _, t2 := range tools {
+		tc := wantMeta[t2.Name()]
+		t.Run(t2.Name(), func(t *testing.T) {
+			inspector, ok := t2.(tool.ToolInspector)
+			if !ok {
+				t.Fatalf("%s does not implement tool.ToolInspector", t2.Name())
+			}
+			got := inspector.Inspect()
+			if got != tc {
+				t.Errorf("Inspect() = %+v, want %+v", got, tc)
+			}
+		})
+	}
 }
