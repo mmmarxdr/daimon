@@ -272,6 +272,14 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.footer = footerHints{screen: screenSessions}
 		return m, loadSessionsCmd(m.store)
 
+	case "ctrl+t":
+		// ctrl+t navigates to the tools screen.
+		// Bare 't' is NOT used to avoid breaking typed messages starting with 't'.
+		m.prevScreen = screenChat
+		m.screen = screenTools
+		m.footer = footerHints{screen: screenTools}
+		return m, loadToolsCmd(m.ag)
+
 	case "esc":
 		// FIX 3: Esc toggles focusEditor ↔ focusMain so the reasoning toggle
 		// ('r') remains reachable after the user switches to thread navigation.

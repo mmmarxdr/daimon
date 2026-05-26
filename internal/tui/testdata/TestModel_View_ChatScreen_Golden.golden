@@ -15,4 +15,4 @@ you  Write a Go function that reverses a slice
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ › > message daimon…                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-enter: send  /: commands  tab: sessions  t: tools  ctrl+c: quit
+enter: send  /: commands  tab: sessions  ^t: tools  ctrl+c: quit

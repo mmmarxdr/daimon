@@ -30,6 +30,7 @@ func newRail(s tuiStyles) rail {
 			panelContextMeter: newContextMeterPanel(s),
 			panelTelemetry:    newTelemetryPanel(s),
 			panelModelPicker:  newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
+			panelToolDetail:   newToolDetailPanel(s),          // PR4a: tools screen
 		},
 	}
 }
