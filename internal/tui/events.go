@@ -58,13 +58,19 @@ func wireEvents(ctx context.Context, bus notify.Bus, ch *TUIChannel) <-chan tea.
 	evCh := make(chan tea.Msg, 256)
 
 	// Thin bus handler — must not block (bus enforces 5s watchdog).
-	bus.Subscribe(func(e notify.Event) {
-		select {
-		case evCh <- busEventMsg{event: e}:
-		default:
-			// Drop on overflow — telemetry is best-effort.
-		}
-	})
+	// bus is nil when notifications are disabled (cfg.Notifications.Enabled is
+	// false or no rules — see runTUICommand); there are simply no bus events to
+	// forward, so skip the subscription. The agent-reply multiplexer below runs
+	// regardless so agent replies still reach the UI.
+	if bus != nil {
+		bus.Subscribe(func(e notify.Event) {
+			select {
+			case evCh <- busEventMsg{event: e}:
+			default:
+				// Drop on overflow — telemetry is best-effort.
+			}
+		})
+	}
 
 	// Forward agent replies from TUIChannel.out onto the same evCh.
 	// FIX 1: never close ch.out; instead select on ch.done / ctx to exit.

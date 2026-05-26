@@ -368,6 +368,40 @@ func TestTUIChannel_Stop_Idempotent(t *testing.T) {
 	_ = ch.Stop() // must not panic
 }
 
+// TestWireEvents_NilBus_NoPanic verifies that wireEvents tolerates a nil
+// notify.Bus. The TUI is launched with a nil bus whenever notifications are
+// disabled in config (cfg.Notifications.Enabled is false or there are no
+// rules — see runTUICommand), so a nil bus MUST NOT panic: it simply means
+// there are no bus events to forward. The agent-reply multiplexer must still
+// run so agent replies reach the UI.
+func TestWireEvents_NilBus_NoPanic(t *testing.T) {
+	ch := newTUIChannel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("wireEvents panicked with nil bus: %v", r)
+		}
+	}()
+
+	evCh := wireEvents(ctx, nil, ch) // nil bus — notifications disabled
+	if evCh == nil {
+		t.Fatal("wireEvents returned a nil channel for a nil bus")
+	}
+
+	// Agent replies must still be forwarded onto evCh even without a bus.
+	go func() {
+		_ = ch.Send(context.Background(), channel.OutgoingMessage{Text: "hello"})
+	}()
+	select {
+	case <-evCh:
+		// correct — agent-reply multiplexer works without a bus.
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for agent reply with nil bus")
+	}
+}
+
 // TestWireEvents_GoroutineExits_AfterStop verifies that the agent-reply
 // forwarding goroutine started by wireEvents exits cleanly after Stop() is
 // called (i.e., done channel is closed), so there are no goroutine leaks.
