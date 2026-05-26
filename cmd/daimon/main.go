@@ -217,6 +217,21 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Bare `daimon` in an interactive terminal launches the power-user TUI by
+	// default — it is the primary interactive experience. Non-interactive
+	// invocations (services, bots, piped stdin) and `--web` (agent + web
+	// dashboard) fall through to the channel-agent path below. Explicit
+	// subcommands (`daimon web`, `daimon tui`, ...) and behavior flags
+	// (--setup, --dashboard, --version, ...) are already handled above, so
+	// reaching here means a bare invocation.
+	if defaultToTUI(isTTY(os.Stdin), *webFlag) {
+		if err := runTUICommand(nil, *cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "tui: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// Normal / wizard path.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -734,6 +749,15 @@ func asProviderConfig(fb *config.FallbackConfig) config.ProviderConfig {
 // Handles both POSIX terminals and Cygwin/MinTTY on Windows.
 func isTTY(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+}
+
+// defaultToTUI reports whether a bare `daimon` invocation (no subcommand, no
+// behavior flag) should launch the power-user TUI instead of the channel-agent
+// path. The TUI is the default interactive experience; it is skipped for
+// non-interactive runs (services, bots, piped stdin) and when --web is set
+// (agent + web dashboard mode).
+func defaultToTUI(interactive, webFlag bool) bool {
+	return interactive && !webFlag
 }
 
 func configureLogging(cfg config.LoggingConfig) {
