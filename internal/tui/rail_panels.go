@@ -410,6 +410,109 @@ func (p *environmentPanel) Render(width, _ int) string {
 }
 
 // ---------------------------------------------------------------------------
+// activePolicyPanel — current active mode (PR5: error screen)
+// ---------------------------------------------------------------------------
+
+// activePolicyPanel shows the active mode name ("plan", "build", or "review")
+// so the user understands which policy gate triggered the denial.
+// Renders "" when mode is empty (sentinel for "not configured" or tests).
+type activePolicyPanel struct {
+	styles tuiStyles
+	mode   string // active mode name; "" renders ""
+}
+
+// newActivePolicyPanel constructs an activePolicyPanel with the given mode.
+// mode is passed from ag.CurrentMode() at construction/registration time
+// in run.go. An empty string renders "" (matches the ""-when-empty contract).
+func newActivePolicyPanel(s tuiStyles, mode string) *activePolicyPanel {
+	return &activePolicyPanel{styles: s, mode: mode}
+}
+
+// setMode updates the active mode name. Called at denial time (via copyRailWith)
+// so the panel always reflects the mode that actually triggered the denial,
+// not the (potentially stale) mode captured at startup. Mirrors the pattern
+// of toolDetailPanel.setTool / todolistPanel.setList.
+func (p *activePolicyPanel) setMode(mode string) {
+	p.mode = mode
+}
+
+// Render implements Panel. Returns "" when mode is empty.
+func (p *activePolicyPanel) Render(width, _ int) string {
+	if p.mode == "" {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 4 {
+		inner = 4
+	}
+
+	header := p.styles.accent.Render("◈ active policy")
+	modeLine := ansi.Truncate(p.styles.amber.Render("mode: "+p.mode), inner, "…")
+	noteLine := ansi.Truncate(p.styles.dimLabel.Render("tool gates enforced"), inner, "…")
+
+	return strings.Join([]string{header, modeLine, noteLine}, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// recentDenialsPanel — list of recently denied tool calls (PR5: error screen)
+// ---------------------------------------------------------------------------
+
+// recentDenialsPanel renders the most-recent denied tool calls in the right
+// rail so the user can see the history of blocked actions this session.
+// Renders "" when no denials have been recorded.
+type recentDenialsPanel struct {
+	styles  tuiStyles
+	denials []denialEntry // copy-on-write snapshot; "" when empty
+}
+
+// newRecentDenialsPanel constructs an empty recentDenialsPanel.
+func newRecentDenialsPanel(s tuiStyles) *recentDenialsPanel {
+	return &recentDenialsPanel{styles: s}
+}
+
+// setDenials replaces the current denial list. Called from copyRailWith in
+// the EventToolEnd denial handler (screen_chat.go handleBusEvent).
+func (p *recentDenialsPanel) setDenials(denials []denialEntry) {
+	p.denials = denials
+}
+
+// Render implements Panel. Returns "" when there are no denials.
+func (p *recentDenialsPanel) Render(width, _ int) string {
+	if len(p.denials) == 0 {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 4 {
+		inner = 4
+	}
+
+	header := p.styles.accent.Render("◈ recent denials")
+	rows := []string{ansi.Truncate(header, inner, "…")}
+
+	for _, d := range p.denials {
+		// Tool name (bold/label style).
+		toolLine := ansi.Truncate(p.styles.errStyle.Render(d.tool), inner, "…")
+		rows = append(rows, toolLine)
+
+		// Reason truncated to fit width (ANSI-safe: ansi.Truncate measures visible
+		// columns and never splits a multi-byte rune or ANSI escape sequence).
+		if d.reason != "" {
+			const maxReason = 40
+			truncReason := d.reason
+			if ansi.StringWidth(truncReason) > maxReason {
+				truncReason = ansi.Truncate(truncReason, maxReason, "…")
+			}
+			reasonLine := ansi.Truncate(p.styles.dimLabel.Render(" "+truncReason), inner, "…")
+			rows = append(rows, reasonLine)
+		}
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// ---------------------------------------------------------------------------
 // resumeListPanel — recent sessions (PR4b: welcome + sessions screens)
 // ---------------------------------------------------------------------------
 

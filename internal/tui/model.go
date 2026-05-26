@@ -129,6 +129,17 @@ type Model struct {
 	// tools screen (PR4a)
 	tools   []toolEntry // loaded from agent.ToolRegistry on navigation
 	toolIdx int         // selected row index in the tools list
+
+	// error screen (PR5): permission-denied state
+	errorToolName string        // tool name that triggered the denial
+	errorReason   string        // human-readable denial reason from EventToolEnd.Error
+	recentDenials []denialEntry // copy-on-write; capped to 10; never nil after first denial
+}
+
+// denialEntry is a single policy/mode denial captured from EventToolEnd.
+type denialEntry struct {
+	tool   string // tool name that was denied
+	reason string // human-readable reason
 }
 
 // Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
@@ -174,9 +185,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// ctrl+c always quits regardless of overlay or focus state.
 			return m, tea.Quit
 		case "q":
-			// Bare 'q' quits ONLY in navigation context: no active overlay and
-			// focus is NOT on the editor (where 'q' is a valid typed character).
-			if !m.overlays.Active() && m.focus != focusEditor && m.focus != focusNone {
+			// Bare 'q' quits ONLY in chat-nav context: screen==screenChat AND no
+			// active overlay AND focus is NOT on the editor (where 'q' is a valid
+			// typed character). On sessions/tools/error screens, 'q' is a no-op —
+			// esc navigates back; ctrl+c always quits.
+			if m.screen == screenChat && !m.overlays.Active() && m.focus != focusEditor && m.focus != focusNone {
 				return m, tea.Quit
 			}
 		}
@@ -226,7 +239,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen == screenChat {
 			return m.updateChat(msg) // full handler including thread mutations
 		}
-		// Non-chat screen: apply no thread mutations but always re-arm the pump.
+		// Fix 3: re-entrant denial — a 2nd denial arriving while already on
+		// screenError must not be swallowed. Update error state and stay on
+		// screenError so the user sees the latest denial.
+		ev := msg.event
+		if m.screen == screenError && ev.Type == notify.EventToolEnd && ev.Meta["denied"] == "true" {
+			m = m.applyDenial(ev)
+			// Re-arm the pump so events keep flowing.
+			if m.events != nil {
+				return m, pumpEvents(m.events)
+			}
+			return m, nil
+		}
+		// All other non-chat screens: apply no thread mutations but always re-arm the pump.
 		if m.events != nil {
 			return m, pumpEvents(m.events)
 		}
@@ -290,7 +315,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenSessions:
 		return m.updateSessions(msg) // PR3b
 	case screenError:
-		return m, nil // stub: PR5
+		return m.updateError(msg) // PR5
 	}
 	return m, nil
 }

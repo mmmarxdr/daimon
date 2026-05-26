@@ -33,3 +33,13 @@ func (a *Agent) ToolRegistry() map[string]tool.Tool {
 func (a *Agent) TodoListForConv(convID string) (tool.TodoList, error) {
 	return a.todoRead(convID)
 }
+
+// CurrentMode returns the name of the active mode ("plan", "build", or "review").
+//
+// It is a thin public wrapper over modeSnapshot() (PR5 / AD-8 pattern). The
+// lock is acquired and released inside modeSnapshot — do NOT add locking here.
+// Falls back to "build" when currentMode is empty or corrupt, matching the
+// modeSnapshot fallback contract.
+func (a *Agent) CurrentMode() string {
+	return a.modeSnapshot().Name
+}

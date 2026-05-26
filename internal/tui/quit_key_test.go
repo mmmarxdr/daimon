@@ -125,3 +125,95 @@ func TestQuitKey_Q_WithFocusNone_DoesNotQuit(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fix 2: bare 'q' is gated to screenChat only — other screens must NOT quit
+// ---------------------------------------------------------------------------
+
+// TestQuitKey_Q_OnScreenError_DoesNotQuit verifies that 'q' does NOT quit
+// when on screenError (user is viewing the denial screen, not navigating chat).
+func TestQuitKey_Q_OnScreenError_DoesNotQuit(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenError
+	m.focus = focusMain // even in navigation focus, q must not quit on non-chat screen
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if cmd != nil {
+		msg := cmd()
+		if _, isQuit := msg.(tea.QuitMsg); isQuit {
+			t.Error("'q' on screenError must NOT quit — esc is the back key, ctrl+c quits")
+		}
+	}
+}
+
+// TestQuitKey_Q_OnScreenSessions_DoesNotQuit verifies that 'q' does NOT quit
+// when on screenSessions (sessions browser).
+func TestQuitKey_Q_OnScreenSessions_DoesNotQuit(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenSessions
+	m.focus = focusMain
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if cmd != nil {
+		msg := cmd()
+		if _, isQuit := msg.(tea.QuitMsg); isQuit {
+			t.Error("'q' on screenSessions must NOT quit")
+		}
+	}
+}
+
+// TestQuitKey_Q_OnScreenTools_DoesNotQuit verifies that 'q' does NOT quit
+// when on screenTools (tools browser).
+func TestQuitKey_Q_OnScreenTools_DoesNotQuit(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenTools
+	m.focus = focusMain
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if cmd != nil {
+		msg := cmd()
+		if _, isQuit := msg.(tea.QuitMsg); isQuit {
+			t.Error("'q' on screenTools must NOT quit")
+		}
+	}
+}
+
+// TestQuitKey_Q_OnScreenChat_FocusMain_Quits verifies the existing behavior:
+// 'q' on screenChat with focusMain (navigation, no overlay) still quits.
+// This guards against Fix 2 accidentally removing the valid quit path.
+func TestQuitKey_Q_OnScreenChat_FocusMain_Quits(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.focus = focusMain
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if cmd == nil {
+		t.Fatal("'q' on screenChat with focusMain must return tea.Quit cmd")
+	}
+	msg := cmd()
+	if _, isQuit := msg.(tea.QuitMsg); !isQuit {
+		t.Errorf("'q' on screenChat with focusMain: cmd returned %T, want tea.QuitMsg", msg)
+	}
+}
+
+// TestQuitKey_CtrlC_OnScreenError_AlwaysQuits verifies ctrl+c quits even on
+// the error screen (the non-chat-nav screen where bare 'q' is now gated).
+func TestQuitKey_CtrlC_OnScreenError_AlwaysQuits(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenError
+	m.focus = focusMain
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if cmd == nil {
+		t.Fatal("ctrl+c on screenError must return tea.Quit cmd")
+	}
+	msg := cmd()
+	if _, isQuit := msg.(tea.QuitMsg); !isQuit {
+		t.Errorf("ctrl+c on screenError: cmd returned %T, want tea.QuitMsg", msg)
+	}
+}

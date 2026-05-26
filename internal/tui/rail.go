@@ -26,11 +26,13 @@ type rail struct {
 func newRail(s tuiStyles) rail {
 	return rail{
 		panels: map[panelID]Panel{
-			panelTodolist:     newTodolistPanel(s),
-			panelContextMeter: newContextMeterPanel(s),
-			panelTelemetry:    newTelemetryPanel(s),
-			panelModelPicker:  newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
-			panelToolDetail:   newToolDetailPanel(s),          // PR4a: tools screen
+			panelTodolist:      newTodolistPanel(s),
+			panelContextMeter:  newContextMeterPanel(s),
+			panelTelemetry:     newTelemetryPanel(s),
+			panelModelPicker:   newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
+			panelToolDetail:    newToolDetailPanel(s),          // PR4a: tools screen
+			panelActivePolicy:  newActivePolicyPanel(s, ""),    // PR5: error screen; RunTUI replaces with ag.CurrentMode()
+			panelRecentDenials: newRecentDenialsPanel(s),       // PR5: error screen; populated by denial events
 		},
 	}
 }

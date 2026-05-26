@@ -113,6 +113,8 @@ func renderCenter(m Model, width, height int) string {
 		return renderSessions(m, width, height)
 	case screenTools:
 		return renderTools(m, width, height) // PR4a
+	case screenError:
+		return renderError(m, width, height) // PR5
 	default:
 		// Stub: later PRs replace these with screen-specific render functions.
 		return renderCenterPlaceholder(m.screen, width, height)
