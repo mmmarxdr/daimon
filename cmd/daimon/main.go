@@ -217,6 +217,22 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Bare `daimon` in an interactive terminal launches the power-user TUI by
+	// default — it is the primary interactive experience. It is gated to truly
+	// bare invocations: both stdin and stdout must be terminals, neither --web
+	// (agent + web dashboard) nor --daemon (headless background daemon) is set,
+	// and there are no leftover positional args (an unknown subcommand like a
+	// `daimon tuii` typo). Known subcommands (`daimon web`, `daimon tui`, ...)
+	// and behavior flags (--setup, --dashboard, --version, ...) already exit
+	// above; anything else falls through to the channel-agent path below.
+	if defaultToTUI(isTTY(os.Stdin) && isTTY(os.Stdout), *webFlag, *daemon, flag.NArg() > 0) {
+		if err := runTUICommand(nil, *cfgPath); err != nil {
+			fmt.Fprintf(os.Stderr, "tui: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	// Normal / wizard path.
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -734,6 +750,23 @@ func asProviderConfig(fb *config.FallbackConfig) config.ProviderConfig {
 // Handles both POSIX terminals and Cygwin/MinTTY on Windows.
 func isTTY(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
+}
+
+// defaultToTUI reports whether a bare `daimon` invocation should launch the
+// power-user TUI instead of the channel-agent path. The TUI is the default
+// interactive experience; it is skipped when:
+//   - the session is not interactive — the caller passes
+//     isTTY(os.Stdin) && isTTY(os.Stdout); the TUI both reads keys from stdin
+//     and renders to stdout, so a redirected/piped stream on either side
+//     (e.g. `daimon > file`, `echo x | daimon`) must NOT default to the TUI;
+//   - --web is set (agent + web dashboard mode);
+//   - --daemon is set (headless background daemon, no interactive channel);
+//   - hasPositionalArgs is true — leftover positional args after flag parsing
+//     (flag.NArg() > 0), e.g. an unknown subcommand like a `daimon tuii` typo,
+//     mean the invocation is not bare, so it falls through to the channel-agent
+//     path rather than silently launching the TUI. Parsed flags do not count.
+func defaultToTUI(interactive, webFlag, daemonFlag, hasPositionalArgs bool) bool {
+	return interactive && !webFlag && !daemonFlag && !hasPositionalArgs
 }
 
 func configureLogging(cfg config.LoggingConfig) {
