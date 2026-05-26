@@ -269,6 +269,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Focus-toggle is preserved via esc (esc already toggles focusEditor↔focusMain).
 		m.prevScreen = screenChat
 		m.screen = screenSessions
+		m.footer = footerHints{screen: screenSessions}
 		return m, loadSessionsCmd(m.store)
 
 	case "esc":

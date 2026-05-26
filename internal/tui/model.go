@@ -121,9 +121,10 @@ type Model struct {
 	activeConvID string // tracked for TodoListForConv + sessions (PR2)
 
 	// sessions screen (PR3b)
-	sessions   []store.Conversation // loaded from store on navigation
-	sessionIdx int                  // selected row index in the sessions list
-	prevScreen screenState          // screen to return to on esc
+	sessions    []store.Conversation // loaded from store on navigation
+	sessionIdx  int                  // selected row index in the sessions list
+	prevScreen  screenState          // screen to return to on esc
+	sessionsErr error                // set when loadSessionsCmd fails; cleared on success
 }
 
 // Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
@@ -285,6 +286,7 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// tab navigates to the sessions screen (matches footer hint).
 			m.prevScreen = screenWelcome
 			m.screen = screenSessions
+			m.footer = footerHints{screen: screenSessions}
 			return m, loadSessionsCmd(m.store)
 		}
 	}

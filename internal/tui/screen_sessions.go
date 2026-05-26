@@ -48,6 +48,14 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case sessionsLoadedMsg:
+		if msg.err != nil {
+			// Store the error so renderSessions can display it instead of "no sessions yet".
+			// sessions is left as-is (empty or previously loaded) and sessionIdx is not changed.
+			m.sessionsErr = msg.err
+			return m, nil
+		}
+		// Successful load: clear any prior error and update the list.
+		m.sessionsErr = nil
 		m.sessions = msg.convs
 		// Clamp sessionIdx to [0, len-1]; 0 when empty.
 		if len(m.sessions) == 0 {
@@ -74,14 +82,24 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter":
 			if len(m.sessions) > 0 {
-				m.activeConvID = m.sessions[m.sessionIdx].ID
+				sel := m.sessions[m.sessionIdx]
+				m.activeConvID = sel.ID
+				// V1: resume rebinds activeConvID and clears the thread; prior history is not replayed.
+				m.thread = thread{}
+				shortID := sel.ID
+				if len([]rune(shortID)) > 8 {
+					shortID = string([]rune(shortID)[:8])
+				}
+				m.thread.append(&MsgDaimon{text: "↩ resumed session " + shortID, styles: m.styles})
 				m.screen = screenChat
 				m.focus = focusEditor
+				m.footer = footerHints{screen: screenChat}
 			}
 			return m, nil
 
 		case "esc":
 			m.screen = m.prevScreen
+			m.footer = footerHints{screen: m.prevScreen}
 			return m, nil
 		}
 	}
@@ -94,6 +112,11 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 // The selected row is highlighted. A small preview of the selected conv is shown
 // below the list. All width math uses ansi.StringWidth/ansi.Truncate (no len/byte).
 func renderSessions(m Model, width, height int) string {
+	// Surface a load error instead of the misleading "no sessions yet" placeholder.
+	if m.sessionsErr != nil {
+		errMsg := "error loading sessions: " + m.sessionsErr.Error()
+		return centerText(m.styles.errStyle.Render(errMsg), width)
+	}
 	if len(m.sessions) == 0 {
 		msg := m.styles.dimLabel.Render("no sessions yet — start chatting to create one")
 		return centerText(msg, width)
@@ -111,10 +134,11 @@ func renderSessions(m Model, width, height int) string {
 	rows = append(rows, "")
 
 	for i, conv := range m.sessions {
-		// Short ID: first 8 chars.
+		// Short ID: first 8 runes (IDs are ASCII today, but guard rune-safely per
+		// the project's ANSI-width rule — no byte-slicing of display strings).
 		shortID := conv.ID
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
+		if len([]rune(shortID)) > 8 {
+			shortID = string([]rune(shortID)[:8])
 		}
 
 		// Relative time from UpdatedAt.
@@ -151,11 +175,10 @@ func renderSessions(m Model, width, height int) string {
 		rows = append(rows, m.styles.dimLabel.Render(ansi.Truncate(msgCount, inner, "…")))
 
 		if sel.CompactedSummary != "" {
-			summary := sel.CompactedSummary
+			// ANSI-safe truncation: ansi.Truncate measures visible columns and never
+			// splits a multi-byte rune or ANSI escape sequence (unlike byte-slicing).
 			const maxSummaryLen = 120
-			if len(summary) > maxSummaryLen {
-				summary = summary[:maxSummaryLen] + "…"
-			}
+			summary := ansi.Truncate(sel.CompactedSummary, maxSummaryLen, "…")
 			rows = append(rows, m.styles.dimLabel.Render(ansi.Truncate("summary: "+summary, inner, "…")))
 		}
 	}
