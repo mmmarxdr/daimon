@@ -10,6 +10,11 @@ package tui
 //   5. submit(text, convID) carries ConversationID
 //   6. modelPickerPanel.Render
 //   7. renderSessions
+//   8. footer.screen is updated on every screen transition (Fix 1)
+//   9. modelPickerPanel with real provider/model values (Fix 2)
+//  10. ANSI-safe truncation for CompactedSummary (Fix 3)
+//  11. sessionsLoadedMsg.err surfaced in renderSessions (Fix 4)
+//  12. enter-resume clears thread and sets marker item (Fix 5)
 
 import (
 	"context"
@@ -18,6 +23,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"daimon/internal/channel"
 	"daimon/internal/store"
@@ -448,5 +454,264 @@ func TestRenderSessions_WithBranch_ShowsBranchMarker(t *testing.T) {
 	// Branch marker must appear for convs with a parent.
 	if !strings.Contains(got, "⎇") {
 		t.Errorf("renderSessions: expected branch marker '⎇' for forked conv:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. footer.screen is updated on every screen transition (Fix 1)
+// ---------------------------------------------------------------------------
+
+// TestFooter_TabFromChat_SetsSessionsScreen verifies that tab in chat updates
+// m.footer.screen to screenSessions (Fix 1: stale footer on tab→sessions).
+func TestFooter_TabFromChat_SetsSessionsScreen(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.focus = focusEditor
+	m.footer = footerHints{screen: screenChat}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	rm := next.(Model)
+
+	if rm.footer.screen != screenSessions {
+		t.Errorf("footer.screen after tab from chat = %v, want screenSessions", rm.footer.screen)
+	}
+}
+
+// TestFooter_TabFromWelcome_SetsSessionsScreen verifies that tab in welcome
+// updates m.footer.screen to screenSessions (Fix 1).
+func TestFooter_TabFromWelcome_SetsSessionsScreen(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenWelcome
+	m.footer = footerHints{screen: screenWelcome}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	rm := next.(Model)
+
+	if rm.footer.screen != screenSessions {
+		t.Errorf("footer.screen after tab from welcome = %v, want screenSessions", rm.footer.screen)
+	}
+}
+
+// TestFooter_EnterResume_SetsChatScreen verifies that enter-resume in sessions
+// updates m.footer.screen to screenChat (Fix 1).
+func TestFooter_EnterResume_SetsChatScreen(t *testing.T) {
+	convs := fakeConvs()
+	m := sessionModel(convs)
+	m.footer = footerHints{screen: screenSessions}
+
+	next, _ := m.updateSessions(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := next.(Model)
+
+	if rm.footer.screen != screenChat {
+		t.Errorf("footer.screen after enter-resume = %v, want screenChat", rm.footer.screen)
+	}
+}
+
+// TestFooter_EscFromSessions_SetsPrevScreen verifies that esc in sessions
+// updates m.footer.screen to prevScreen (Fix 1).
+func TestFooter_EscFromSessions_SetsPrevScreen(t *testing.T) {
+	m := sessionModel(fakeConvs())
+	m.prevScreen = screenChat
+	m.footer = footerHints{screen: screenSessions}
+
+	next, _ := m.updateSessions(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := next.(Model)
+
+	if rm.footer.screen != screenChat {
+		t.Errorf("footer.screen after esc (prevScreen=chat) = %v, want screenChat", rm.footer.screen)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 9. modelPickerPanel with real provider/model values (Fix 2)
+// ---------------------------------------------------------------------------
+
+// TestModelPickerPanel_WithRealValues_RendersProviderAndModel verifies that
+// constructing the panel with a real provider and model renders both strings.
+// This mirrors how RunTUI injects cfg.Models.Default values (Fix 2).
+func TestModelPickerPanel_WithRealValues_RendersProviderAndModel(t *testing.T) {
+	p := newModelPickerPanel(newTuiStyles(), "anthropic", "claude-sonnet-4-6")
+	got := p.Render(40, 20)
+
+	if got == "" {
+		t.Fatal("modelPickerPanel.Render with real values: got empty, want content")
+	}
+	if !strings.Contains(got, "anthropic") {
+		t.Errorf("modelPickerPanel.Render: expected 'anthropic' in output:\n%s", got)
+	}
+	if !strings.Contains(got, "claude-sonnet-4-6") {
+		t.Errorf("modelPickerPanel.Render: expected 'claude-sonnet-4-6' in output:\n%s", got)
+	}
+}
+
+// TestModelPickerPanel_Empty_ReturnsEmpty verifies the zero-value sentinel
+// (provider="" or model="") renders "" (Fix 2: empty → "").
+func TestModelPickerPanel_Empty_ReturnsEmpty(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		model    string
+	}{
+		{"both empty", "", ""},
+		{"only provider", "anthropic", ""},
+		{"only model", "", "claude-sonnet-4-6"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := newModelPickerPanel(newTuiStyles(), tt.provider, tt.model)
+			got := p.Render(40, 20)
+			if got != "" {
+				t.Errorf("modelPickerPanel.Render(%q,%q): got %q, want empty", tt.provider, tt.model, got)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 10. ANSI-safe truncation for CompactedSummary (Fix 3)
+// ---------------------------------------------------------------------------
+
+// TestRenderSessions_CompactedSummary_TruncatesAnsiSafe verifies that a
+// CompactedSummary longer than maxSummaryLen is truncated at a rune boundary,
+// not a byte boundary. With ansi.Truncate the result is a clean visible-width
+// limit; with a byte-slice the summary variable contains invalid UTF-8 before
+// it reaches the outer ansi.Truncate, which is the bug (Fix 3).
+//
+// We verify by checking that the rendered summary line does not exceed the
+// width limit and contains the "summary" label — both would fail if
+// the truncation panicked or produced garbage.
+func TestRenderSessions_CompactedSummary_TruncatesAnsiSafe(t *testing.T) {
+	// Wide emoji (2-column each) ensure visible-width truncation is correct.
+	// 60 emoji × 2 cols = 120 visible cols — well above maxSummaryLen (120 chars).
+	craftedSummary := strings.Repeat("🎯", 60) // 60 × 4 bytes = 240 bytes total
+
+	m := newTestModel()
+	m.screen = screenSessions
+	m.sessions = []store.Conversation{
+		{
+			ID:               "conv-cjk12345",
+			ChannelID:        "tui",
+			Status:           "active",
+			UpdatedAt:        time.Now(),
+			CompactedSummary: craftedSummary,
+			Metadata:         map[string]string{"title": "CJK test"},
+		},
+	}
+	m.sessionIdx = 0
+
+	// Must not panic; summary label must appear.
+	got := renderSessions(m, 80, 20)
+	if !strings.Contains(got, "summary") {
+		t.Errorf("renderSessions: expected 'summary' label in output:\n%s", got)
+	}
+	// None of the rendered lines should exceed 80 visible columns.
+	for _, line := range strings.Split(got, "\n") {
+		w := ansi.StringWidth(line)
+		if w > 80 {
+			t.Errorf("renderSessions: line exceeds width 80 (got %d): %q", w, line)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 11. sessionsLoadedMsg.err surfaced in renderSessions (Fix 4)
+// ---------------------------------------------------------------------------
+
+// TestUpdateSessions_SessionsLoadedMsg_WithError_SetsSessionsErr verifies that
+// when sessionsLoadedMsg carries an error, renderSessions shows an error message
+// rather than "no sessions yet" (Fix 4).
+func TestUpdateSessions_SessionsLoadedMsg_WithError_SetsSessionsErr(t *testing.T) {
+	m := sessionModel(nil)
+
+	next, _ := m.updateSessions(sessionsLoadedMsg{err: context.DeadlineExceeded})
+	rm := next.(Model)
+
+	// renderSessions must show error indication, not "no sessions yet".
+	got := renderSessions(rm, 80, 20)
+	if strings.Contains(got, "no sessions yet") {
+		t.Errorf("renderSessions after load error: got 'no sessions yet', want error message:\n%s", got)
+	}
+	// The error string or some error indication must appear.
+	if !strings.Contains(got, "error") && !strings.Contains(got, "failed") && !strings.Contains(got, "DeadlineExceeded") {
+		t.Errorf("renderSessions after load error: expected error indication in output:\n%s", got)
+	}
+}
+
+// TestUpdateSessions_SessionsLoadedMsg_Success_ClearsSessionsErr verifies that
+// a successful reload clears a previously set error (Fix 4).
+func TestUpdateSessions_SessionsLoadedMsg_Success_ClearsSessionsErr(t *testing.T) {
+	m := sessionModel(nil)
+	// First: set an error.
+	next, _ := m.updateSessions(sessionsLoadedMsg{err: context.DeadlineExceeded})
+	rm := next.(Model)
+
+	// Second: successful reload clears the error.
+	next2, _ := rm.updateSessions(sessionsLoadedMsg{convs: fakeConvs()})
+	rm2 := next2.(Model)
+
+	got := renderSessions(rm2, 80, 20)
+	if strings.Contains(got, "error") || strings.Contains(got, "failed") {
+		t.Errorf("renderSessions after successful reload: still shows error:\n%s", got)
+	}
+	// Successful load shows sessions.
+	if !strings.Contains(got, "conv-abc") {
+		t.Errorf("renderSessions after successful reload: expected session in output:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 12. enter-resume clears thread and sets marker item (Fix 5)
+// ---------------------------------------------------------------------------
+
+// TestUpdateSessions_EnterResume_ClearsThreadAndSetsMarker verifies that
+// after enter-resume: m.thread does NOT contain pre-resume items, DOES contain
+// the resumed marker, m.activeConvID == sel.ID, m.screen == screenChat (Fix 5).
+func TestUpdateSessions_EnterResume_ClearsThreadAndSetsMarker(t *testing.T) {
+	convs := fakeConvs()
+	m := sessionModel(convs)
+	m.sessionIdx = 1
+
+	// Put pre-resume items in the thread so we can verify they're gone.
+	m.thread.append(&MsgUser{text: "old message", styles: m.styles})
+	m.thread.append(&MsgDaimon{text: "old reply", styles: m.styles})
+
+	next, _ := m.updateSessions(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := next.(Model)
+
+	// Screen and ID must be set correctly.
+	if rm.screen != screenChat {
+		t.Errorf("screen after enter-resume = %v, want screenChat", rm.screen)
+	}
+	if rm.activeConvID != convs[1].ID {
+		t.Errorf("activeConvID = %q, want %q", rm.activeConvID, convs[1].ID)
+	}
+
+	// Old items must be gone.
+	for _, item := range rm.thread.items {
+		if mu, ok := item.(*MsgUser); ok && mu.text == "old message" {
+			t.Error("thread still contains pre-resume MsgUser 'old message'")
+		}
+		if md, ok := item.(*MsgDaimon); ok && md.text == "old reply" {
+			t.Error("thread still contains pre-resume MsgDaimon 'old reply'")
+		}
+	}
+
+	// Must contain at least one item (the resumed marker).
+	if len(rm.thread.items) == 0 {
+		t.Error("thread is empty after enter-resume; expected at least a resumed marker item")
+	}
+
+	// The marker item must be a MsgDaimon containing the resume indicator.
+	found := false
+	for _, item := range rm.thread.items {
+		if md, ok := item.(*MsgDaimon); ok {
+			if strings.Contains(md.text, "resumed") || strings.Contains(md.text, "↩") {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Errorf("thread after enter-resume: no resume marker item found; items = %v", rm.thread.items)
 	}
 }

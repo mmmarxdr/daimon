@@ -29,7 +29,7 @@ func newRail(s tuiStyles) rail {
 			panelTodolist:     newTodolistPanel(s),
 			panelContextMeter: newContextMeterPanel(s),
 			panelTelemetry:    newTelemetryPanel(s),
-			panelModelPicker:  newModelPickerPanel(s, "", ""), // provider/model injected by RunTUI
+			panelModelPicker:  newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
 		},
 	}
 }
