@@ -233,7 +233,8 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			mu := &MsgUser{text: text, styles: m.styles}
 			m.thread.append(mu)
 			// Submit via channel (IO-free: runs in Cmd goroutine).
-			submitCmd := m.ch.submit(text)
+			// Pass activeConvID so a resumed session binds to the right conversation (AD-7).
+			submitCmd := m.ch.submit(text, m.activeConvID)
 			return m, submitCmd
 		}
 
@@ -264,15 +265,12 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Focus is on editor — fall through to input bar below.
 
 	case "tab":
-		// Switch focus between editor and main (thread navigation).
-		if m.focus == focusEditor {
-			m.focus = focusMain
-			m.input.Blur()
-		} else {
-			m.focus = focusEditor
-			m.input.Focus()
-		}
-		return m, nil
+		// tab navigates to the sessions screen (per footer hint: "tab: sessions").
+		// Focus-toggle is preserved via esc (esc already toggles focusEditor↔focusMain).
+		m.prevScreen = screenChat
+		m.screen = screenSessions
+		m.footer = footerHints{screen: screenSessions}
+		return m, loadSessionsCmd(m.store)
 
 	case "esc":
 		// FIX 3: Esc toggles focusEditor ↔ focusMain so the reasoning toggle

@@ -119,6 +119,12 @@ type Model struct {
 	channelID    string // "tui"
 	senderID     string // "local_user"
 	activeConvID string // tracked for TodoListForConv + sessions (PR2)
+
+	// sessions screen (PR3b)
+	sessions    []store.Conversation // loaded from store on navigation
+	sessionIdx  int                  // selected row index in the sessions list
+	prevScreen  screenState          // screen to return to on esc
+	sessionsErr error                // set when loadSessionsCmd fails; cleared on success
 }
 
 // Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
@@ -250,7 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenTools:
 		return m, nil // stub: PR4
 	case screenSessions:
-		return m, nil // stub: PR3
+		return m.updateSessions(msg) // PR3b
 	case screenError:
 		return m, nil // stub: PR5
 	}
@@ -266,13 +272,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // cleared via the existing promptSentMsg path (submit → updateChat → input.Reset)
 // since screen is screenChat by the time promptSentMsg arrives.
 func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "enter" {
-		if text := m.input.Value(); text != "" {
-			m.thread.append(&MsgUser{text: text, styles: m.styles})
-			m.screen = screenChat
-			m.focus = focusEditor
-			m.footer = footerHints{screen: screenChat}
-			return m, m.ch.submit(text)
+	if key, ok := msg.(tea.KeyMsg); ok {
+		switch key.String() {
+		case "enter":
+			if text := m.input.Value(); text != "" {
+				m.thread.append(&MsgUser{text: text, styles: m.styles})
+				m.screen = screenChat
+				m.focus = focusEditor
+				m.footer = footerHints{screen: screenChat}
+				return m, m.ch.submit(text, m.activeConvID)
+			}
+		case "tab":
+			// tab navigates to the sessions screen (matches footer hint).
+			m.prevScreen = screenWelcome
+			m.screen = screenSessions
+			m.footer = footerHints{screen: screenSessions}
+			return m, loadSessionsCmd(m.store)
 		}
 	}
 	var cmd tea.Cmd

@@ -59,6 +59,13 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 	evCh := wireEvents(context.Background(), bus, ch)
 
 	s := newTuiStyles()
+	// Inject cfg.Models.Default into the model-picker panel so it renders the
+	// active provider/model instead of the empty-string sentinel ("").
+	// newTestModel uses newRail(s) with empty strings — renders "" in tests, which is fine.
+	r := newRail(s)
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		panels[panelModelPicker] = newModelPickerPanel(s, cfg.Models.Default.Provider, cfg.Models.Default.Model)
+	})
 	m := Model{
 		styles:    s,
 		ag:        ag,
@@ -74,7 +81,7 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		topBar:    topBar{brand: "⫶"},
 		footer:    footerHints{screen: screenWelcome},
 		input:     newInputBar(),
-		rail:      newRail(s),
+		rail:      r,
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

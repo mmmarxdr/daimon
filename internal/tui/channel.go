@@ -110,6 +110,9 @@ func (c *TUIChannel) Stop() error {
 // submit returns a tea.Cmd that enqueues an IncomingMessage on the agent inbox
 // and returns promptSentMsg to the TUI event loop.
 //
+// convID, when non-empty, binds the message to an existing conversation (AD-7 resume).
+// Passing "" creates a new conversation (preserves prior behaviour for all call sites).
+//
 // This MUST be called only as a tea.Cmd (i.e., returned from Update), never
 // invoked inline. The blocking send to c.inbox runs on the Cmd's goroutine,
 // keeping Update IO-free.
@@ -118,18 +121,19 @@ func (c *TUIChannel) Stop() error {
 //   - nil-inbox: if Start has not been called, returns promptSentMsg immediately.
 //   - shutdown: if c.ctx is cancelled (e.g. the agent is shutting down), the
 //     send is dropped via a select so the goroutine does not leak.
-func (c *TUIChannel) submit(text string) tea.Cmd {
+func (c *TUIChannel) submit(text, convID string) tea.Cmd {
 	return func() tea.Msg {
 		if c.inbox == nil {
 			// Agent not started yet; drop the message rather than block forever.
 			return promptSentMsg{}
 		}
 		im := channel.IncomingMessage{
-			ID:        uuid.New().String(),
-			ChannelID: "tui",
-			SenderID:  "local_user",
-			Content:   content.TextBlock(text),
-			Timestamp: time.Now(),
+			ID:             uuid.New().String(),
+			ChannelID:      "tui",
+			SenderID:       "local_user",
+			Content:        content.TextBlock(text),
+			Timestamp:      time.Now(),
+			ConversationID: convID,
 		}
 		// Select on ctx.Done() so a shutdown does not leak this goroutine.
 		if c.ctx != nil {

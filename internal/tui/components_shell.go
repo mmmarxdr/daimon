@@ -129,7 +129,7 @@ func (fh *footerHints) hintsForScreen() string {
 	case screenTools:
 		return "↑↓: navigate  enter: detail  q: back  ctrl+c: quit"
 	case screenSessions:
-		return "↑↓: navigate  enter: resume  n: new  q: back  ctrl+c: quit"
+		return "↑↓: navigate  enter: resume  esc: back  ctrl+c: quit"
 	case screenError:
 		return "enter: continue  q: back to chat  ctrl+c: quit"
 	default:

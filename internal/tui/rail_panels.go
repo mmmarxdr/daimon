@@ -149,6 +149,43 @@ func (p *todolistPanel) Render(width, _ int) string {
 }
 
 // ---------------------------------------------------------------------------
+// modelPickerPanel — current active model display (read-only V1)
+// ---------------------------------------------------------------------------
+
+// modelPickerPanel displays the active model and provider in the right rail
+// for the sessions screen. V1 is read-only: switching models requires /model
+// via the command palette (deferred). Renders "" when provider or model is empty.
+type modelPickerPanel struct {
+	styles   tuiStyles
+	provider string // e.g. "anthropic"
+	model    string // e.g. "claude-opus-4-5"
+}
+
+// newModelPickerPanel constructs a modelPickerPanel.
+// provider and model are passed from cfg.Models.Default at construction time.
+func newModelPickerPanel(s tuiStyles, provider, model string) *modelPickerPanel {
+	return &modelPickerPanel{styles: s, provider: provider, model: model}
+}
+
+// Render implements Panel. Returns "" when provider or model is not configured.
+func (p *modelPickerPanel) Render(width, _ int) string {
+	if p.provider == "" || p.model == "" {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 4 {
+		inner = 4
+	}
+
+	header := p.styles.accent.Render("◈ model")
+	provLine := ansi.Truncate(p.styles.dimLabel.Render(p.provider), inner, "…")
+	modelLine := ansi.Truncate(p.styles.dimLabel.Render(p.model), inner, "…")
+
+	return strings.Join([]string{header, provLine, modelLine}, "\n")
+}
+
+// ---------------------------------------------------------------------------
 // contextMeterPanel — context window usage
 // ---------------------------------------------------------------------------
 

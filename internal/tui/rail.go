@@ -19,15 +19,17 @@ type rail struct {
 }
 
 // newRail constructs a rail with the concrete panels wired for every screen
-// that PR2b delivers (chat: todolist, context-meter, telemetry).
-// Panels for later screens (diff, error, tools, sessions, welcome) are added
-// by their respective PRs; until then, rail.Render simply skips missing IDs.
+// that PR2b–PR3b delivers (chat: todolist, context-meter, telemetry;
+// sessions: model-picker). panelResumeList for sessions is deferred to PR4
+// (welcome screen owns it) — it is absent here; rail.Render skips missing IDs,
+// satisfying the Panel contract (missing → zero-height).
 func newRail(s tuiStyles) rail {
 	return rail{
 		panels: map[panelID]Panel{
 			panelTodolist:     newTodolistPanel(s),
 			panelContextMeter: newContextMeterPanel(s),
 			panelTelemetry:    newTelemetryPanel(s),
+			panelModelPicker:  newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
 		},
 	}
 }
