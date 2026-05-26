@@ -31,7 +31,7 @@ func TestTUIChannel_Submit_EnqueuesIncomingMessage(t *testing.T) {
 	ch := newTUIChannel()
 	_ = ch.Start(context.Background(), inbox)
 
-	cmd := ch.submit("hello world")
+	cmd := ch.submit("hello world", "")
 	msg := cmd() // execute the cmd synchronously
 
 	// The cmd should return a promptSentMsg.
@@ -111,7 +111,7 @@ func TestTUIChannel_Submit_NilInbox_DoesNotBlock(t *testing.T) {
 
 	done := make(chan tea.Msg, 1)
 	go func() {
-		cmd := ch.submit("will this block?")
+		cmd := ch.submit("will this block?", "")
 		done <- cmd()
 	}()
 
@@ -160,7 +160,7 @@ func TestTUIChannel_WiringIntegrity(t *testing.T) {
 	}
 
 	// --- Assert A: submit() via m.ch reaches the mux-wired inbox ---
-	cmd := m.ch.submit("ping")
+	cmd := m.ch.submit("ping", "")
 	msg := cmd() // run synchronously
 	if _, ok := msg.(promptSentMsg); !ok {
 		t.Fatalf("submit() returned %T, want promptSentMsg", msg)
@@ -217,7 +217,7 @@ func TestTUIChannel_Submit_ShutdownGuard(t *testing.T) {
 
 	done := make(chan tea.Msg, 1)
 	go func() {
-		cmd := tuiCh.submit("after cancel")
+		cmd := tuiCh.submit("after cancel", "")
 		done <- cmd()
 	}()
 
