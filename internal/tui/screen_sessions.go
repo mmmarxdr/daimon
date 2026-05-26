@@ -44,26 +44,12 @@ func loadSessionsCmd(st store.Store) tea.Cmd {
 
 // updateSessions is the screenSessions Update handler. It is called from
 // Model.Update when m.screen == screenSessions.
+//
+// NOTE: sessionsLoadedMsg is handled GLOBALLY in model.go Update (PR4b) so
+// both the welcome resume-list panel and this screen are updated regardless
+// of which screen is active. This handler no longer needs to process it.
 func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-
-	case sessionsLoadedMsg:
-		if msg.err != nil {
-			// Store the error so renderSessions can display it instead of "no sessions yet".
-			// sessions is left as-is (empty or previously loaded) and sessionIdx is not changed.
-			m.sessionsErr = msg.err
-			return m, nil
-		}
-		// Successful load: clear any prior error and update the list.
-		m.sessionsErr = nil
-		m.sessions = msg.convs
-		// Clamp sessionIdx to [0, len-1]; 0 when empty.
-		if len(m.sessions) == 0 {
-			m.sessionIdx = 0
-		} else if m.sessionIdx >= len(m.sessions) {
-			m.sessionIdx = len(m.sessions) - 1
-		}
-		return m, nil
 
 	case tea.KeyMsg:
 		switch msg.String() {

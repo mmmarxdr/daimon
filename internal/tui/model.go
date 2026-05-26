@@ -143,10 +143,12 @@ type Model struct {
 // live model already holds it; Init on the copy does not re-create it.
 func (m Model) Init() tea.Cmd {
 	if m.events != nil {
-		// Bus bridge already wired (RunTUI path); just start the pump.
-		return pumpEvents(m.events)
+		// Bus bridge already wired (RunTUI path); start pump AND pre-load sessions
+		// so the welcome resume-list panel is populated immediately on launch.
+		return tea.Batch(pumpEvents(m.events), loadSessionsCmd(m.store))
 	}
-	return nil
+	// Test / no-bus path: still kick off session load (nil store is guarded inside).
+	return loadSessionsCmd(m.store)
 }
 
 // Update implements tea.Model. It dispatches messages globally first, then
@@ -189,6 +191,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				panels[panelTodolist] = &cp
 			}
 		})
+		return m, nil
+
+	// PR4b: sessionsLoadedMsg is handled GLOBALLY so both the welcome screen
+	// (resume-list panel) and the sessions screen (renderSessions reads m.sessions)
+	// receive the update regardless of which screen is active.
+	case sessionsLoadedMsg:
+		if msg.err != nil {
+			m.sessionsErr = msg.err
+		} else {
+			m.sessionsErr = nil
+			m.sessions = msg.convs
+			// Clamp sessionIdx to [0, len-1].
+			if len(m.sessions) == 0 {
+				m.sessionIdx = 0
+			} else if m.sessionIdx >= len(m.sessions) {
+				m.sessionIdx = len(m.sessions) - 1
+			}
+			// Update the resume-list panel (welcome + sessions rail) via copy-on-write.
+			m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+				if p, ok := panels[panelResumeList].(*resumeListPanel); ok {
+					cp := *p
+					cp.setSessions(m.sessions)
+					panels[panelResumeList] = &cp
+				}
+			})
+		}
 		return m, nil
 
 	// C3: Handle bus/reply messages globally so the pump is re-armed regardless
