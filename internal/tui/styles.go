@@ -46,6 +46,11 @@ type tuiStyles struct {
 
 	// input bar
 	inputBarStyle lipgloss.Style
+
+	// overlay compositing
+	dim lipgloss.Style // Faint overlay for the base behind modal dialogs
+	// paletteBox is the centralized border style for the command palette.
+	paletteBox lipgloss.Style
 }
 
 // newTuiStyles constructs the canonical tuiStyles value.
@@ -75,5 +80,11 @@ func newTuiStyles() tuiStyles {
 		selected:    lipgloss.NewStyle().Bold(true).Foreground(accent),
 
 		inputBarStyle: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).BorderForeground(accent),
+
+		dim: lipgloss.NewStyle().Faint(true),
+		paletteBox: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 1).
+			BorderForeground(accent),
 	}
 }

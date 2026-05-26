@@ -17,6 +17,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"daimon/internal/agent"
 	"daimon/internal/notify"
 )
 
@@ -285,6 +286,21 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Focus()
 		}
 		return m, nil
+
+	case "/":
+		// PR3a: "/" at the start of an empty input opens the command palette.
+		// If the input is non-empty the slash falls through to the input bar
+		// so users can type "/" inside a message normally.
+		if m.input.Value() == "" {
+			// Guard against nil agent (tests / welcome screen).
+			var cmds []agent.CommandInfo
+			if m.ag != nil {
+				cmds = m.ag.Commands()
+			}
+			m.overlays.Push(newCommandPalette(cmds, m.styles))
+			return m, nil
+		}
+		// Non-empty input: fall through to input bar.
 	}
 
 	// Forward remaining keys to the focused region.
