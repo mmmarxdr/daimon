@@ -89,9 +89,10 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		// populated when sessionsLoadedMsg arrives via the global handler.
 		panels[panelResumeList] = newResumeListPanel(s)
 		// PR5: active-policy panel (error screen) — built once with the agent's
-		// current mode at startup. The mode is static for the session lifetime
-		// in V1 (switching modes via /mode replaces the whole session). If modes
-		// become hot-swappable, this panel should be rebuilt on mode-change events.
+		// current mode at startup. The /mode command performs a live SetMode swap
+		// on the existing session; on a later denial the panel is refreshed via
+		// setMode(ag.CurrentMode()) at denial time so it always shows the mode
+		// that actually triggered the denial, not a stale startup snapshot.
 		panels[panelActivePolicy] = newActivePolicyPanel(s, ag.CurrentMode())
 	})
 	m := Model{

@@ -428,6 +428,14 @@ func newActivePolicyPanel(s tuiStyles, mode string) *activePolicyPanel {
 	return &activePolicyPanel{styles: s, mode: mode}
 }
 
+// setMode updates the active mode name. Called at denial time (via copyRailWith)
+// so the panel always reflects the mode that actually triggered the denial,
+// not the (potentially stale) mode captured at startup. Mirrors the pattern
+// of toolDetailPanel.setTool / todolistPanel.setList.
+func (p *activePolicyPanel) setMode(mode string) {
+	p.mode = mode
+}
+
 // Render implements Panel. Returns "" when mode is empty.
 func (p *activePolicyPanel) Render(width, _ int) string {
 	if p.mode == "" {

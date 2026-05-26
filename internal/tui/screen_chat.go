@@ -82,6 +82,62 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// applyDenial captures a policy/mode denial from ev into the model's error
+// state and returns the updated model (copy-on-write throughout).
+//
+// It is shared by TWO callers:
+//   - handleBusEvent (screen==screenChat): first denial transition. The caller
+//     additionally sets prevScreen, screen=screenError, and footer.
+//   - the global busEventMsg handler (screen==screenError): re-entrant denial.
+//     The caller stays on screenError; no screen transition is needed.
+//
+// What applyDenial does:
+//  1. Sets errorToolName + errorReason to the new denial.
+//  2. Appends to recentDenials (copy-on-write slice, capped at 10).
+//  3. Updates recentDenialsPanel in the rail (copy-on-write).
+//  4. Updates activePolicyPanel mode to ag.CurrentMode() (guards nil ag).
+func (m Model) applyDenial(ev notify.Event) Model {
+	m.errorToolName = ev.ToolName
+	m.errorReason = ev.Error
+
+	// Copy-on-write: build a fresh slice so we never alias the prior model's
+	// backing array. Cap at 10 most-recent denials.
+	const maxDenials = 10
+	prev := m.recentDenials
+	next := make([]denialEntry, len(prev)+1)
+	copy(next, prev)
+	next[len(prev)] = denialEntry{tool: ev.ToolName, reason: ev.Error}
+	if len(next) > maxDenials {
+		next = next[len(next)-maxDenials:]
+	}
+	m.recentDenials = next
+
+	// Update the recent-denials rail panel (copy-on-write).
+	m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+		if p, ok := panels[panelRecentDenials].(*recentDenialsPanel); ok {
+			cp := *p
+			cp.setDenials(m.recentDenials)
+			panels[panelRecentDenials] = &cp
+		}
+	})
+
+	// Fix 1: Update the active-policy panel's mode at denial time so it always
+	// reflects the mode that triggered this denial, not the startup snapshot.
+	// Guard m.ag == nil for tests and non-RunTUI paths.
+	if m.ag != nil {
+		currentMode := m.ag.CurrentMode()
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if p, ok := panels[panelActivePolicy].(*activePolicyPanel); ok {
+				cp := *p
+				cp.setMode(currentMode)
+				panels[panelActivePolicy] = &cp
+			}
+		})
+	}
+
+	return m
+}
+
 // handleBusEvent processes a single notify.Event and returns the updated model
 // plus any commands (spinner tick, pump re-issue).
 func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
@@ -151,28 +207,8 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		// hijack the screen. Runtime errors (tool crash, not-found) stay in the
 		// chat thread (existing ToolLine toolError behavior above is preserved).
 		if ev.Meta["denied"] == "true" {
-			m.errorToolName = ev.ToolName
-			m.errorReason = ev.Error
-			// Copy-on-write: build a fresh slice so we never alias the prior model's
-			// backing array. Cap at 10 most-recent denials.
-			const maxDenials = 10
-			prev := m.recentDenials
-			next := make([]denialEntry, len(prev)+1)
-			copy(next, prev)
-			next[len(prev)] = denialEntry{tool: ev.ToolName, reason: ev.Error}
-			if len(next) > maxDenials {
-				next = next[len(next)-maxDenials:]
-			}
-			m.recentDenials = next
-			// Update the recent-denials rail panel (copy-on-write).
-			m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
-				if p, ok := panels[panelRecentDenials].(*recentDenialsPanel); ok {
-					cp := *p
-					cp.setDenials(m.recentDenials)
-					panels[panelRecentDenials] = &cp
-				}
-			})
-			// Switch to the error screen.
+			m = m.applyDenial(ev)
+			// First transition: come from screenChat → set prevScreen + screen + footer.
 			m.prevScreen = screenChat
 			m.screen = screenError
 			m.footer = footerHints{screen: screenError}
