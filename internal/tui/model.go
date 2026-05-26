@@ -129,6 +129,17 @@ type Model struct {
 	// tools screen (PR4a)
 	tools   []toolEntry // loaded from agent.ToolRegistry on navigation
 	toolIdx int         // selected row index in the tools list
+
+	// error screen (PR5): permission-denied state
+	errorToolName string        // tool name that triggered the denial
+	errorReason   string        // human-readable denial reason from EventToolEnd.Error
+	recentDenials []denialEntry // copy-on-write; capped to 10; never nil after first denial
+}
+
+// denialEntry is a single policy/mode denial captured from EventToolEnd.
+type denialEntry struct {
+	tool   string // tool name that was denied
+	reason string // human-readable reason
 }
 
 // Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
@@ -290,7 +301,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenSessions:
 		return m.updateSessions(msg) // PR3b
 	case screenError:
-		return m, nil // stub: PR5
+		return m.updateError(msg) // PR5
 	}
 	return m, nil
 }

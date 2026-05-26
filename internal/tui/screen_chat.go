@@ -147,6 +147,36 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 				panels[panelTelemetry] = &cp
 			}
 		})
+		// PR5: Policy/mode DENIAL detection — only Meta["denied"]=="true" events
+		// hijack the screen. Runtime errors (tool crash, not-found) stay in the
+		// chat thread (existing ToolLine toolError behavior above is preserved).
+		if ev.Meta["denied"] == "true" {
+			m.errorToolName = ev.ToolName
+			m.errorReason = ev.Error
+			// Copy-on-write: build a fresh slice so we never alias the prior model's
+			// backing array. Cap at 10 most-recent denials.
+			const maxDenials = 10
+			prev := m.recentDenials
+			next := make([]denialEntry, len(prev)+1)
+			copy(next, prev)
+			next[len(prev)] = denialEntry{tool: ev.ToolName, reason: ev.Error}
+			if len(next) > maxDenials {
+				next = next[len(next)-maxDenials:]
+			}
+			m.recentDenials = next
+			// Update the recent-denials rail panel (copy-on-write).
+			m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+				if p, ok := panels[panelRecentDenials].(*recentDenialsPanel); ok {
+					cp := *p
+					cp.setDenials(m.recentDenials)
+					panels[panelRecentDenials] = &cp
+				}
+			})
+			// Switch to the error screen.
+			m.prevScreen = screenChat
+			m.screen = screenError
+			m.footer = footerHints{screen: screenError}
+		}
 
 	case notify.EventTurnCompleted:
 		// C4 FIX: agentReplyMsg (TUIChannel.Send path) is the SINGLE source of
