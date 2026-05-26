@@ -1,11 +1,15 @@
 package tui
 
-// rail_panels.go — concrete right-rail panel structs for PR2b.
+// rail_panels.go — concrete right-rail panel structs for PR2b and PR4b.
 //
-// Implements three Panel types for the chat screen (tasks 2.14–2.17):
+// Implements panel types for multiple screens:
 //   - telemetryPanel   — tokens / cost / tool-call counts from EventTokensUsage / EventToolStart/End
 //   - todolistPanel    — LLM-generated todo list from Agent.TodoListForConv
 //   - contextMeterPanel — context usage from EventTokensUsage (token count used as proxy)
+//   - modelPickerPanel  — active model display (read-only V1, sessions screen)
+//   - toolDetailPanel   — selected tool detail (PR4a: tools screen)
+//   - environmentPanel  — cwd / model / go / os / store (PR4b: welcome screen)
+//   - resumeListPanel   — recent sessions (PR4b: welcome + sessions screens)
 //
 // Panel contract (AD-6 / REQ-7):
 //   - Render(width, height int) string
@@ -23,6 +27,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"daimon/internal/notify"
+	"daimon/internal/store"
 	"daimon/internal/tool"
 )
 
@@ -321,5 +326,154 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 		ansi.Truncate(barLine, inner, "…"),
 		ansi.Truncate(p.styles.dimLabel.Render(pctLine), inner, "…"),
 	}
+	return strings.Join(rows, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// environmentPanel — cwd / model / go / os / store (PR4b: welcome screen)
+// ---------------------------------------------------------------------------
+
+// environmentPanel renders a compact key/value block for the welcome screen
+// showing the runtime environment: cwd, active model, Go version, OS/arch,
+// and store type. Renders "" only when ALL fields are empty.
+type environmentPanel struct {
+	styles    tuiStyles
+	cwd       string // working directory
+	model     string // "provider/model" string
+	goVersion string // runtime.Version()
+	osArch    string // "GOOS/GOARCH"
+	storeType string // cfg.Store.Type
+}
+
+// newEnvironmentPanel constructs an environmentPanel with the given values.
+func newEnvironmentPanel(s tuiStyles, cwd, model, goVersion, osArch, storeType string) *environmentPanel {
+	return &environmentPanel{
+		styles:    s,
+		cwd:       cwd,
+		model:     model,
+		goVersion: goVersion,
+		osArch:    osArch,
+		storeType: storeType,
+	}
+}
+
+// Render implements Panel. Returns "" when all fields are empty.
+func (p *environmentPanel) Render(width, _ int) string {
+	if p.cwd == "" && p.model == "" && p.goVersion == "" && p.osArch == "" && p.storeType == "" {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 8 {
+		inner = 8
+	}
+
+	header := p.styles.accent.Render("◈ environment")
+
+	// Each key/value row: key rendered with dimLabel, value truncated to fit.
+	// cwd can be very long — truncate with ansi.Truncate before rendering.
+	const keyWidth = 7 // "store  " — widest key
+
+	renderRow := func(key, value string) string {
+		if value == "" {
+			return ""
+		}
+		// Reserve space for the key prefix so value doesn't overflow inner.
+		valWidth := inner - keyWidth - 2
+		if valWidth < 4 {
+			valWidth = 4
+		}
+		truncatedVal := ansi.Truncate(value, valWidth, "…")
+		label := fmt.Sprintf("%-*s", keyWidth, key)
+		line := p.styles.dimLabel.Render(label) + " " + truncatedVal
+		return ansi.Truncate(line, inner, "…")
+	}
+
+	rows := []string{ansi.Truncate(header, inner, "…")}
+	if row := renderRow("cwd", p.cwd); row != "" {
+		rows = append(rows, row)
+	}
+	if row := renderRow("model", p.model); row != "" {
+		rows = append(rows, row)
+	}
+	if row := renderRow("go", p.goVersion); row != "" {
+		rows = append(rows, row)
+	}
+	if row := renderRow("os", p.osArch); row != "" {
+		rows = append(rows, row)
+	}
+	if row := renderRow("store", p.storeType); row != "" {
+		rows = append(rows, row)
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// resumeListPanel — recent sessions (PR4b: welcome + sessions screens)
+// ---------------------------------------------------------------------------
+
+// resumeListPanel renders the most-recent N (capped at 5) conversations in the
+// right rail. Provides a quick resume-list on both the welcome and sessions
+// screens. Data is set via setSessions after sessionsLoadedMsg arrives globally.
+// Renders "" when no sessions are loaded.
+type resumeListPanel struct {
+	styles   tuiStyles
+	sessions []store.Conversation
+}
+
+// newResumeListPanel constructs an empty resumeListPanel.
+func newResumeListPanel(s tuiStyles) *resumeListPanel {
+	return &resumeListPanel{styles: s}
+}
+
+// setSessions updates the panel's session list. Called from copyRailWith in
+// the global sessionsLoadedMsg handler (model.go Update).
+func (p *resumeListPanel) setSessions(convs []store.Conversation) {
+	p.sessions = convs
+}
+
+// Render implements Panel. Returns "" when there are no sessions.
+func (p *resumeListPanel) Render(width, _ int) string {
+	if len(p.sessions) == 0 {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 8 {
+		inner = 8
+	}
+
+	header := p.styles.accent.Render("◈ recent sessions")
+	rows := []string{ansi.Truncate(header, inner, "…")}
+
+	// Cap at 5 most-recent sessions.
+	const maxSessions = 5
+	convs := p.sessions
+	if len(convs) > maxSessions {
+		convs = convs[:maxSessions]
+	}
+
+	for _, conv := range convs {
+		// Short ID: first 8 runes — rune-safe, no byte-slicing.
+		shortID := conv.ID
+		if len([]rune(shortID)) > 8 {
+			shortID = string([]rune(shortID)[:8])
+		}
+
+		// Relative updated-ago time.
+		ago := relativeTime(conv.UpdatedAt)
+
+		// Title from metadata or fallback.
+		title := conv.Metadata["title"]
+		if title == "" {
+			title = "(untitled)"
+		}
+
+		// Format: "shortID  ago  title" — mirrors renderSessions row format.
+		line := fmt.Sprintf("%-8s  %-8s  %s", shortID, ago, title)
+		rows = append(rows, p.styles.dimLabel.Render(ansi.Truncate(line, inner, "…")))
+	}
+
 	return strings.Join(rows, "\n")
 }

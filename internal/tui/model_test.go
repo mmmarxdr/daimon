@@ -73,14 +73,18 @@ func TestModel_InitialScreen_IsWelcome(t *testing.T) {
 	}
 }
 
-// TestModel_Init_ReturnsNilCmd verifies that Init() returns nil (no startup Cmd).
+// TestModel_Init_ReturnsLoadSessionsCmd verifies that Init() returns a non-nil
+// cmd (loadSessionsCmd) even when events is nil (PR4b: sessions pre-loaded at
+// startup so the welcome resume-list panel is populated immediately).
+// The nil-store path is guarded inside loadSessionsCmd (returns empty sessionsLoadedMsg).
 // It also confirms that calling Init() does not accidentally change the screen
 // on the caller's copy (value receiver — mutation is on the copy, not the caller).
-func TestModel_Init_ReturnsNilCmd(t *testing.T) {
+func TestModel_Init_ReturnsLoadSessionsCmd(t *testing.T) {
 	m := newTestModel()
+	// events == nil, store == nil — loadSessionsCmd guards nil store.
 	cmd := m.Init()
-	if cmd != nil {
-		t.Errorf("Init() returned non-nil Cmd, want nil")
+	if cmd == nil {
+		t.Error("Init() returned nil Cmd, want non-nil loadSessionsCmd (PR4b)")
 	}
 	// The caller's copy must be unchanged after Init.
 	if m.screen != screenWelcome {

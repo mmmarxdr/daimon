@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
@@ -63,8 +64,30 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 	// active provider/model instead of the empty-string sentinel ("").
 	// newTestModel uses newRail(s) with empty strings — renders "" in tests, which is fine.
 	r := newRail(s)
+
+	// Build real values for the environment panel.
+	cwd, _ := os.Getwd()
+	// Only render "provider/model" when BOTH are set, so a half-configured
+	// config never shows a dangling "anthropic/" or "/model".
+	modelStr := ""
+	if cfg.Models.Default.Provider != "" && cfg.Models.Default.Model != "" {
+		modelStr = cfg.Models.Default.Provider + "/" + cfg.Models.Default.Model
+	}
+
 	r = copyRailWith(r, func(panels map[panelID]Panel) {
 		panels[panelModelPicker] = newModelPickerPanel(s, cfg.Models.Default.Provider, cfg.Models.Default.Model)
+		// PR4b: environment panel (welcome screen).
+		panels[panelEnvironment] = newEnvironmentPanel(
+			s,
+			cwd,
+			modelStr,
+			runtime.Version(),
+			runtime.GOOS+"/"+runtime.GOARCH,
+			cfg.Store.Type,
+		)
+		// PR4b: resume-list panel (welcome + sessions screens) — starts empty;
+		// populated when sessionsLoadedMsg arrives via the global handler.
+		panels[panelResumeList] = newResumeListPanel(s)
 	})
 	m := Model{
 		styles:    s,

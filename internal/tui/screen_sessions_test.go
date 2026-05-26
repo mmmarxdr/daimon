@@ -192,14 +192,19 @@ func TestUpdateSessions_Esc_GoesToPrevScreen(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. sessionsLoadedMsg — populates sessions and clamps sessionIdx
+// 2. sessionsLoadedMsg — handled GLOBALLY (PR4b); tests use m.Update
+//
+// sessionsLoadedMsg is now handled in the global switch (model.go Update) so
+// both the welcome resume-list panel and the sessions screen receive the update.
+// Tests that previously called updateSessions directly now use m.Update.
 // ---------------------------------------------------------------------------
 
 func TestUpdateSessions_SessionsLoadedMsg_Populates(t *testing.T) {
 	m := sessionModel(nil)
 	convs := fakeConvs()
 
-	next, _ := m.updateSessions(sessionsLoadedMsg{convs: convs})
+	// Use m.Update — sessionsLoadedMsg is now a global message (PR4b).
+	next, _ := m.Update(sessionsLoadedMsg{convs: convs})
 	rm := next.(Model)
 
 	if len(rm.sessions) != len(convs) {
@@ -214,8 +219,8 @@ func TestUpdateSessions_SessionsLoadedMsg_ClampsIdx(t *testing.T) {
 	m := sessionModel(fakeConvs())
 	m.sessionIdx = 99 // out of range
 
-	// Load only 1 conv.
-	next, _ := m.updateSessions(sessionsLoadedMsg{convs: fakeConvs()[:1]})
+	// Load only 1 conv via global Update.
+	next, _ := m.Update(sessionsLoadedMsg{convs: fakeConvs()[:1]})
 	rm := next.(Model)
 
 	if rm.sessionIdx != 0 {
@@ -227,7 +232,7 @@ func TestUpdateSessions_SessionsLoadedMsg_Empty(t *testing.T) {
 	m := sessionModel(fakeConvs())
 	m.sessionIdx = 1
 
-	next, _ := m.updateSessions(sessionsLoadedMsg{convs: nil})
+	next, _ := m.Update(sessionsLoadedMsg{convs: nil})
 	rm := next.(Model)
 
 	if len(rm.sessions) != 0 {
@@ -241,8 +246,8 @@ func TestUpdateSessions_SessionsLoadedMsg_Empty(t *testing.T) {
 func TestUpdateSessions_SessionsLoadedMsg_WithError_DoesNotPanic(t *testing.T) {
 	m := sessionModel(nil)
 
-	// Should not panic, sessions stays empty.
-	next, _ := m.updateSessions(sessionsLoadedMsg{err: context.DeadlineExceeded})
+	// Should not panic, sessions stays empty (error path sets sessionsErr only).
+	next, _ := m.Update(sessionsLoadedMsg{err: context.DeadlineExceeded})
 	rm := next.(Model)
 
 	if len(rm.sessions) != 0 {
@@ -619,11 +624,11 @@ func TestRenderSessions_CompactedSummary_TruncatesAnsiSafe(t *testing.T) {
 
 // TestUpdateSessions_SessionsLoadedMsg_WithError_SetsSessionsErr verifies that
 // when sessionsLoadedMsg carries an error, renderSessions shows an error message
-// rather than "no sessions yet" (Fix 4).
+// rather than "no sessions yet" (Fix 4). Uses global m.Update (PR4b).
 func TestUpdateSessions_SessionsLoadedMsg_WithError_SetsSessionsErr(t *testing.T) {
 	m := sessionModel(nil)
 
-	next, _ := m.updateSessions(sessionsLoadedMsg{err: context.DeadlineExceeded})
+	next, _ := m.Update(sessionsLoadedMsg{err: context.DeadlineExceeded})
 	rm := next.(Model)
 
 	// renderSessions must show error indication, not "no sessions yet".
@@ -638,15 +643,15 @@ func TestUpdateSessions_SessionsLoadedMsg_WithError_SetsSessionsErr(t *testing.T
 }
 
 // TestUpdateSessions_SessionsLoadedMsg_Success_ClearsSessionsErr verifies that
-// a successful reload clears a previously set error (Fix 4).
+// a successful reload clears a previously set error (Fix 4). Uses global m.Update (PR4b).
 func TestUpdateSessions_SessionsLoadedMsg_Success_ClearsSessionsErr(t *testing.T) {
 	m := sessionModel(nil)
 	// First: set an error.
-	next, _ := m.updateSessions(sessionsLoadedMsg{err: context.DeadlineExceeded})
+	next, _ := m.Update(sessionsLoadedMsg{err: context.DeadlineExceeded})
 	rm := next.(Model)
 
 	// Second: successful reload clears the error.
-	next2, _ := rm.updateSessions(sessionsLoadedMsg{convs: fakeConvs()})
+	next2, _ := rm.Update(sessionsLoadedMsg{convs: fakeConvs()})
 	rm2 := next2.(Model)
 
 	got := renderSessions(rm2, 80, 20)
