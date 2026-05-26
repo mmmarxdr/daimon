@@ -119,15 +119,15 @@ func (fh *footerHints) Render(width int, s tuiStyles) string {
 func (fh *footerHints) hintsForScreen() string {
 	switch fh.screen {
 	case screenWelcome:
-		return "enter: send  ctrl+c: quit  tab: sessions  t: tools"
+		return "enter: send  ctrl+c: quit  tab: sessions  ^t: tools"
 	case screenChat:
-		return "enter: send  /: commands  tab: sessions  t: tools  ctrl+c: quit"
+		return "enter: send  /: commands  tab: sessions  ^t: tools  ctrl+c: quit"
 	case screenDiff:
 		return "↑↓: scroll hunks  q: back to chat  ctrl+c: quit"
 	case screenSlash:
 		return "↑↓: navigate  enter: run  esc: close  ctrl+c: quit"
 	case screenTools:
-		return "↑↓: navigate  enter: detail  q: back  ctrl+c: quit"
+		return "↑↓: navigate  esc: back  ctrl+c: quit"
 	case screenSessions:
 		return "↑↓: navigate  enter: resume  esc: back  ctrl+c: quit"
 	case screenError:

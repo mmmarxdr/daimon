@@ -11,4 +11,4 @@
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ › > message daimon…                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-enter: send  ctrl+c: quit  tab: sessions  t: tools
+enter: send  ctrl+c: quit  tab: sessions  ^t: tools

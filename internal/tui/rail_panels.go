@@ -186,6 +186,76 @@ func (p *modelPickerPanel) Render(width, _ int) string {
 }
 
 // ---------------------------------------------------------------------------
+// toolDetailPanel — selected tool detail (PR4a: tools screen)
+// ---------------------------------------------------------------------------
+
+// toolDetailPanel renders the detail view for the currently selected tool in
+// the tools screen right rail. Renders "" when no tool has been set yet.
+type toolDetailPanel struct {
+	styles  tuiStyles
+	name    string
+	desc    string
+	meta    tool.ToolMeta
+	hasData bool
+}
+
+// newToolDetailPanel constructs a toolDetailPanel with empty state.
+func newToolDetailPanel(s tuiStyles) *toolDetailPanel {
+	return &toolDetailPanel{styles: s}
+}
+
+// setTool replaces the current tool detail. Called from updateToolDetailPanel
+// via copyRailWith on navigation or toolsLoadedMsg.
+func (p *toolDetailPanel) setTool(name, desc string, meta tool.ToolMeta) {
+	p.name = name
+	p.desc = desc
+	p.meta = meta
+	p.hasData = true
+}
+
+// Render implements Panel. Returns "" when no tool has been set.
+func (p *toolDetailPanel) Render(width, _ int) string {
+	if !p.hasData {
+		return ""
+	}
+
+	inner := width - 1
+	if inner < 4 {
+		inner = 4
+	}
+
+	header := p.styles.accent.Render("◈ tool detail")
+	nameLine := ansi.Truncate(p.styles.label.Render(p.name), inner, "…")
+
+	// Description: truncate to a single visible line.
+	const maxDesc = 80
+	descText := p.desc
+	if ansi.StringWidth(descText) > maxDesc {
+		descText = ansi.Truncate(descText, maxDesc, "…")
+	}
+	descLine := ansi.Truncate(p.styles.dimLabel.Render(descText), inner, "…")
+
+	riskLine := ansi.Truncate(p.styles.dimLabel.Render("risk:       "+string(p.meta.Risk)), inner, "…")
+	catLine := ansi.Truncate(p.styles.dimLabel.Render("category:   "+string(p.meta.Category)), inner, "…")
+	permLine := ansi.Truncate(p.styles.dimLabel.Render("permission: "+string(p.meta.Permission)), inner, "…")
+	srcLine := ansi.Truncate(p.styles.dimLabel.Render("source:     "+string(p.meta.Source)), inner, "…")
+
+	rows := []string{
+		ansi.Truncate(header, inner, "…"),
+		nameLine,
+		"",
+		descLine,
+		"",
+		riskLine,
+		catLine,
+		permLine,
+		srcLine,
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// ---------------------------------------------------------------------------
 // contextMeterPanel — context window usage
 // ---------------------------------------------------------------------------
 

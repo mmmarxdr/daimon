@@ -125,6 +125,10 @@ type Model struct {
 	sessionIdx  int                  // selected row index in the sessions list
 	prevScreen  screenState          // screen to return to on esc
 	sessionsErr error                // set when loadSessionsCmd fails; cleared on success
+
+	// tools screen (PR4a)
+	tools   []toolEntry // loaded from agent.ToolRegistry on navigation
+	toolIdx int         // selected row index in the tools list
 }
 
 // Init implements tea.Model. When a notify.Bus is wired (i.e. we are running
@@ -254,7 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenSlash:
 		return m, nil // stub: PR3 (canonical path: overlay push while screen==chat)
 	case screenTools:
-		return m, nil // stub: PR4
+		return m.updateTools(msg) // PR4a
 	case screenSessions:
 		return m.updateSessions(msg) // PR3b
 	case screenError:
@@ -288,6 +292,14 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenSessions
 			m.footer = footerHints{screen: screenSessions}
 			return m, loadSessionsCmd(m.store)
+
+		case "ctrl+t":
+			// ctrl+t navigates to the tools screen.
+			// Bare 't' is NOT used to avoid breaking typed messages starting with 't'.
+			m.prevScreen = screenWelcome
+			m.screen = screenTools
+			m.footer = footerHints{screen: screenTools}
+			return m, loadToolsCmd(m.ag)
 		}
 	}
 	var cmd tea.Cmd
