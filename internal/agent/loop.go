@@ -712,6 +712,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			toolStart := time.Now()
 			skippedByPreApply := false
 
+			// toolDenied tracks whether this tool call was blocked by a mode
+			// policy gate (name-gate AD-6 or arg-gate AD-5). Set only for
+			// policy/mode denials — NOT for runtime errors (not-found, crash,
+			// tool's own IsError). Used below to enrich EventToolEnd with
+			// Meta["denied"]="true" so consumers (TUI, dashboard) can
+			// distinguish a policy block from a runtime failure.
+			toolDenied := false
+
 			// AD-6: mode allowlist execution gate — checked BEFORE the tools-map
 			// lookup so a disallowed tool returns the mode error, not "not found".
 			// modeSnap is the per-turn snapshot captured at processMessage start
@@ -725,6 +733,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					IsError: true,
 					Content: fmt.Sprintf("tool '%s' not allowed in mode '%s'", tc.Name, modeSnap.Name),
 				}
+				toolDenied = true
 			} else if argOK, argReason := isArgAllowed(tc.Name, tc.Input, modeSnap); !argOK {
 				// AD-5 (change #6): mode arg-level execution gate. Runs AFTER the
 				// name-gate passes, BEFORE the tools-map lookup. Reuses AD-6
@@ -732,6 +741,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				// flows verbatim through audit, bus emit, and conv.Messages append,
 				// identical to the name-level block path above.
 				result = tool.ToolResult{IsError: true, Content: argReason}
+				toolDenied = true
 			} else {
 				a.toolsMu.RLock()
 				t, ok := a.tools[tc.Name]
@@ -879,6 +889,18 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					"conv_id": conv.ID,
 					"status":  busStatus,
 				})
+				// Enrich denied calls: consumers (TUI, dashboard) use this flag to
+				// distinguish a policy/mode block from a runtime error.
+				if toolDenied {
+					toolEndMeta["denied"] = "true"
+				}
+				// Carry the error reason/message when the tool failed. The Error
+				// field is omitempty so it is absent from JSON on the success path —
+				// byte-compatible for existing consumers that ignore it.
+				var toolEndError string
+				if result.IsError {
+					toolEndError = result.Content
+				}
 				a.bus.Emit(notify.Event{
 					Type:       notify.EventToolEnd,
 					Origin:     notify.OriginAgent,
@@ -888,6 +910,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					ToolName:   tc.Name,
 					DurationMs: toolDuration.Milliseconds(),
 					IsError:    result.IsError,
+					Error:      toolEndError,
 					Meta:       toolEndMeta,
 				})
 			}
