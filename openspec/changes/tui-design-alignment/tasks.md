@@ -74,19 +74,19 @@ Chain strategy: stacked-to-main
 
 ### PR 1b — RED: write failing tests first
 
-- [ ] 1b.1 In `internal/tui/styles_test.go`, add a test: render a bordered box using `tuiStyles.panelBorder`; assert output contains `┌` (U+250C), does NOT contain `╭` (U+256D). **[Req: Square borders — Panel border is normal scenario]**
-- [ ] 1b.2 In `internal/tui/styles_test.go`, add a test: assert `tuiStyles.panelBorder` border foreground = `#22242c`. **[Req: Square borders — Border foreground is line token scenario]**
-- [ ] 1b.3 In `internal/tui/styles_test.go` (or a new `panel_header_test.go`), add a test: `s.panelHeader("telemetry")` returns a string that, when ANSI-stripped, equals `"── TELEMETRY"`. Assert it does NOT contain `◈`. **[Req: Panel headers in ── TITLE form]**
-- [ ] 1b.4 Run `make test` — confirm new cases fail (RED).
+- [x] 1b.1 In `internal/tui/styles_test.go`, add a test: render a bordered box using `tuiStyles.panelBorder`; assert output contains `┌` (U+250C), does NOT contain `╭` (U+256D). **[Req: Square borders — Panel border is normal scenario]**
+- [x] 1b.2 In `internal/tui/styles_test.go`, add a test: assert `tuiStyles.panelBorder` border foreground = `#22242c`. **[Req: Square borders — Border foreground is line token scenario]**
+- [x] 1b.3 In `internal/tui/styles_test.go` (or a new `panel_header_test.go`), add a test: `s.panelHeader("telemetry")` returns a string that, when ANSI-stripped, equals `"── TELEMETRY"`. Assert it does NOT contain `◈`. **[Req: Panel headers in ── TITLE form]**
+- [x] 1b.4 Run `make test` — confirm new cases fail (RED).
 
 ### PR 1b — GREEN: implement
 
-- [ ] 1b.5 In `internal/tui/styles.go`: add `panelBorder` style slot using `lipgloss.NormalBorder()` (square corners), `BorderForeground(colorLine)`, `Padding(0,1)`. Repoint existing `border` slot (currently `RoundedBorder`) to `NormalBorder` + `colorLine`. Repoint `inputBarStyle` border to `NormalBorder` + `colorLineStrong`. Repoint `paletteBox` border to `NormalBorder` + `colorLine`. **[Req: Square borders]**
-- [ ] 1b.6 In `internal/tui/styles.go`: add `func (s tuiStyles) panelHeader(title string) string` that returns `"── " + strings.ToUpper(title)` rendered with `s.dimLabel`. **[Req: Panel headers in ── TITLE form]**
-- [ ] 1b.7 In `internal/tui/rail_panels.go`: replace all 9 `◈ <lowercase>` header sites with `s.panelHeader("...")` calls. **[Req: Panel headers]**
-- [ ] 1b.8 In `internal/tui/screen_tools.go`: replace 1 `◈ <lowercase>` header site with `s.panelHeader("...")`. **[Req: Panel headers]**
-- [ ] 1b.9 In `internal/tui/screen_sessions.go`: replace 1 `◈ <lowercase>` header site with `s.panelHeader("...")`. **[Req: Panel headers]**
-- [ ] 1b.10 Run `make test` — all tests pass (GREEN). Check that no rounded border `╭` or `◈` glyph appears in any panel render test output.
+- [x] 1b.5 In `internal/tui/styles.go`: add `panelBorder` style slot using `lipgloss.NormalBorder()` (square corners), `BorderForeground(colorLine)`, `Padding(0,1)`. Repoint existing `border` slot (currently `RoundedBorder`) to `NormalBorder` + `colorLine`. Repoint `inputBarStyle` border to `NormalBorder` + `colorLineStrong`. Repoint `paletteBox` border to `NormalBorder` + **`colorAccent`** (command palette border = accent per design, tui-components.jsx:441: "1px solid ${TUI.accent}"; do NOT use colorLine — this regressed twice). **[Req: Square borders]**
+- [x] 1b.6 In `internal/tui/styles.go`: add `func (s tuiStyles) panelHeader(title string) string` that returns `"── " + strings.ToUpper(title)` rendered with `s.dimLabel`. **[Req: Panel headers in ── TITLE form]**
+- [x] 1b.7 In `internal/tui/rail_panels.go`: replace all 9 `◈ <lowercase>` header sites with `s.panelHeader("...")` calls. **[Req: Panel headers]**
+- [x] 1b.8 In `internal/tui/screen_tools.go`: replace 1 `◈ <lowercase>` header site with `s.panelHeader("...")`. **[Req: Panel headers]**
+- [x] 1b.9 In `internal/tui/screen_sessions.go`: replace 1 `◈ <lowercase>` header site with `s.panelHeader("...")`. **[Req: Panel headers]**
+- [x] 1b.10 Run `make test` — all tests pass (GREEN). Check that no rounded border `╭` or `◈` glyph appears in any panel render test output.
 
 ---
 

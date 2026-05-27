@@ -81,7 +81,7 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		inner = 4
 	}
 
-	header := p.styles.accent.Render("◈ telemetry")
+	header := p.styles.panelHeader("telemetry")
 	tokLine := fmt.Sprintf("tokens  %d", p.totalIn)
 	costLine := fmt.Sprintf("cost    $%.4f", p.totalCost)
 	toolLine := fmt.Sprintf("tools   %d", p.toolCalls)
@@ -135,7 +135,7 @@ func (p *todolistPanel) Render(width, _ int) string {
 	}
 
 	rows := []string{
-		ansi.Truncate(p.styles.accent.Render("◈ todo"), inner, "…"),
+		ansi.Truncate(p.styles.panelHeader("todo"), inner, "…"),
 	}
 	for _, item := range p.list.Items {
 		var marker string
@@ -183,7 +183,7 @@ func (p *modelPickerPanel) Render(width, _ int) string {
 		inner = 4
 	}
 
-	header := p.styles.accent.Render("◈ model")
+	header := p.styles.panelHeader("model")
 	provLine := ansi.Truncate(p.styles.dimLabel.Render(p.provider), inner, "…")
 	modelLine := ansi.Truncate(p.styles.dimLabel.Render(p.model), inner, "…")
 
@@ -229,7 +229,7 @@ func (p *toolDetailPanel) Render(width, _ int) string {
 		inner = 4
 	}
 
-	header := p.styles.accent.Render("◈ tool detail")
+	header := p.styles.panelHeader("tool detail")
 	nameLine := ansi.Truncate(p.styles.label.Render(p.name), inner, "…")
 
 	// Description: truncate to a single visible line.
@@ -317,7 +317,7 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 	filled := int(pct * float64(barWidth))
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
 
-	header := p.styles.accent.Render("◈ context")
+	header := p.styles.panelHeader("context")
 	barLine := "[" + bar + "]"
 	pctLine := fmt.Sprintf("%.1f%% of 200k", pct*100)
 
@@ -368,7 +368,7 @@ func (p *environmentPanel) Render(width, _ int) string {
 		inner = 8
 	}
 
-	header := p.styles.accent.Render("◈ environment")
+	header := p.styles.panelHeader("environment")
 
 	// Each key/value row: key rendered with dimLabel, value truncated to fit.
 	// cwd can be very long — truncate with ansi.Truncate before rendering.
@@ -447,7 +447,7 @@ func (p *activePolicyPanel) Render(width, _ int) string {
 		inner = 4
 	}
 
-	header := p.styles.accent.Render("◈ active policy")
+	header := p.styles.panelHeader("active policy")
 	modeLine := ansi.Truncate(p.styles.amber.Render("mode: "+p.mode), inner, "…")
 	noteLine := ansi.Truncate(p.styles.dimLabel.Render("tool gates enforced"), inner, "…")
 
@@ -488,7 +488,7 @@ func (p *recentDenialsPanel) Render(width, _ int) string {
 		inner = 4
 	}
 
-	header := p.styles.accent.Render("◈ recent denials")
+	header := p.styles.panelHeader("recent denials")
 	rows := []string{ansi.Truncate(header, inner, "…")}
 
 	for _, d := range p.denials {
@@ -547,7 +547,7 @@ func (p *resumeListPanel) Render(width, _ int) string {
 		inner = 8
 	}
 
-	header := p.styles.accent.Render("◈ recent sessions")
+	header := p.styles.panelHeader("recent sessions")
 	rows := []string{ansi.Truncate(header, inner, "…")}
 
 	// Cap at 5 most-recent sessions.
