@@ -144,12 +144,15 @@ func (h *SubagentHandle) Subscribe(ctx context.Context) (<-chan notify.Event, er
 			if ev.Meta["subagent_id"] != id {
 				return
 			}
+			// Hold subMu for the entire fan-out loop so that no cleanup
+			// goroutine can close a channel while we are (or are about to
+			// be) sending on it. This is deadlock-free ONLY BECAUSE all
+			// sends are non-blocking (select/default) and no other blocking
+			// call occurs while subMu is held. WARNING: adding any blocking
+			// call here would allow the callWithTimeout abandoned-goroutine
+			// path in bus.go to stall cleanup goroutines waiting on subMu.
 			rec.subMu.Lock()
-			subs := make([]chan notify.Event, len(rec.subs))
-			copy(subs, rec.subs)
-			rec.subMu.Unlock()
-
-			for _, sub := range subs {
+			for _, sub := range rec.subs {
 				select {
 				case sub <- ev: // non-blocking
 				default:
@@ -157,6 +160,7 @@ func (h *SubagentHandle) Subscribe(ctx context.Context) (<-chan notify.Event, er
 						"subagent_id", id, "type", ev.Type)
 				}
 			}
+			rec.subMu.Unlock()
 		})
 		h.rec.subInstalled = true
 	}
@@ -167,7 +171,8 @@ func (h *SubagentHandle) Subscribe(ctx context.Context) (<-chan notify.Event, er
 	h.rec.subs = append(h.rec.subs, ch)
 
 	// Cleanup goroutine: close ch when ctx cancels OR rec.done closes.
-	// Removes ch from rec.subs before closing to stop future fan-out sends.
+	// Removes ch from rec.subs AND closes it while still holding subMu so
+	// the fan-out handler can never send on a channel that has been closed.
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -180,8 +185,8 @@ func (h *SubagentHandle) Subscribe(ctx context.Context) (<-chan notify.Event, er
 				break
 			}
 		}
+		close(ch) // inside the lock: mutual exclusion with the fan-out loop
 		h.rec.subMu.Unlock()
-		close(ch)
 	}()
 
 	return ch, nil

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,6 +259,90 @@ func TestSubagentHandle_Subscribe_NilBus_ClosedChannelImmediately(t *testing.T) 
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Error("channel not closed within 200ms for nil bus")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// REQ-11.5 — concurrency: send vs close race (reproduce panic: send on closed channel)
+// ---------------------------------------------------------------------------
+
+// TestSubagentHandle_Subscribe_SendCloseRace stresses the fan-out handler
+// against concurrent subscriber cancellations to reproduce the "send on
+// closed channel" panic described in the bug report.
+//
+// Root cause: the handler copies rec.subs under the lock, releases the lock,
+// then sends on the copy. Concurrently, the cleanup goroutine removes ch from
+// rec.subs (under lock) and then closes ch OUTSIDE the lock. The handler can
+// race past the removal, holding a stale copy still containing ch, and send on
+// the already-closed channel → panic.
+//
+// Run with: go test ./internal/agent/ -race -run TestSubagentHandle_Subscribe_SendCloseRace -count=20
+func TestSubagentHandle_Subscribe_SendCloseRace(t *testing.T) {
+	const (
+		iterations = 200
+		workers    = 8
+	)
+
+	for iter := 0; iter < iterations; iter++ {
+		bus := notify.NewEventBus(256, 0, 0)
+
+		rec := &subRecord{
+			id:      "race-sub",
+			batchID: "b1",
+			done:    make(chan struct{}),
+			status:  "running",
+			bus:     bus,
+		}
+		handle := &SubagentHandle{ID: "race-sub", rec: rec}
+
+		// Subscribe installs the bus handler lazily on the first call.
+		subCtx, subCancel := context.WithCancel(context.Background())
+		ch, err := handle.Subscribe(subCtx)
+		if err != nil {
+			t.Fatalf("iter %d: Subscribe: %v", iter, err)
+		}
+		_ = ch
+
+		// Drain the channel in the background so it never blocks on a
+		// full buffer (buf=32); we care about the panic, not the value.
+		// Tracked with drainWg so we can join after ch is guaranteed closed,
+		// preventing goroutine accumulation across iterations.
+		var drainWg sync.WaitGroup
+		drainWg.Add(1)
+		go func() {
+			defer drainWg.Done()
+			for range ch {
+			}
+		}()
+
+		// Concurrent emitters: blast events at the same subagent_id so the
+		// fan-out handler is busy sending to ch.
+		var wg sync.WaitGroup
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 50; i++ {
+					bus.Emit(notify.Event{
+						Type:      notify.EventToolStart,
+						Origin:    notify.OriginAgent,
+						ChannelID: "subagent:race-sub",
+						Timestamp: time.Now(),
+						Meta:      map[string]string{"subagent_id": "race-sub"},
+					})
+				}
+			}()
+		}
+
+		// Cancel the subscriber context while emitters are still running to
+		// race the cleanup goroutine (remove+close) against the fan-out send.
+		subCancel()
+		wg.Wait()
+		bus.Close()
+		// ch is guaranteed closed now: subCancel triggered the cleanup goroutine
+		// (remove+close under subMu), and bus.Close() ensures no new sends arrive.
+		// Join the drain goroutine before moving to the next iteration.
+		drainWg.Wait()
 	}
 }
 
