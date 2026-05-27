@@ -147,7 +147,7 @@ func renderTools(m Model, width, height int) string {
 
 	var rows []string
 
-	header := m.styles.accent.Render("◈ built-in tools")
+	header := m.styles.panelHeader("built-in tools")
 	rows = append(rows, ansi.Truncate(header, inner, "…"))
 	rows = append(rows, "")
 

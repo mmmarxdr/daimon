@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 )
 
@@ -187,5 +188,144 @@ func TestTuiStyles_CorrectForegroundColors(t *testing.T) {
 	}
 	if colorPink != "#d67b9e" {
 		t.Errorf("colorPink = %q, want #d67b9e", colorPink)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1b.1 — panelBorder uses square border (NormalBorder, contains ┌, not ╭)
+// ---------------------------------------------------------------------------
+
+// TestTuiStyles_PanelBorder_IsSquare asserts that tuiStyles.panelBorder uses a
+// square box-drawing border (lipgloss.NormalBorder, corners ┌ ┐ └ ┘) and NOT
+// the rounded border (╭ ╮ ╰ ╯). The panelBorder slot must be initialized in
+// newTuiStyles().
+func TestTuiStyles_PanelBorder_IsSquare(t *testing.T) {
+	s := newTuiStyles()
+
+	// Render a bordered box — panelBorder has BorderX applied so Render(content)
+	// must produce the corner and horizontal line characters.
+	rendered := s.panelBorder.Render("x")
+	if rendered == "" {
+		t.Fatal("panelBorder.Render: got empty string — slot may be uninitialized")
+	}
+
+	// Must contain the square top-left corner ┌ (U+250C).
+	if !strings.Contains(rendered, "┌") {
+		t.Errorf("panelBorder: rendered output does not contain '┌' (U+250C);\n"+
+			"expected NormalBorder (square) — output:\n%s", rendered)
+	}
+
+	// Must NOT contain the rounded corner ╭ (U+256D).
+	if strings.Contains(rendered, "╭") {
+		t.Errorf("panelBorder: rendered output contains '╭' (U+256D);\n"+
+			"expected NormalBorder (square), not RoundedBorder — output:\n%s", rendered)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1b.2 — panelBorder border foreground = colorLine (#22242c)
+// ---------------------------------------------------------------------------
+
+// TestTuiStyles_PanelBorder_ForegroundIsColorLine asserts that the panelBorder
+// slot's border foreground color is colorLine (#22242c). Uses a forced TrueColor
+// renderer to produce deterministic ANSI sequences regardless of TERM setting.
+// Expected truecolor fg form: ESC[38;2;<R>;<G>;<B>m
+// colorLine = #22242c → R=0x22=34, G=0x24=36, B=0x2c=44 → 38;2;34;36;44
+func TestTuiStyles_PanelBorder_ForegroundIsColorLine(t *testing.T) {
+	r := lipgloss.NewRenderer(io.Discard)
+	r.SetColorProfile(termenv.TrueColor)
+
+	s := newTuiStyles()
+
+	// Extract the border foreground from panelBorder and render through a
+	// forced TrueColor renderer to get a deterministic ANSI sequence.
+	borderFg := s.panelBorder.GetBorderBottomForeground() // same color for all sides
+	if _, isNoColor := borderFg.(lipgloss.NoColor); isNoColor {
+		t.Fatal("panelBorder.GetBorderBottomForeground(): NoColor — border foreground not set")
+	}
+
+	rendered := r.NewStyle().Foreground(borderFg).Render("x")
+
+	// colorLine = #22242c → R=34, G=36, B=44
+	const wantANSI = "38;2;34;36;44"
+	if !strings.Contains(rendered, wantANSI) {
+		t.Errorf("panelBorder border foreground: rendered %q does not contain expected ANSI sequence %q;\n"+
+			"expected colorLine (#22242c) but got a different color", rendered, wantANSI)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1b.A-GUARD — paletteBox border foreground = colorAccent (#5dbfa7)
+// ---------------------------------------------------------------------------
+
+// TestTuiStyles_PaletteBox_BorderIsAccent asserts that the paletteBox slot's
+// border foreground is colorAccent (#5dbfa7), NOT colorLine (#22242c).
+//
+// Design rationale: tui-components.jsx:441 specifies the command palette border
+// as "1px solid ${TUI.accent}" (Outline accent). Using colorLine makes the
+// border near-invisible against the dark background.
+//
+// This test exists specifically to prevent regression — this bug was fixed in
+// PR 1a, re-introduced in PR 1b (task 1b.5 incorrectly directed colorLine),
+// and must not regress again.
+//
+// colorAccent = #5dbfa7 → R=0x5d=93, G=0xbf=191, B=0xa7=167 → 38;2;93;191;167
+func TestTuiStyles_PaletteBox_BorderIsAccent(t *testing.T) {
+	r := lipgloss.NewRenderer(io.Discard)
+	r.SetColorProfile(termenv.TrueColor)
+
+	s := newTuiStyles()
+
+	// Extract border foreground from paletteBox (all sides share the same color).
+	borderFg := s.paletteBox.GetBorderBottomForeground()
+	if _, isNoColor := borderFg.(lipgloss.NoColor); isNoColor {
+		t.Fatal("paletteBox.GetBorderBottomForeground(): no color set — border foreground not configured")
+	}
+
+	rendered := r.NewStyle().Foreground(borderFg).Render("x")
+
+	// colorAccent = #5dbfa7 → 38;2;93;191;167
+	const wantANSI = "38;2;93;191;167"
+	if !strings.Contains(rendered, wantANSI) {
+		t.Errorf("paletteBox border foreground: rendered %q does not contain expected ANSI sequence %q;\n"+
+			"expected colorAccent (#5dbfa7) — command palette border must be accent per design (tui-components.jsx:441).\n"+
+			"Do NOT use colorLine here — this has regressed twice already.", rendered, wantANSI)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1b.3 — panelHeader(title) returns "── TITLE" form (uppercase, stripped)
+// ---------------------------------------------------------------------------
+
+// TestTuiStyles_PanelHeader_Format asserts that s.panelHeader(title) produces
+// a string whose ANSI-stripped content equals "── TITLE" (uppercase, preceded
+// by the box-drawing rule ──). It must NOT contain the old glyph "◈".
+func TestTuiStyles_PanelHeader_Format(t *testing.T) {
+	s := newTuiStyles()
+
+	cases := []struct {
+		input string
+		want  string // ANSI-stripped expected value
+	}{
+		{"telemetry", "── TELEMETRY"},
+		{"todo", "── TODO"},
+		{"context", "── CONTEXT"},
+		{"built-in tools", "── BUILT-IN TOOLS"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got := s.panelHeader(tc.input)
+			stripped := ansi.Strip(got)
+
+			if stripped != tc.want {
+				t.Errorf("panelHeader(%q): ANSI-stripped = %q, want %q", tc.input, stripped, tc.want)
+			}
+
+			// Must NOT contain the old glyph.
+			if strings.Contains(got, "◈") {
+				t.Errorf("panelHeader(%q): output contains '◈' — old glyph must not appear", tc.input)
+			}
+		})
 	}
 }

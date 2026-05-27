@@ -11,7 +11,7 @@ package tui
 //   FooterHints (1 row)
 //
 // Off-by-N rule (AD-10): every bordered box subtracts border+padding before
-// passing width to children. A RoundedBorder+Padding(0,1) steals 4 columns.
+// passing width to children. A NormalBorder+Padding(0,1) steals 4 columns.
 // ALL width math uses ansi.StringWidth — never len() or byte slicing.
 
 import (
@@ -42,7 +42,7 @@ func renderLayout(m Model) string {
 	footerHeight := 1
 	inputHeight := 0
 	if hasInput {
-		inputHeight = 3 // RoundedBorder + 1 row content
+		inputHeight = 3 // NormalBorder + 1 row content
 	}
 	centerHeight := m.height - topBarHeight - footerHeight - inputHeight
 	if centerHeight < 0 {

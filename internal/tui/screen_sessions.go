@@ -115,7 +115,7 @@ func renderSessions(m Model, width, height int) string {
 
 	var rows []string
 
-	header := m.styles.accent.Render("◈ sessions")
+	header := m.styles.panelHeader("sessions")
 	rows = append(rows, ansi.Truncate(header, inner, "…"))
 	rows = append(rows, "")
 

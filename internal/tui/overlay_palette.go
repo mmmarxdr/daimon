@@ -205,7 +205,7 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 		boxWidth = 40
 	}
 	// Inner content width (box has 1-col padding each side).
-	innerWidth := boxWidth - 4 // RoundedBorder(2) + Padding(0,1)(2)
+	innerWidth := boxWidth - 4 // NormalBorder(2) + Padding(0,1)(2)
 	if innerWidth < 1 {
 		innerWidth = 1
 	}

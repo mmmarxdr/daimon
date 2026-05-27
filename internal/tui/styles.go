@@ -8,7 +8,11 @@ package tui
 // a tuiStyles value (or pointer to model.styles) and call s.accent.Render(...)
 // etc. — never lipgloss.NewStyle().Foreground(lipgloss.Color("#...")) inline.
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // ---------------------------------------------------------------------------
 // Design token constants — sourced verbatim from docs/tui-design/daimon/project/tui.jsx
@@ -103,6 +107,11 @@ type tuiStyles struct {
 	// input bar
 	inputBarStyle lipgloss.Style
 
+	// panel border — square NormalBorder colored with colorLine.
+	// Use for all rail/screen panel borders in Phase 1+.
+	// Phase 1 introduces this slot and repoints existing borders to NormalBorder.
+	panelBorder lipgloss.Style
+
 	// overlay compositing
 	dim lipgloss.Style // Faint overlay for the base behind modal dialogs
 	// paletteBox is the centralized border style for the command palette.
@@ -121,13 +130,17 @@ func newTuiStyles() tuiStyles {
 	inkSoft := lipgloss.Color(colorInkSoft)
 	red := lipgloss.Color(colorRed)
 	green := lipgloss.Color(colorGreen)
+	line := lipgloss.Color(colorLine)
+	lineStrong := lipgloss.Color(colorLineStr)
 
 	return tuiStyles{
 		// topBar: background colorBG, foreground colorInk (warm parchment).
 		// Was #cdd6f4 (Catppuccin) — corrected to design token colorInk.
 		topBar: lipgloss.NewStyle().Background(bg).Foreground(ink),
 		footer: lipgloss.NewStyle().Faint(true).Italic(true),
-		border: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
+		// border: square NormalBorder colored with colorLine (was RoundedBorder).
+		// NormalBorder has same thickness as RoundedBorder, so off-by-N math unchanged.
+		border: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).BorderForeground(line),
 
 		label: lipgloss.NewStyle().Bold(true),
 		// dimLabel uses colorInkMuted as an explicit foreground rather than
@@ -146,12 +159,33 @@ func newTuiStyles() tuiStyles {
 		inactiveTab: lipgloss.NewStyle().Faint(true),
 		selected:    lipgloss.NewStyle().Bold(true).Foreground(accent),
 
-		inputBarStyle: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1).BorderForeground(accent),
+		// inputBarStyle: square NormalBorder with colorLineStrong (design: lineStrong for input).
+		// Was RoundedBorder with colorAccent. Off-by-N math unchanged (same border thickness).
+		inputBarStyle: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1).BorderForeground(lineStrong),
+
+		// panelBorder: canonical square border for rail/screen panels.
+		// NormalBorder (┌─┐│└─┘) + colorLine (dim border) + Padding(0,1).
+		panelBorder: lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			Padding(0, 1).
+			BorderForeground(line),
 
 		dim: lipgloss.NewStyle().Faint(true),
+		// paletteBox: NormalBorder (square) + accent. Command palette uses accent border
+		// per design (tui-components.jsx:441: "1px solid ${TUI.accent}", Outline accent).
+		// Do NOT change to line — this has regressed twice; see TestTuiStyles_PaletteBox_BorderIsAccent.
 		paletteBox: lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+			Border(lipgloss.NormalBorder()).
 			Padding(0, 1).
 			BorderForeground(accent),
 	}
+}
+
+// panelHeader returns the canonical "── TITLE" panel header string rendered with
+// dimLabel style (muted). All panel types must call this instead of inlining
+// accent.Render("◈ ...") directly.
+//
+// Example: s.panelHeader("telemetry") → "── TELEMETRY" (ANSI-colored with dimLabel).
+func (s tuiStyles) panelHeader(title string) string {
+	return s.dimLabel.Render("── " + strings.ToUpper(title))
 }
