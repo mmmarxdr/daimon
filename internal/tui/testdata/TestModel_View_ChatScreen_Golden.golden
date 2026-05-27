@@ -14,7 +14,7 @@
 ✓  write_file                          12L 48tok
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ › add a follow-up, or ⌃C to interrupt…                                    …  │
-│ ⇥ /commands    @ mention file    # add to memory    ⌃R retry [BUILD MODE] …  │
+│ ⇥ mode    @ mention file    # add to memory    ⌃R retry [BUILD MODE] / com…  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────────────────
 ⇥ /commands   ⌃C interrupt   ⌃R retry turn   ⌃E edit last   ⌃S save session daim

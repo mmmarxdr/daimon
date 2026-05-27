@@ -256,47 +256,37 @@ func TestUpdateSessions_SessionsLoadedMsg_WithError_DoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. tab in chat → screenSessions + non-nil cmd
+// 3. tab in chat → cycles mode (Phase A: Tab no longer navigates to sessions)
 // ---------------------------------------------------------------------------
 
-func TestHandleChatKey_Tab_NavigatesToSessions(t *testing.T) {
+func TestHandleChatKey_Tab_CyclesMode(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
 	m.focus = focusEditor
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	rm := next.(Model)
 
-	if rm.screen != screenSessions {
-		t.Errorf("screen after tab in chat = %v, want screenSessions", rm.screen)
-	}
-	if rm.prevScreen != screenChat {
-		t.Errorf("prevScreen = %v, want screenChat", rm.prevScreen)
-	}
-	if cmd == nil {
-		t.Error("tab in chat: expected a non-nil cmd (loadSessionsCmd), got nil")
+	// Tab must NOT navigate to sessions (Phase A: Tab cycles mode).
+	if rm.screen == screenSessions {
+		t.Error("screen after tab in chat = screenSessions; Tab must cycle mode, not navigate to sessions (Phase A)")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// 4. tab in welcome → screenSessions + non-nil cmd
+// 4. tab in welcome → cycles mode (Phase A: Tab no longer navigates to sessions)
 // ---------------------------------------------------------------------------
 
-func TestUpdateWelcome_Tab_NavigatesToSessions(t *testing.T) {
+func TestUpdateWelcome_Tab_CyclesMode(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenWelcome
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	rm := next.(Model)
 
-	if rm.screen != screenSessions {
-		t.Errorf("screen after tab in welcome = %v, want screenSessions", rm.screen)
-	}
-	if rm.prevScreen != screenWelcome {
-		t.Errorf("prevScreen = %v, want screenWelcome", rm.prevScreen)
-	}
-	if cmd == nil {
-		t.Error("tab in welcome: expected a non-nil cmd (loadSessionsCmd), got nil")
+	// Tab must NOT navigate to sessions (Phase A: Tab cycles mode).
+	if rm.screen == screenSessions {
+		t.Error("screen after tab in welcome = screenSessions; Tab must cycle mode, not navigate to sessions (Phase A)")
 	}
 }
 
@@ -466,9 +456,9 @@ func TestRenderSessions_WithBranch_ShowsBranchMarker(t *testing.T) {
 // 8. footer.screen is updated on every screen transition (Fix 1)
 // ---------------------------------------------------------------------------
 
-// TestFooter_TabFromChat_SetsSessionsScreen verifies that tab in chat updates
-// m.footer.screen to screenSessions (Fix 1: stale footer on tab→sessions).
-func TestFooter_TabFromChat_SetsSessionsScreen(t *testing.T) {
+// TestFooter_TabFromChat_FooterUnchanged verifies that tab in chat (now: mode cycle)
+// does NOT switch the footer to screenSessions (Phase A: Tab cycles mode).
+func TestFooter_TabFromChat_FooterUnchanged(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenChat
 	m.focus = focusEditor
@@ -477,14 +467,15 @@ func TestFooter_TabFromChat_SetsSessionsScreen(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	rm := next.(Model)
 
-	if rm.footer.screen != screenSessions {
-		t.Errorf("footer.screen after tab from chat = %v, want screenSessions", rm.footer.screen)
+	// Footer must NOT change to sessions (Tab cycles mode now).
+	if rm.footer.screen == screenSessions {
+		t.Error("footer.screen after tab from chat = screenSessions; Tab must cycle mode (Phase A)")
 	}
 }
 
-// TestFooter_TabFromWelcome_SetsSessionsScreen verifies that tab in welcome
-// updates m.footer.screen to screenSessions (Fix 1).
-func TestFooter_TabFromWelcome_SetsSessionsScreen(t *testing.T) {
+// TestFooter_TabFromWelcome_FooterUnchanged verifies that tab in welcome (now: mode cycle)
+// does NOT switch the footer to screenSessions (Phase A: Tab cycles mode).
+func TestFooter_TabFromWelcome_FooterUnchanged(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenWelcome
 	m.footer = footerHints{screen: screenWelcome}
@@ -492,8 +483,9 @@ func TestFooter_TabFromWelcome_SetsSessionsScreen(t *testing.T) {
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	rm := next.(Model)
 
-	if rm.footer.screen != screenSessions {
-		t.Errorf("footer.screen after tab from welcome = %v, want screenSessions", rm.footer.screen)
+	// Footer must NOT change to sessions (Tab cycles mode now).
+	if rm.footer.screen == screenSessions {
+		t.Error("footer.screen after tab from welcome = screenSessions; Tab must cycle mode (Phase A)")
 	}
 }
 

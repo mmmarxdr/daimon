@@ -180,13 +180,15 @@ func TestInputBar_NoDoublePrompt(t *testing.T) {
 	}
 }
 
-// TestInputBar_ContainsCommandsChip asserts the input second row contains /commands.
-func TestInputBar_ContainsCommandsChip(t *testing.T) {
+// TestInputBar_ContainsModeChip asserts the input second row contains the mode chip.
+// Phase A: "⇥ mode" replaces the old "⇥ /commands" chip; commands are accessed via "/".
+func TestInputBar_ContainsModeChip(t *testing.T) {
 	s := newTuiStyles()
 	ib := newInputBar()
 	rendered := ib.Render(80, s)
-	if !strings.Contains(rendered, "/commands") {
-		t.Errorf("inputBar.Render: missing '/commands' chip in second row\nrendered: %q", rendered)
+	// The mode chip "⇥ mode" must be present.
+	if !strings.Contains(rendered, "mode") {
+		t.Errorf("inputBar.Render: missing 'mode' chip in second row\nrendered: %q", rendered)
 	}
 }
 

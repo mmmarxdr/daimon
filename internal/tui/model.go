@@ -4,6 +4,8 @@
 package tui
 
 import (
+	"context"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"daimon/internal/agent"
@@ -11,6 +13,32 @@ import (
 	"daimon/internal/notify"
 	"daimon/internal/store"
 )
+
+// ---------------------------------------------------------------------------
+// modeAgent — interface for mode read/write used by Tab cycling (A3)
+//
+// The production path wires *agent.Agent (which satisfies this via CurrentMode
+// and a thin SetModeImmediate wrapper). Tests inject a mockModeAgent stub.
+// ---------------------------------------------------------------------------
+
+// modeAgent abstracts mode reads/writes so the TUI can cycle mode in tests
+// without a real store, context, or conversation.
+type modeAgent interface {
+	// CurrentMode returns the active mode name ("build", "plan", or "review").
+	CurrentMode() string
+	// SetModeImmediate updates the in-memory mode cache without persistence.
+	// The TUI uses this for optimistic UI; the real agent also persists asynchronously
+	// via a tea.Cmd (switchModeCmd).
+	SetModeImmediate(name string)
+}
+
+// switchModeMsg is delivered by switchModeCmd after a mode change attempt.
+// On success err is nil. On failure (ErrTurnInProgress, store error) err is set
+// and the model should show the error in the thread or ignore it.
+type switchModeMsg struct {
+	mode string
+	err  error
+}
 
 // ---------------------------------------------------------------------------
 // focusRegion — intra-screen focus routing (AD-3, reintroduced in PR2)
@@ -134,6 +162,11 @@ type Model struct {
 	errorToolName string        // tool name that triggered the denial
 	errorReason   string        // human-readable denial reason from EventToolEnd.Error
 	recentDenials []denialEntry // copy-on-write; capped to 10; never nil after first denial
+
+	// mode cycling (Phase A / A3): thin interface over *agent.Agent for testability.
+	// Nil when no agent is wired (tests / welcome screen without agent). When nil,
+	// Tab is a no-op mode cycle (does nothing, does NOT navigate to sessions).
+	modeAgent modeAgent
 }
 
 // denialEntry is a single policy/mode denial captured from EventToolEnd.
@@ -287,6 +320,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.thread.append(&MsgDaimon{text: text, styles: m.styles})
 		return m, nil
+
+	case switchModeMsg:
+		// A3: async mode-persistence result. On success, no further action needed
+		// (the modeAgent cache was updated optimistically in cycleMode before the
+		// Cmd was issued). On error, surface the message to the thread.
+		if msg.err != nil {
+			m.thread.append(&MsgDaimon{
+				text:   "mode switch failed: " + msg.err.Error(),
+				styles: m.styles,
+			})
+		}
+		return m, nil
 	}
 
 	// 2. Overlays intercept ALL messages before screen routing (AD-9 / PR3).
@@ -339,12 +384,11 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.footer = footerHints{screen: screenChat}
 				return m, m.ch.submit(text, m.activeConvID)
 			}
+
 		case "tab":
-			// tab navigates to the sessions screen (matches footer hint).
-			m.prevScreen = screenWelcome
-			m.screen = screenSessions
-			m.footer = footerHints{screen: screenSessions}
-			return m, loadSessionsCmd(m.store)
+			// A3: Tab cycles the agent mode (build → plan → review → build).
+			// Sessions are now accessible via /sessions in the command palette.
+			return m.cycleMode()
 
 		case "ctrl+t":
 			// ctrl+t navigates to the tools screen.
@@ -353,6 +397,34 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = screenTools
 			m.footer = footerHints{screen: screenTools}
 			return m, loadToolsCmd(m.ag)
+
+		case "ctrl+p":
+			// A1: ctrl+p always opens the command palette.
+			var cmds []agent.CommandInfo
+			if m.ag != nil {
+				cmds = m.ag.Commands()
+			}
+			m.overlays.Push(newCommandPalette(cmds, m.styles))
+			return m, nil
+
+		case "/":
+			// A1: "/" with empty input opens the command palette.
+			// Non-empty: fall through to the input bar (typed "/").
+			if m.input.Value() == "" {
+				var cmds []agent.CommandInfo
+				if m.ag != nil {
+					cmds = m.ag.Commands()
+				}
+				m.overlays.Push(newCommandPalette(cmds, m.styles))
+				return m, nil
+			}
+
+		case "?":
+			// A2: "?" with empty input opens the help overlay.
+			if m.input.Value() == "" {
+				m.overlays.Push(newHelpOverlay(m.styles))
+				return m, nil
+			}
 		}
 	}
 	var cmd tea.Cmd
@@ -397,5 +469,87 @@ func newTestModel() Model {
 		focus:     focusEditor,
 		input:     newInputBar(),
 		rail:      newRail(s),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mode cycling helpers (A3)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// agentModeAdapter — production modeAgent wrapping *agent.Agent
+// ---------------------------------------------------------------------------
+
+// agentModeAdapter wraps *agent.Agent to satisfy the modeAgent interface.
+// It maintains a local optimistic override so the TUI renders the new mode
+// instantly (before the async store persistence via switchModeCmd completes).
+type agentModeAdapter struct {
+	ag            *agent.Agent
+	localOverride string // non-empty while a switch is in-flight
+}
+
+func newAgentModeAdapter(ag *agent.Agent) *agentModeAdapter {
+	if ag == nil {
+		return nil
+	}
+	return &agentModeAdapter{ag: ag}
+}
+
+// CurrentMode returns the optimistic override if set, else delegates to
+// the real agent cache.
+func (a *agentModeAdapter) CurrentMode() string {
+	if a.localOverride != "" {
+		return a.localOverride
+	}
+	return a.ag.CurrentMode()
+}
+
+// SetModeImmediate stores the new mode as a local optimistic override.
+// The caller is responsible for issuing a switchModeCmd that calls
+// agent.SetMode (persists to store + updates the real cache).
+func (a *agentModeAdapter) SetModeImmediate(name string) {
+	a.localOverride = name
+}
+
+// ---------------------------------------------------------------------------
+// modeOrderedNames is the canonical rotation order for Tab mode cycling.
+// Matches agent.ModeNames() order: build → plan → review → build.
+var modeOrderedNames = []string{"build", "plan", "review"}
+
+// nextModeName returns the mode name that follows current in the rotation.
+// Unknown current modes default to the first mode ("build").
+func nextModeName(current string) string {
+	for i, name := range modeOrderedNames {
+		if name == current {
+			return modeOrderedNames[(i+1)%len(modeOrderedNames)]
+		}
+	}
+	return modeOrderedNames[0]
+}
+
+// cycleMode advances modeAgent to the next mode, updates the optimistic cache,
+// and returns the updated model plus a switchModeCmd for async persistence.
+// If modeAgent is nil, cycleMode is a no-op.
+func (m Model) cycleMode() (Model, tea.Cmd) {
+	if m.modeAgent == nil {
+		return m, nil
+	}
+	next := nextModeName(m.modeAgent.CurrentMode())
+	m.modeAgent.SetModeImmediate(next)
+	// Issue async persistence via the real agent (if wired).
+	if m.ag != nil {
+		return m, switchModeCmd(m.ag, next, m.channelID, m.senderID)
+	}
+	return m, nil
+}
+
+// switchModeCmd returns a tea.Cmd that calls ag.SetMode in a goroutine and
+// delivers the result as a switchModeMsg. No mutation in the closure.
+func switchModeCmd(ag *agent.Agent, name, channelID, senderID string) tea.Cmd {
+	return func() tea.Msg {
+		// Use a background context; no cancellation on TUI exit (V1 limitation,
+		// same policy as runCommandCmd).
+		err := ag.SetMode(context.Background(), channelID, senderID, name)
+		return switchModeMsg{mode: name, err: err}
 	}
 }

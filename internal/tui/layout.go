@@ -63,8 +63,16 @@ func renderLayout(m Model) string {
 	}
 
 	// 4. Render each zone.
-	// TopBar — update slots from model state then render.
+	// Resolve the current mode from modeAgent (live) or topBar.mode (startup snapshot).
+	// modeAgent is nil in tests that don't inject an agent; fall back to topBar.mode.
+	currentMode := m.topBar.mode
+	if m.modeAgent != nil {
+		currentMode = m.modeAgent.CurrentMode()
+	}
+
+	// TopBar — update the mode slot dynamically from the live modeAgent, then render.
 	tb := m.topBar
+	tb.mode = currentMode
 	topRendered := tb.Render(m.width, m.styles)
 
 	// Center content.
@@ -82,11 +90,11 @@ func renderLayout(m Model) string {
 		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, center, railRendered)
 	}
 
-	// InputBar.
+	// InputBar — pass the live mode so the mode pill reflects the current mode.
 	inputRendered := ""
 	if hasInput {
 		ib := m.input
-		inputRendered = ib.Render(m.width, m.styles)
+		inputRendered = ib.RenderWithMode(m.width, m.styles, currentMode)
 	}
 
 	// FooterHints.

@@ -10,7 +10,7 @@
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ › add a follow-up, or ⌃C to interrupt…                                    …  │
-│ ⇥ /commands    @ mention file    # add to memory    ⌃R retry [BUILD MODE] …  │
+│ ⇥ mode    @ mention file    # add to memory    ⌃R retry [BUILD MODE] / com…  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────────────────
-enter send   ⌃C quit   ⇥ sessions   ^t tools                     daimon listens.
+enter send   ⌃C quit   ⇥ mode   / commands   ^t tools            daimon listens.

@@ -111,6 +111,7 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		footer:    footerHints{screen: screenWelcome},
 		input:     newInputBar(),
 		rail:      r,
+		modeAgent: newAgentModeAdapter(ag),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

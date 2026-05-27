@@ -331,12 +331,9 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Focus is on editor — fall through to input bar below.
 
 	case "tab":
-		// tab navigates to the sessions screen (per footer hint: "tab: sessions").
-		// Focus-toggle is preserved via esc (esc already toggles focusEditor↔focusMain).
-		m.prevScreen = screenChat
-		m.screen = screenSessions
-		m.footer = footerHints{screen: screenSessions}
-		return m, loadSessionsCmd(m.store)
+		// A3: Tab cycles the agent mode (build → plan → review → build).
+		// Sessions are now accessible via /sessions in the command palette.
+		return m.cycleMode()
 
 	case "ctrl+t":
 		// ctrl+t navigates to the tools screen.
@@ -359,6 +356,15 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case "ctrl+p":
+		// A1: ctrl+p always opens the command palette (mirrors "/" behavior).
+		var cmds []agent.CommandInfo
+		if m.ag != nil {
+			cmds = m.ag.Commands()
+		}
+		m.overlays.Push(newCommandPalette(cmds, m.styles))
+		return m, nil
+
 	case "/":
 		// PR3a: "/" at the start of an empty input opens the command palette.
 		// If the input is non-empty the slash falls through to the input bar
@@ -373,6 +379,14 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Non-empty input: fall through to input bar.
+
+	case "?":
+		// A2: "?" with empty input opens the help overlay.
+		if m.input.Value() == "" {
+			m.overlays.Push(newHelpOverlay(m.styles))
+			return m, nil
+		}
+		// Non-empty: fall through to input bar.
 	}
 
 	// Forward remaining keys to the focused region.

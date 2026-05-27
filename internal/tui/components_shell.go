@@ -216,7 +216,8 @@ func (fh *footerHints) renderHints(s tuiStyles) string {
 	case screenWelcome:
 		return renderHint("enter", "send") + sep +
 			renderHint("⌃C", "quit") + sep +
-			renderHint("⇥", "sessions") + sep +
+			renderHint("⇥", "mode") + sep +
+			renderHint("/", "commands") + sep +
 			renderHint("^t", "tools")
 	case screenDiff:
 		return renderHint("↑↓", "scroll hunks") + sep +
@@ -249,7 +250,7 @@ func (fh *footerHints) renderHints(s tuiStyles) string {
 func (fh *footerHints) hintsForScreen() string {
 	switch fh.screen {
 	case screenWelcome:
-		return "enter: send  ctrl+c: quit  tab: sessions  ^t: tools"
+		return "enter: send  ctrl+c: quit  tab: mode  /: commands  ^t: tools"
 	case screenChat:
 		return "⇥ /commands   ⌃C interrupt   ⌃R retry turn   ⌃E edit last   ⌃S save session"
 	case screenDiff:
@@ -320,12 +321,20 @@ func (ib *inputBar) Blur() {
 
 // Render returns the rendered input bar capped to `width` visible columns.
 // The sentinel string inputBarSentinel is always present so tests can detect it.
+// Mode pill defaults to "[BUILD MODE]" — use RenderWithMode to supply the
+// current agent mode dynamically.
 //
 // Layout (inside the inputBarStyle border+padding box):
 //
 //	Row 1: › (accent sentinel) + textinput view
-//	Row 2: ⇥ /commands  @ mention file  # add to memory  ⌃R retry  <spacer>  BUILD MODE  ⇧⇥ switch
+//	Row 2: ⇥ /commands  @ mention file  # add to memory  ⌃R retry  <spacer>  <MODE>  ⇧⇥ switch
 func (ib *inputBar) Render(width int, s tuiStyles) string {
+	return ib.RenderWithMode(width, s, "")
+}
+
+// RenderWithMode renders the input bar with the given mode name in the mode pill.
+// Empty mode defaults to "BUILD MODE". Mode names are upper-cased for display.
+func (ib *inputBar) RenderWithMode(width int, s tuiStyles, mode string) string {
 	// Width math (lipgloss v1.1.0): inputBarStyle.Width(N).Render → outer = N+2.
 	// Padding(0,1) is inside N, so text content area = N-2.
 	// To get outer = width: N = width-2.  Content area = width-4.
@@ -351,15 +360,19 @@ func (ib *inputBar) Render(width int, s tuiStyles) string {
 	chip := func(sym, label string) string {
 		return s.accent.Render(sym) + s.dimLabel.Render(" "+label)
 	}
-	chipsLeft := chip("⇥", "/commands") + sep +
+	chipsLeft := chip("⇥", "mode") + sep +
 		chip("@", "mention file") + sep +
 		chip("#", "add to memory") + sep +
 		chip("⌃R", "retry")
 
 	// Render the mode pill as inline bracketed text (single line, amber).
 	// A lipgloss bordered box would produce 3 lines; inline brackets keep it on one line.
-	modePillStr := s.amber.Render("[BUILD MODE]")
-	switchHint := chip("⇧⇥", "switch")
+	modeName := strings.ToUpper(mode)
+	if modeName == "" {
+		modeName = "BUILD"
+	}
+	modePillStr := s.amber.Render("[" + modeName + " MODE]")
+	switchHint := chip("/", "commands")
 
 	chipsLeftW := ansi.StringWidth(chipsLeft)
 	modeW := ansi.StringWidth(modePillStr)
