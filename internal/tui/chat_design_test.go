@@ -218,7 +218,7 @@ func TestInputBar_PlaceholderText(t *testing.T) {
 func TestTopBar_ContainsPipeSeparators(t *testing.T) {
 	s := newTuiStyles()
 	tb := topBar{}
-	tb.SetData("⫶ daimon", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
+	tb.SetData("⫶", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
 	rendered := tb.Render(120, s)
 	if !strings.Contains(rendered, "│") {
 		t.Errorf("topBar.Render: missing '│' pipe separator\nrendered: %q", rendered)
@@ -229,7 +229,7 @@ func TestTopBar_ContainsPipeSeparators(t *testing.T) {
 func TestTopBar_ContainsSegments(t *testing.T) {
 	s := newTuiStyles()
 	tb := topBar{}
-	tb.SetData("⫶ daimon", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
+	tb.SetData("⫶", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
 	rendered := tb.Render(120, s)
 
 	tokens := []string{"⫶", "daimon", "main", "claude-3-5", "build", "$0.01", "ready"}
@@ -245,7 +245,7 @@ func TestTopBar_ContainsSegments(t *testing.T) {
 func TestTopBar_ContainsBottomRule(t *testing.T) {
 	s := newTuiStyles()
 	tb := topBar{}
-	tb.SetData("⫶ daimon", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
+	tb.SetData("⫶", "~/projects/daimon", "main", "claude-3-5", "build", "$0.01", "ready")
 	rendered := tb.Render(80, s)
 	if !strings.Contains(rendered, "─") {
 		t.Errorf("topBar.Render: missing bottom-rule character '─'\nrendered: %q", rendered)

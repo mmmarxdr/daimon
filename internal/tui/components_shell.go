@@ -60,8 +60,9 @@ func (tb *topBar) Render(width int, s tuiStyles) string {
 	pipe := s.inkFaint.Render(" │ ")
 	dot := s.inkFaint.Render(" · ")
 
-	// Brand segment: ⫶ (accent) + " daimon" (ink).
-	brand := s.accent.Render(tb.brand)
+	// Brand segment: ⫶ (accent) + " daimon" (ink). The brand field holds only
+	// the glyph; the "daimon" wordmark is fixed by the design.
+	brand := s.accent.Render(tb.brand) + s.ink.Render(" daimon")
 
 	// CWD segment: split into leading path (inkMuted) + final segment (inkSoft).
 	cwdSeg := ""

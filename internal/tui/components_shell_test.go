@@ -13,8 +13,11 @@ import (
 func TestTopBar_Render_AllSlotsPresent(t *testing.T) {
 	s := newTuiStyles()
 	tb := topBar{}
+	// Width 120: the full topbar (⫶ daimon │ cwd · branch │ model · mode … cost · status)
+	// needs adequate width for every slot to be present without truncation. At
+	// narrow widths (e.g. 80) the cwd/right side legitimately truncates.
 	tb.SetData("⫶", "/home/user/project", "main", "claude-3-5", "build", "$0.01", "ready")
-	rendered := tb.Render(80, s)
+	rendered := tb.Render(120, s)
 
 	tokens := []string{"⫶", "/home/user/project", "main", "claude-3-5", "build", "$0.01", "ready"}
 	for _, tok := range tokens {

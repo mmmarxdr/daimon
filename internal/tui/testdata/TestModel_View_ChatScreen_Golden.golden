@@ -1,4 +1,4 @@
-⫶ │ /home/user/project · main │ model claude-opus-4 · mode build $0.12 · ● ready
+⫶ daimon │ /home/user/project · main │ model claude-opus-4 · mo… $0.12 · ● ready
 ────────────────────────────────────────────────────────────────────────────────
 ▌ Write a Go function that reverses a slice.
 ⫶ Sure! Here's a generic reverse function:
