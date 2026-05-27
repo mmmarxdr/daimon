@@ -10,14 +10,68 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Theme token values — sourced from components.md §Theme Tokens.
-// Defined as package-level constants so tests can compare against them.
+// ---------------------------------------------------------------------------
+// Design token constants — sourced verbatim from docs/tui-design/daimon/project/tui.jsx
+// ---------------------------------------------------------------------------
+// Every hex value below is a direct copy from the TUI object in tui.jsx.
+// Do NOT change these without updating tui.jsx first.
+
 const (
-	colorBG     = "#0e0f13" // terminal background (dark-only)
+	// Background layers
+	colorBG      = "#0e0f13" // terminal background (dark-only)
+	colorBGElev  = "#15171d" // elevated surface
+	colorBGDeep  = "#0a0b0f" // deep background
+	colorBGPanel = "#11131a" // panel background
+
+	// Ink (text) hierarchy
+	colorInk      = "#eae5d8" // primary text (warm parchment)
+	colorInkSoft  = "#c2bca9" // secondary text
+	colorInkMuted = "#7a7465" // muted text
+	colorInkFaint = "#4a4438" // faint text
+	colorInkGhost = "#2c2a25" // ghost / placeholder text
+
+	// Line (border / divider) hierarchy
+	colorLine     = "#22242c" // default border / divider
+	colorLineSoft = "#1a1c22" // soft border
+	colorLineStr  = "#2e3038" // strong border
+
+	// Accent and semantic colors
 	colorAccent = "#5dbfa7" // phosphor teal — primary accent, ⫶ glyph, borders
-	colorAmber  = "#ffb347" // mode badge, running tool state
-	colorPink   = "#f48fb1" // subagent threads, branch indicators
+	colorAmber  = "#e3b67a" // mode badge, running tool state (was #ffb347)
+	colorRed    = "#e38775" // error / danger (was ANSI 9)
+	colorGreen  = "#7aba8a" // success / ok
+	colorPink   = "#d67b9e" // subagent threads, branch indicators (was #f48fb1)
 )
+
+// ---------------------------------------------------------------------------
+// Deferred rgba tint approximations (for Phase 2 background fill slots)
+// ---------------------------------------------------------------------------
+// These rgba tokens are defined in tui.jsx but cannot be resolved at parse
+// time (alpha blending requires runtime computation). Exact tints will be
+// computed in Phase 2.
+//
+//   accentDim  rgba(93,191,167,0.14)  — exact tint computed in Phase 2
+//   accentBg   rgba(93,191,167,0.07)  — exact tint computed in Phase 2
+//   amberBg    rgba(227,182,122,0.10) — exact tint computed in Phase 2
+//   redBg      rgba(227,135,117,0.10) — exact tint computed in Phase 2
+//
+// Phase 2: add accentDim, accentBg, amberBg, redBg fields to tuiStyles and
+// initialize them with the correct blended values.
+
+// ---------------------------------------------------------------------------
+// Glyph constants — sourced from the design spec and components.md
+// ---------------------------------------------------------------------------
+
+const (
+	glyphDaimon = "⫶" // U+2AF6 — daimon speaker prefix (was δ)
+	glyphUser   = "▌" // U+258C — user-line prefix (was "you  ")
+	glyphPrompt = "›" // U+203A — prompt indicator
+	glyphExpand = "▸" // U+25B8 — expand affordance prefix
+)
+
+// ---------------------------------------------------------------------------
+// tuiStyles struct
+// ---------------------------------------------------------------------------
 
 // tuiStyles holds all Lipgloss styles for the TUI.
 // It is constructed once in RunTUI and threaded to all sub-components.
@@ -35,9 +89,11 @@ type tuiStyles struct {
 
 	// accents
 	accent   lipgloss.Style // phosphor teal (#5dbfa7)
-	amber    lipgloss.Style // mode / running (#ffb347)
-	pink     lipgloss.Style // subagents (#f48fb1)
-	errStyle lipgloss.Style // error states — lipgloss terminal color 9 (matches existing errStyle)
+	amber    lipgloss.Style // mode / running (#e3b67a)
+	pink     lipgloss.Style // subagents (#d67b9e)
+	errStyle lipgloss.Style // error states — #e38775
+	green    lipgloss.Style // success / ok (#7aba8a)
+	inkSoft  lipgloss.Style // secondary text (#c2bca9)
 
 	// interactive states
 	activeTab   lipgloss.Style
@@ -60,20 +116,31 @@ func newTuiStyles() tuiStyles {
 	amber := lipgloss.Color(colorAmber)
 	pink := lipgloss.Color(colorPink)
 	bg := lipgloss.Color(colorBG)
+	ink := lipgloss.Color(colorInk)
+	inkMuted := lipgloss.Color(colorInkMuted)
+	inkSoft := lipgloss.Color(colorInkSoft)
+	red := lipgloss.Color(colorRed)
+	green := lipgloss.Color(colorGreen)
 
 	return tuiStyles{
-		topBar: lipgloss.NewStyle().Background(bg).Foreground(lipgloss.Color("#cdd6f4")),
+		// topBar: background colorBG, foreground colorInk (warm parchment).
+		// Was #cdd6f4 (Catppuccin) — corrected to design token colorInk.
+		topBar: lipgloss.NewStyle().Background(bg).Foreground(ink),
 		footer: lipgloss.NewStyle().Faint(true).Italic(true),
 		border: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1),
 
-		label:    lipgloss.NewStyle().Bold(true),
-		dimLabel: lipgloss.NewStyle().Faint(true),
+		label: lipgloss.NewStyle().Bold(true),
+		// dimLabel uses colorInkMuted as an explicit foreground rather than
+		// Faint(true), which relies on terminal theme and varies across hosts.
+		dimLabel: lipgloss.NewStyle().Foreground(inkMuted),
 		hint:     lipgloss.NewStyle().Faint(true).Italic(true),
 
 		accent:   lipgloss.NewStyle().Foreground(accent),
 		amber:    lipgloss.NewStyle().Foreground(amber),
 		pink:     lipgloss.NewStyle().Foreground(pink),
-		errStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true),
+		errStyle: lipgloss.NewStyle().Foreground(red).Bold(true),
+		green:    lipgloss.NewStyle().Foreground(green),
+		inkSoft:  lipgloss.NewStyle().Foreground(inkSoft),
 
 		activeTab:   lipgloss.NewStyle().Bold(true).Underline(true).Foreground(accent),
 		inactiveTab: lipgloss.NewStyle().Faint(true),

@@ -407,6 +407,103 @@ func TestHandleChatKey_R_ExpandsReasoning(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 1a.3 — MsgDaimon must render with ⫶ glyph, not δ
+// ---------------------------------------------------------------------------
+
+// TestMsgDaimon_Render_GlyphDaimon asserts that MsgDaimon uses the ⫶ glyph
+// as the speaker prefix, not the legacy δ character.
+func TestMsgDaimon_Render_GlyphDaimon(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgDaimon{text: "hello from daimon", styles: s}
+	got := m.Render(80)
+
+	if !strings.ContainsRune(got, '⫶') {
+		t.Errorf("MsgDaimon.Render must contain ⫶ (U+2AF6), got: %q", got)
+	}
+	if strings.ContainsRune(got, 'δ') {
+		t.Errorf("MsgDaimon.Render must NOT contain δ (legacy glyph), got: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1a.4 — MsgUser must render with ▌ glyph, not "you  "
+// ---------------------------------------------------------------------------
+
+// TestMsgUser_Render_GlyphUser asserts that MsgUser uses ▌ as the user-line
+// prefix, not the legacy "you  " string.
+func TestMsgUser_Render_GlyphUser(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgUser{text: "hello from user", styles: s}
+	got := m.Render(80)
+
+	if !strings.ContainsRune(got, '▌') {
+		t.Errorf("MsgUser.Render must contain ▌ (U+258C), got: %q", got)
+	}
+	if strings.Contains(got, "you  ") {
+		t.Errorf("MsgUser.Render must NOT contain legacy 'you  ' prefix, got: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 1a.5 — ToolLine must show ▸ view when output is truncated, not otherwise
+// ---------------------------------------------------------------------------
+
+// TestToolLine_Expand_ShowsHintWhenTruncated verifies that when a ToolLine's
+// name is truncated (overflows display budget) and expanded==false, the
+// rendered output contains the expand hint "▸ view".
+func TestToolLine_Expand_ShowsHintWhenTruncated(t *testing.T) {
+	s := newTuiStyles()
+	// A very long name that will exceed any reasonable display budget at width=40.
+	longName := "a_very_long_tool_name_that_definitely_exceeds_the_budget_at_width_40_for_sure"
+	tl := &ToolLine{
+		callID:   "call-expand",
+		name:     longName,
+		state:    toolDone,
+		expanded: false,
+		styles:   s,
+	}
+	got := tl.Render(40)
+	if !strings.Contains(got, "▸ view") {
+		t.Errorf("ToolLine with truncated name and expanded=false must show '▸ view', got: %q", got)
+	}
+}
+
+// TestToolLine_Expand_HidesHintWhenNotTruncated verifies that when a ToolLine's
+// name fits within the budget (no truncation), "▸ view" does NOT appear.
+func TestToolLine_Expand_HidesHintWhenNotTruncated(t *testing.T) {
+	s := newTuiStyles()
+	tl := &ToolLine{
+		callID:   "call-short",
+		name:     "bash",
+		state:    toolDone,
+		expanded: false,
+		styles:   s,
+	}
+	got := tl.Render(80)
+	if strings.Contains(got, "▸ view") {
+		t.Errorf("ToolLine with short name must NOT show '▸ view', got: %q", got)
+	}
+}
+
+// TestToolLine_Expand_HidesHintWhenExpanded verifies that when expanded==true,
+// "▸ view" does NOT appear even if the name was originally truncated.
+func TestToolLine_Expand_HidesHintWhenExpanded(t *testing.T) {
+	s := newTuiStyles()
+	longName := "a_very_long_tool_name_that_definitely_exceeds_the_budget_at_width_40_for_sure"
+	tl := &ToolLine{
+		callID:   "call-expanded",
+		name:     longName,
+		state:    toolDone,
+		expanded: true,
+		styles:   s,
+	}
+	got := tl.Render(40)
+	if strings.Contains(got, "▸ view") {
+		t.Errorf("ToolLine with expanded=true must NOT show '▸ view', got: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // FIX 3 — 'r' key must not steal from input bar when focusEditor is active
 // ---------------------------------------------------------------------------
 
