@@ -17,4 +17,4 @@
 │ ⇥ mode    @ mention file    # add to memory    ⌃R retry [BUILD MODE] / com…  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────────────────
-⇥ /commands   ⌃C interrupt   ⌃R retry turn   ⌃E edit last   ⌃S save session daim
+/ commands   ⇥ mode   ⌃T tools   ? help   ⌃C quit                daimon listens.

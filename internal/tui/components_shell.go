@@ -201,12 +201,16 @@ func (fh *footerHints) renderHints(s tuiStyles) string {
 
 	switch fh.screen {
 	case screenChat:
+		// Hints list ONLY keys that handleChatKey actually wires (enter, r, tab→
+		// mode, ⌃t→tools, esc, ⌃p+/→palette, ?→help) plus the global ⌃C quit.
+		// retry/edit/save are design hints but not yet implemented — do NOT
+		// advertise them until they work.
 		hints := []hint{
-			{"⇥", "/commands"},
-			{"⌃C", "interrupt"},
-			{"⌃R", "retry turn"},
-			{"⌃E", "edit last"},
-			{"⌃S", "save session"},
+			{"/", "commands"},
+			{"⇥", "mode"},
+			{"⌃T", "tools"},
+			{"?", "help"},
+			{"⌃C", "quit"},
 		}
 		parts := make([]string, len(hints))
 		for i, h := range hints {

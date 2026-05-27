@@ -110,14 +110,14 @@ func TestRail_PanelHeaderWithBadge_Format(t *testing.T) {
 // ─── TASK B: Footer hints ────────────────────────────────────────────────────
 
 // TestFooter_ChatScreen_ContainsDesignHints asserts the chat-screen footer
-// contains the design-spec hint tokens.
+// lists ONLY the keys that are actually wired (no dead/lying hints).
 func TestFooter_ChatScreen_ContainsDesignHints(t *testing.T) {
 	s := newTuiStyles()
 	fh := footerHints{}
 	fh.SetScreen(screenChat)
 	rendered := fh.Render(120, s)
 
-	tokens := []string{"/commands", "interrupt", "retry", "edit", "save"}
+	tokens := []string{"commands", "mode", "tools", "help", "quit"}
 	for _, tok := range tokens {
 		if !strings.Contains(rendered, tok) {
 			t.Errorf("footerHints.Render(screenChat): missing hint token %q\nrendered: %q", tok, rendered)
