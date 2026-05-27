@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Daimon — Landing (2 direcciones)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400;1,9..144,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    html, body { margin: 0; padding: 0; background: #0b0a08; font-family: 'Inter', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    a { color: inherit; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Reuse LIMINAL_TOKENS for tokens chain -->
+  <script type="text/babel" src="liminal.jsx"></script>
+
+  <!-- Landing shared primitives, backgrounds, then direction A -->
+  <script type="text/babel" src="landing-shared.jsx"></script>
+  <script type="text/babel" src="landing-backgrounds.jsx"></script>
+  <script type="text/babel" src="landing-daimon.jsx"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+
+  <script type="text/babel">
+    const { useState } = React;
+
+    const TWEAKS = /*EDITMODE-BEGIN*/{
+      "theme_a": "dark",
+      "theme_b": "dark",
+      "side_by_side": true
+    }/*EDITMODE-END*/;
+
+    function LandingFrame({ initialMode, width, height }) {
+      const [isDark, setIsDark] = useState(initialMode === 'dark');
+      const [turning, setTurning] = useState(null);
+      // turning = null | { fromIsDark, toIsDark }
+
+      const theme = isDark ? LANDING_TOKENS.dark : LANDING_TOKENS.light;
+      const nextTheme = isDark ? LANDING_TOKENS.light : LANDING_TOKENS.dark;
+
+      const onToggle = () => {
+        if (turning) return;
+        // Flip theme immediately so the page BEHIND the overlay is already the new theme.
+        const next = !isDark;
+        setTurning({ coverColor: theme.bg });
+        setIsDark(next);
+        // End the turn after the animation completes
+        setTimeout(() => setTurning(null), 900);
+      };
+
+      return (
+        <div style={{
+          width, height,
+          background: theme.bg,
+          overflowY: 'auto', overflowX: 'hidden',
+          position: 'relative',
+        }}>
+          <LandingStyles />
+          <LandingDaimon theme={theme} isDark={isDark} onToggle={onToggle} />
+          {turning && <PageTurnOverlay coverColor={turning.coverColor} accent={nextTheme.accent} />}
+        </div>
+      );
+    }
+
+    function PageTurnOverlay({ coverColor, accent }) {
+      // Full-size sheet that starts covering the viewport, then slides
+      // off toward the bottom-left with a slight rotation — like flipping
+      // the page of a book. An accent edge glow sweeps with it.
+      return (
+        <div style={{
+          position: 'absolute', inset: 0, zIndex: 9999,
+          pointerEvents: 'none', overflow: 'hidden',
+          perspective: 1600,
+        }}>
+          {/* The sheet */}
+          <div style={{
+            position: 'absolute',
+            top: '-10%', left: '-10%', right: '-10%', bottom: '-10%',
+            background: coverColor,
+            animation: 'pageTurn 0.95s cubic-bezier(0.72, 0.05, 0.28, 0.95) forwards',
+            boxShadow: `0 0 0 1px rgba(0,0,0,0.02), 12px 12px 40px rgba(0,0,0,0.25)`,
+            transformOrigin: 'top right',
+          }}/>
+          {/* Glowing accent edge — diagonal bar that sweeps across */}
+          <div style={{
+            position: 'absolute',
+            top: '-20%', left: '-40%', width: '70%', height: '140%',
+            background: `linear-gradient(90deg, transparent 0%, ${accent}88 45%, ${accent}ff 50%, ${accent}88 55%, transparent 100%)`,
+            filter: 'blur(2px)',
+            transform: 'rotate(-18deg)',
+            animation: 'pageTurnEdge 0.95s cubic-bezier(0.72, 0.05, 0.28, 0.95) forwards',
+            mixBlendMode: 'screen',
+          }}/>
+        </div>
+      );
+    }
+
+    function App() {
+      return (
+        <DesignCanvas background="#0b0a08">
+          <DCSection id="landing" title="Daimon — Landing (The Daimon)" subtitle="Editorial cinema. Cada sección con su propia animación. Scroll dentro de cada artboard.">
+            <DCArtboard id="dark" label="Dark" width={1280} height={900}>
+              <LandingFrame initialMode="dark" width={1280} height={900} />
+            </DCArtboard>
+            <DCArtboard id="light" label="Light" width={1280} height={900}>
+              <LandingFrame initialMode="light" width={1280} height={900} />
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

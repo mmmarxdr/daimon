@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Daimon — v2 · Liminal (light + dark)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #efece5; }
+    * { box-sizing: border-box; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="chat-mocks.jsx"></script>
+  <script type="text/babel" src="liminal.jsx"></script>
+
+  <script type="text/babel">
+    function App() {
+      const [cmdOpen, setCmdOpen] = React.useState(null); // 'light' | 'dark' | null
+      const [lastHover, setLastHover] = React.useState('dark');
+
+      const [lightTheme] = React.useState(LIMINAL_TOKENS.light);
+      const [darkTheme] = React.useState(LIMINAL_TOKENS.dark);
+
+      React.useEffect(() => {
+        const onKey = (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            setCmdOpen(lastHover);
+          } else if (e.key === 'Escape') {
+            setCmdOpen(null);
+          }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+      }, [lastHover]);
+
+      return (
+        <DesignCanvas>
+          <DCSection
+            title="Daimon · v2 — Liminal"
+            subtitle="Identidad propia. Mismo sistema, modo light + dark unificados. Entre terminal y editorial: la voz interior que habla. Código con syntax highlighting real, tools enriquecidas, panel workspace a la derecha. Atajo de teclado sobre cualquier frame para abrir la paleta.">
+
+            <DCArtboard
+              label="Light — warm paper + deep teal"
+              width={1400}
+              height={880}>
+              <div style={{ height: '100%' }} onMouseEnter={() => setLastHover('light')}>
+                <LiminalChat
+                  theme={lightTheme}
+                  isDark={false}
+                  onToggleTheme={() => {}}
+                  showCmd={() => setCmdOpen('light')}
+                  cmdOpen={cmdOpen === 'light'}
+                  closeCmd={() => setCmdOpen(null)} />
+              </div>
+            </DCArtboard>
+
+            <DCArtboard
+              label="Dark — warm near-black + phosphor teal"
+              width={1400}
+              height={880}>
+              <div style={{ height: '100%' }} onMouseEnter={() => setLastHover('dark')}>
+                <LiminalChat
+                  theme={darkTheme}
+                  isDark={true}
+                  onToggleTheme={() => {}}
+                  showCmd={() => setCmdOpen('dark')}
+                  cmdOpen={cmdOpen === 'dark'}
+                  closeCmd={() => setCmdOpen(null)} />
+              </div>
+            </DCArtboard>
+
+            <DCPostIt top={-30} left={1440} rotate={-2.5} width={260}>
+              <b>Identidad</b><br/><br/>
+              Wordmark: <span style={{fontFamily:'JetBrains Mono, monospace'}}>⫶</span> — punto (pensamiento) + barra (presencia). Animado: el punto respira cuando Daimon escucha.<br/><br/>
+              Serif italic ("Fraunces") SOLO en momentos narrativos: "Daimon speaks", "pondered for Xs", placeholders. Todo lo demás Inter + JetBrains Mono.
+            </DCPostIt>
+
+            <DCPostIt top={790} left={200} rotate={2} width={260}>
+              Light comparte geometría exacta con dark. Misma trama, mismo teal (ajustado por contraste), mismo código siempre dark (por legibilidad y carácter). El papel cálido <span style={{fontFamily:'JetBrains Mono, monospace', fontSize:11}}>#f8f6f1</span> es la base.
+            </DCPostIt>
+
+            <DCPostIt top={790} left={1720} rotate={-1.5} width={260}>
+              Código no es texto plano: syntax highlighting real (keywords magenta, tipos dorado, funciones teal, strings sage), gutter con números, chrome con semáforo tenue, botones copy/apply reales, soporte para diffs con línea +/−.
+            </DCPostIt>
+          </DCSection>
+
+          <div style={{ padding: '0 60px 60px', maxWidth: 1400, margin: '0 auto' }}>
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24,
+              fontFamily: 'Inter, system-ui, sans-serif', color: 'rgba(40,30,20,0.82)',
+            }}>
+              <div style={{
+                padding: 22, background: '#faf6ee',
+                border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6,
+                fontSize: 13.5, lineHeight: 1.65,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Sistema unificado light/dark</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  <li><b>Paleta base:</b> papel cálido <code style={{fontFamily:'JetBrains Mono'}}>#f8f6f1</code> / near-black cálido <code style={{fontFamily:'JetBrains Mono'}}>#141210</code>. Nunca grises fríos.</li>
+                  <li><b>Acento:</b> un único teal, ajustado en intensidad por modo (<code style={{fontFamily:'JetBrains Mono'}}>#2d8573</code> ↔ <code style={{fontFamily:'JetBrains Mono'}}>#5dbfa7</code>).</li>
+                  <li><b>Código:</b> siempre dark, independientemente del modo. Es un territorio propio dentro de la app.</li>
+                  <li><b>Tipografía:</b> Inter (UI) + Fraunces italic (momentos) + JetBrains Mono (datos, código, atajos).</li>
+                </ul>
+              </div>
+              <div style={{
+                padding: 22, background: '#faf6ee',
+                border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6,
+                fontSize: 13.5, lineHeight: 1.65,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Detalles con carácter</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  <li><b>Hilo vertical:</b> una línea fina recorre la columna del chat uniendo todos los mensajes como un pensamiento continuo.</li>
+                  <li><b>Speaker headers:</b> "You" / "Daimon <i style={{fontFamily:'Fraunces',color:'#2d8573'}}>speaks</i>" con hora mono a la derecha, línea divisoria entre ambos.</li>
+                  <li><b>Tools:</b> barra de estado a la izquierda (teal/ámbar), click expande a mini-dashboard con input JSON + output con scroll + botón "open in workspace".</li>
+                  <li><b>Reasoning:</b> pill compacta "pondered for 6s" en italic serif — colapsada por defecto, borde teal cuando se abre.</li>
+                  <li><b>Command bar:</b> "summon…" en italic serif, glifos cuadrados en lugar de iconos genéricos.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div style={{
+              marginTop: 24, padding: 22, background: '#faf6ee',
+              border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6,
+              fontSize: 13, color: 'rgba(40,30,20,0.7)', lineHeight: 1.6,
+              fontFamily: 'Inter, system-ui, sans-serif',
+            }}>
+              <b>¿Y ahora?</b> Si esto te late, la siguiente iteración cubre: <i>(1)</i> estados streaming/error/vacío, <i>(2)</i> más tipos de artifact en workspace (tablas, imágenes, diffs navegables), <i>(3)</i> el resto del sidebar (Overview, Memory, Tools), <i>(4)</i> mobile. Si quieres mover alguna pieza (el hilo vertical es quizá el move más arriesgado; también podemos usar el teal más saturado, o serifs más fuertes), dímelo.
+            </div>
+          </div>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
+</content>
+<parameter name="asset">Daimon v2 — Liminal

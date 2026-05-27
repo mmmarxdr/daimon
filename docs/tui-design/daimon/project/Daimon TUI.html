@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Daimon — TUI</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300;1,9..144,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    html, body { margin: 0; padding: 0; background: #0a0b0f; font-family: 'Inter', system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel" src="tui.jsx"></script>
+  <script type="text/babel" src="tui-screens-a.jsx"></script>
+  <script type="text/babel" src="tui-screens-b.jsx"></script>
+
+  <script type="text/babel">
+    function App() {
+      return (
+        <DesignCanvas background="#0a0b0f">
+          <DCSection
+            id="hero"
+            title="Daimon — TUI"
+            subtitle="The agent in your terminal. opencode-feeling, Daimon aesthetic: ⫶, italic stage directions, phosphor teal. All screens are dark, monospace, frameless — designed as actual terminal screenshots.">
+            <DCArtboard id="chat" label="02 · chat activo · tools + subagente + todolist + telemetría" width={1400} height={860}>
+              <TUI_Chat width={1400} height={860}/>
+            </DCArtboard>
+            <DCArtboard id="welcome" label="01 · boot / welcome" width={1200} height={760}>
+              <TUI_Welcome width={1200} height={760}/>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection
+            id="flows"
+            title="Flows críticos"
+            subtitle="Aprobación de edits, command palette, tools & MCPs. Cada uno mantiene el sidebar de telemetría / contexto donde aplica.">
+            <DCArtboard id="diff" label="03 · diff approval — hunk-by-hunk con rationale" width={1400} height={860}>
+              <TUI_Diff width={1400} height={860}/>
+            </DCArtboard>
+            <DCArtboard id="slash" label="04 · slash palette" width={1400} height={860}>
+              <TUI_Slash width={1400} height={860}/>
+            </DCArtboard>
+            <DCArtboard id="tools" label="05 · tools & MCPs" width={1400} height={860}>
+              <TUI_Tools width={1400} height={860}/>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection
+            id="rest"
+            title="Sessions, modelos, errores"
+            subtitle="Resumir hilos, cambiar modelo, y el momento en que Daimon pide permiso. Diseñados para no romper el ritmo del power user.">
+            <DCArtboard id="sessions" label="06 · sessions + model picker" width={1400} height={860}>
+              <TUI_Sessions width={1400} height={860}/>
+            </DCArtboard>
+            <DCArtboard id="error" label="07 · permission denied / policy prompt" width={1400} height={860}>
+              <TUI_Error width={1400} height={860}/>
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
