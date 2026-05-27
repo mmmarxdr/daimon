@@ -99,7 +99,7 @@ type MsgUser struct {
 
 // Render implements threadItem. Returns the user message styled as a bubble.
 func (m *MsgUser) Render(width int) string {
-	prefix := m.styles.label.Render("you  ")
+	prefix := m.styles.inkSoft.Render(glyphUser + " ")
 	inner := wrapText(m.text, width-ansi.StringWidth(prefix)-2)
 	lines := strings.Split(inner, "\n")
 	out := make([]string, 0, len(lines))
@@ -128,7 +128,7 @@ type MsgDaimon struct {
 
 // Render implements threadItem. Returns the daimon message styled as a bubble.
 func (m *MsgDaimon) Render(width int) string {
-	prefix := m.styles.dimLabel.Render("δ    ")
+	prefix := m.styles.accent.Render(glyphDaimon + " ")
 	inner := wrapText(m.text, width-ansi.StringWidth(prefix)-2)
 	lines := strings.Split(inner, "\n")
 	out := make([]string, 0, len(lines))
@@ -264,7 +264,7 @@ func (tl *ToolLine) Render(width int) string {
 	}
 
 	// Tool name — truncate with expand affordance if it overflows.
-	// When expanded==false and the name was truncated, show "↵ expand" hint.
+	// When expanded==false and the name was truncated, show "▸ view" hint.
 	nameField := "  " + tl.name
 	stateW := ansi.StringWidth(stateStr)
 	statsStr := tl.renderStats()
@@ -284,7 +284,6 @@ func (tl *ToolLine) Render(width int) string {
 		}
 		wasTruncated = true
 	}
-	_ = wasTruncated // expand affordance rendered below
 
 	line := stateStr + nameField
 	lineW := ansi.StringWidth(line)
@@ -295,6 +294,16 @@ func (tl *ToolLine) Render(width int) string {
 		}
 		line += strings.Repeat(" ", gap) + tl.styles.dimLabel.Render(statsStr)
 	}
+
+	// Expand affordance: when the name was truncated and the tool is not
+	// yet expanded, append a "▸ view" hint on its own line so the user
+	// knows they can expand it.
+	if wasTruncated && !tl.expanded {
+		hint := tl.styles.dimLabel.Render("  " + glyphExpand + " view")
+		hint = ansi.Truncate(hint, width, "")
+		line += "\n" + hint
+	}
+
 	return line
 }
 
@@ -325,7 +334,7 @@ func (tl *ToolLine) renderStats() string {
 // ---------------------------------------------------------------------------
 
 // Subagent renders a spawned sub-agent's activity as a nested mini-thread.
-// Uses the pink accent (#f48fb1) per the component spec.
+// Uses the pink accent (#d67b9e) per the component spec.
 type Subagent struct {
 	id     string // EventSubagentSpawned meta["subagent_id"] or similar
 	thread thread // nested mini-thread
