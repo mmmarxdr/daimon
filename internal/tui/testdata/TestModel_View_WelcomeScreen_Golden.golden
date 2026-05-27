@@ -1,5 +1,5 @@
-⫶ · /home/user/project · main                 claude-3-5 · build · $0.00 · ready
-
+⫶ │ /home/user/project · main │ model claude-3-5 · mode build    $0.00 · ● ready
+────────────────────────────────────────────────────────────────────────────────
 
 
 
@@ -9,6 +9,8 @@
              your embedded AI agent
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ › > message daimon…                                                          │
+│ › add a follow-up, or ⌃C to interrupt…                                    …  │
+│ ⇥ /commands    @ mention file    # add to memory    ⌃R retry [BUILD MODE] …  │
 └──────────────────────────────────────────────────────────────────────────────┘
-enter: send  ctrl+c: quit  tab: sessions  ^t: tools
+────────────────────────────────────────────────────────────────────────────────
+enter send   ⌃C quit   ⇥ sessions   ^t tools                     daimon listens.

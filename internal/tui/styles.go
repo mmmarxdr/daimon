@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,16 @@ type tuiStyles struct {
 	// Phase 1 introduces this slot and repoints existing borders to NormalBorder.
 	panelBorder lipgloss.Style
 
+	// text hierarchy — additional per-token style slots for topbar/footer/panels.
+	ink      lipgloss.Style // primary text (#eae5d8)
+	inkFaint lipgloss.Style // faint / ghost text (#4a4438)
+
+	// tagline: italic + inkFaint. Used in footer right-side "daimon listens." text.
+	tagline lipgloss.Style
+
+	// modePill: amber foreground + amber NormalBorder. Used in input bar mode badge.
+	modePill lipgloss.Style
+
 	// overlay compositing
 	dim lipgloss.Style // Faint overlay for the base behind modal dialogs
 	// paletteBox is the centralized border style for the command palette.
@@ -125,9 +136,10 @@ func newTuiStyles() tuiStyles {
 	amber := lipgloss.Color(colorAmber)
 	pink := lipgloss.Color(colorPink)
 	bg := lipgloss.Color(colorBG)
-	ink := lipgloss.Color(colorInk)
+	inkColor := lipgloss.Color(colorInk)
 	inkMuted := lipgloss.Color(colorInkMuted)
 	inkSoft := lipgloss.Color(colorInkSoft)
+	inkFaintColor := lipgloss.Color(colorInkFaint)
 	red := lipgloss.Color(colorRed)
 	green := lipgloss.Color(colorGreen)
 	line := lipgloss.Color(colorLine)
@@ -136,7 +148,7 @@ func newTuiStyles() tuiStyles {
 	return tuiStyles{
 		// topBar: background colorBG, foreground colorInk (warm parchment).
 		// Was #cdd6f4 (Catppuccin) — corrected to design token colorInk.
-		topBar: lipgloss.NewStyle().Background(bg).Foreground(ink),
+		topBar: lipgloss.NewStyle().Background(bg).Foreground(inkColor),
 		footer: lipgloss.NewStyle().Faint(true).Italic(true),
 		// border: square NormalBorder colored with colorLine (was RoundedBorder).
 		// NormalBorder has same thickness as RoundedBorder, so off-by-N math unchanged.
@@ -170,6 +182,20 @@ func newTuiStyles() tuiStyles {
 			Padding(0, 1).
 			BorderForeground(line),
 
+		// ink: primary text color (#eae5d8).
+		ink: lipgloss.NewStyle().Foreground(inkColor),
+		// inkFaint: faint/ghost text (#4a4438).
+		inkFaint: lipgloss.NewStyle().Foreground(inkFaintColor),
+
+		// tagline: italic + inkFaint. Used in footer "daimon listens." right-side tagline.
+		tagline: lipgloss.NewStyle().Italic(true).Foreground(inkFaintColor),
+
+		// modePill: amber foreground + amber NormalBorder. Used in input bar mode badge.
+		modePill: lipgloss.NewStyle().
+			Foreground(amber).
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(amber),
+
 		dim: lipgloss.NewStyle().Faint(true),
 		// paletteBox: NormalBorder (square) + accent. Command palette uses accent border
 		// per design (tui-components.jsx:441: "1px solid ${TUI.accent}", Outline accent).
@@ -188,4 +214,33 @@ func newTuiStyles() tuiStyles {
 // Example: s.panelHeader("telemetry") → "── TELEMETRY" (ANSI-colored with dimLabel).
 func (s tuiStyles) panelHeader(title string) string {
 	return s.dimLabel.Render("── " + strings.ToUpper(title))
+}
+
+// panelHeaderWithBadge returns a header line with the title left-aligned and
+// the badge right-aligned within the given inner content width.
+//
+// Example: s.panelHeaderWithBadge("telemetry", "live") within innerWidth=28
+// → "── TELEMETRY           live"
+//
+// If innerWidth <= 0 or the title+badge don't fit, the badge is appended with a
+// single space separator (no spacer). Use ansi.StringWidth for all width math.
+func (s tuiStyles) panelHeaderWithBadge(title, badge string) string {
+	return s.panelHeaderWithBadgeWidth(title, badge, 0)
+}
+
+// panelHeaderWithBadgeWidth is the width-aware variant of panelHeaderWithBadge.
+// When innerWidth > 0, the badge is right-aligned within that width.
+func (s tuiStyles) panelHeaderWithBadgeWidth(title, badge string, innerWidth int) string {
+	left := s.dimLabel.Render("── " + strings.ToUpper(title))
+	right := s.dimLabel.Render(badge)
+	if innerWidth <= 0 {
+		return left + " " + right
+	}
+	leftW := ansi.StringWidth(left)
+	rightW := ansi.StringWidth(right)
+	gap := innerWidth - leftW - rightW
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
 }

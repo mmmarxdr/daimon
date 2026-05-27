@@ -71,7 +71,9 @@ func fakeSessionConvs() []store.Conversation {
 
 func TestEnvironmentPanel_Render_WithData_ContainsAllFields(t *testing.T) {
 	p := fakeEnvPanel()
-	got := p.Render(40, 20)
+	// width=46: box overhead (border+padding = 4 cols) + enough inner space for
+	// "model   anthropic/claude-sonnet-4-6" (35 visible chars) + 2-col lipgloss slack.
+	got := p.Render(46, 20)
 
 	if got == "" {
 		t.Fatal("environmentPanel.Render with data: got empty string, want non-empty")

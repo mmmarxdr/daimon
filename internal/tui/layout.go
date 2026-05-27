@@ -38,11 +38,13 @@ func renderLayout(m Model) string {
 	hasInput := inputBarScreens[m.screen]
 
 	// 2. Reserve rows for chrome.
-	topBarHeight := 1
-	footerHeight := 1
+	// topBar now renders 2 lines: content row + bottom border rule.
+	topBarHeight := 2
+	// footer now renders 2 lines: top border rule + hints row.
+	footerHeight := 2
 	inputHeight := 0
 	if hasInput {
-		inputHeight = 3 // NormalBorder + 1 row content
+		inputHeight = 4 // NormalBorder top + 2 content rows (input + chips) + NormalBorder bottom
 	}
 	centerHeight := m.height - topBarHeight - footerHeight - inputHeight
 	if centerHeight < 0 {

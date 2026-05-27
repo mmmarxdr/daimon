@@ -31,6 +31,42 @@ import (
 	"daimon/internal/tool"
 )
 
+// wrapPanelBox wraps the given content string in a bordered box using s.panelBorder.
+//
+// Width math (lipgloss v1.1.0 verified):
+//
+//	panelBorder.Width(N).Render(content) → outer box width = N + 2 (border only).
+//	Padding(0,1) is included within N, so text content area = N - 2.
+//	To get outer == `width`: N = width - 2.
+//	Text content area = (width-2) - 2 = width - 4.
+//
+// Pre-truncate each content line to (width-5) to avoid lipgloss word-wrap at exactly
+// content_area-1 columns (verified: lipgloss wraps when visible >= Width-1).
+// Returns "" unchanged so callers can short-circuit on empty content.
+func wrapPanelBox(content string, width int, s tuiStyles) string {
+	if content == "" {
+		return ""
+	}
+	// Width(N) → outer = N+2. So N = width-2 gives outer = width.
+	lipglossW := width - 2
+	if lipglossW < 1 {
+		lipglossW = 1
+	}
+	// Text content area = lipglossW - 2 (padding each side).
+	// Truncate to contentArea-1 to avoid lipgloss word-wrap edge case.
+	truncW := lipglossW - 3 // = width - 5
+	if truncW < 1 {
+		truncW = 1
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > truncW {
+			lines[i] = ansi.Truncate(line, truncW, "…")
+		}
+	}
+	return s.panelBorder.Width(lipglossW).Render(strings.Join(lines, "\n"))
+}
+
 // ---------------------------------------------------------------------------
 // telemetryPanel — tokens / cost / tool-call counts
 // ---------------------------------------------------------------------------
@@ -75,13 +111,13 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	// Inner width: no manual margin is prepended; just clamp to a minimum.
-	inner := width - 1
+	// Inner width: panelBorder overhead = 4 (2 border + 2 padding).
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
 
-	header := p.styles.panelHeader("telemetry")
+	header := p.styles.panelHeaderWithBadge("telemetry", "live")
 	tokLine := fmt.Sprintf("tokens  %d", p.totalIn)
 	costLine := fmt.Sprintf("cost    $%.4f", p.totalCost)
 	toolLine := fmt.Sprintf("tools   %d", p.toolCalls)
@@ -99,7 +135,7 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		rows = append(rows, ansi.Truncate(p.styles.errStyle.Render(errLine), inner, "…"))
 	}
 
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -129,13 +165,23 @@ func (p *todolistPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	// Inner width: panelBorder overhead = 4 (2 border + 2 padding).
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
 
+	// Badge: "X/Y · auto" where X=done/completed, Y=total.
+	done := 0
+	for _, item := range p.list.Items {
+		if item.Status == "done" || item.Status == "completed" {
+			done++
+		}
+	}
+	badge := fmt.Sprintf("%d/%d · auto", done, len(p.list.Items))
+
 	rows := []string{
-		ansi.Truncate(p.styles.panelHeader("todo"), inner, "…"),
+		ansi.Truncate(p.styles.panelHeaderWithBadgeWidth("todo", badge, inner), inner, "…"),
 	}
 	for _, item := range p.list.Items {
 		var marker string
@@ -150,7 +196,7 @@ func (p *todolistPanel) Render(width, _ int) string {
 		line := marker + " " + item.Content
 		rows = append(rows, ansi.Truncate(line, inner, "…"))
 	}
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +224,7 @@ func (p *modelPickerPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
@@ -187,7 +233,7 @@ func (p *modelPickerPanel) Render(width, _ int) string {
 	provLine := ansi.Truncate(p.styles.dimLabel.Render(p.provider), inner, "…")
 	modelLine := ansi.Truncate(p.styles.dimLabel.Render(p.model), inner, "…")
 
-	return strings.Join([]string{header, provLine, modelLine}, "\n")
+	return wrapPanelBox(strings.Join([]string{header, provLine, modelLine}, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -224,7 +270,7 @@ func (p *toolDetailPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
@@ -257,7 +303,7 @@ func (p *toolDetailPanel) Render(width, _ int) string {
 		srcLine,
 	}
 
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +343,8 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	// Inner width: panelBorder overhead = 4 (2 border + 2 padding).
+	inner := width - 4
 	if inner < 8 {
 		inner = 8
 	}
@@ -326,7 +373,7 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 		ansi.Truncate(barLine, inner, "…"),
 		ansi.Truncate(p.styles.dimLabel.Render(pctLine), inner, "…"),
 	}
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +410,7 @@ func (p *environmentPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 8 {
 		inner = 8
 	}
@@ -406,7 +453,7 @@ func (p *environmentPanel) Render(width, _ int) string {
 		rows = append(rows, row)
 	}
 
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +489,7 @@ func (p *activePolicyPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
@@ -451,7 +498,7 @@ func (p *activePolicyPanel) Render(width, _ int) string {
 	modeLine := ansi.Truncate(p.styles.amber.Render("mode: "+p.mode), inner, "…")
 	noteLine := ansi.Truncate(p.styles.dimLabel.Render("tool gates enforced"), inner, "…")
 
-	return strings.Join([]string{header, modeLine, noteLine}, "\n")
+	return wrapPanelBox(strings.Join([]string{header, modeLine, noteLine}, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -483,7 +530,7 @@ func (p *recentDenialsPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 4 {
 		inner = 4
 	}
@@ -509,7 +556,7 @@ func (p *recentDenialsPanel) Render(width, _ int) string {
 		}
 	}
 
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
 // ---------------------------------------------------------------------------
@@ -542,7 +589,7 @@ func (p *resumeListPanel) Render(width, _ int) string {
 		return ""
 	}
 
-	inner := width - 1
+	inner := width - 4
 	if inner < 8 {
 		inner = 8
 	}
@@ -578,5 +625,5 @@ func (p *resumeListPanel) Render(width, _ int) string {
 		rows = append(rows, p.styles.dimLabel.Render(ansi.Truncate(line, inner, "…")))
 	}
 
-	return strings.Join(rows, "\n")
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }

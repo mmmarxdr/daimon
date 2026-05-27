@@ -47,32 +47,70 @@ func (tb *topBar) SetData(brand, cwd, branch, model, mode, cost, status string) 
 	tb.status = status
 }
 
-// Render returns a single-line string of exactly `width` visible columns.
-// Slots are separated by " · " and right-side slots are right-aligned.
+// Render returns a two-line string:
+//
+//	Line 1: topBar content with │ separators and colored segments.
+//	Line 2: a full-width horizontal rule of ─ in the line/dimLabel color.
+//
+// Design segments:
+//
+//	LEFT:  ⫶(accent) daimon(ink) │ path/(inkMuted)+project(inkSoft) · branch(pink) │ model(inkMuted) model(ink) · mode(inkMuted) mode(amber)
+//	RIGHT: cost(inkMuted) · ●(accent) status(inkMuted)
 func (tb *topBar) Render(width int, s tuiStyles) string {
-	sep := " · "
+	pipe := s.inkFaint.Render(" │ ")
+	dot := s.inkFaint.Render(" · ")
 
-	// Left group: brand + cwd + branch
-	left := tb.brand
+	// Brand segment: ⫶ (accent) + " daimon" (ink).
+	brand := s.accent.Render(tb.brand)
+
+	// CWD segment: split into leading path (inkMuted) + final segment (inkSoft).
+	cwdSeg := ""
 	if tb.cwd != "" {
-		left += sep + tb.cwd
-	}
-	if tb.branch != "" {
-		left += sep + tb.branch
+		// Split at last "/" to get leading path + project name.
+		lastSlash := strings.LastIndex(tb.cwd, "/")
+		if lastSlash >= 0 && lastSlash < len(tb.cwd)-1 {
+			cwdSeg = s.dimLabel.Render(tb.cwd[:lastSlash+1]) + s.inkSoft.Render(tb.cwd[lastSlash+1:])
+		} else {
+			cwdSeg = s.inkSoft.Render(tb.cwd)
+		}
 	}
 
-	// Right group: model + mode + cost + status
-	right := tb.model
-	if tb.mode != "" {
-		right += sep + tb.mode
+	// Branch segment (only when non-empty).
+	branchSeg := ""
+	if tb.branch != "" {
+		branchSeg = s.pink.Render(tb.branch)
 	}
+
+	// Model+mode segment.
+	modelSeg := s.dimLabel.Render("model ") + s.ink.Render(tb.model)
+	modeSeg := s.dimLabel.Render("mode ") + s.amber.Render(tb.mode)
+
+	// Compose left side.
+	left := brand
+	if cwdSeg != "" {
+		left += pipe + cwdSeg
+		if branchSeg != "" {
+			left += dot + branchSeg
+		}
+	}
+	left += pipe + modelSeg
+	if tb.mode != "" {
+		left += dot + modeSeg
+	}
+
+	// Right side: cost · ● status.
+	right := ""
 	if tb.cost != "" {
-		right += sep + tb.cost
+		right += s.dimLabel.Render(tb.cost)
 	}
 	if tb.status != "" {
-		right += sep + tb.status
+		if right != "" {
+			right += dot
+		}
+		right += s.accent.Render("●") + s.dimLabel.Render(" "+tb.status)
 	}
 
+	// Compose the topbar line with right-align spacer.
 	leftW := ansi.StringWidth(left)
 	rightW := ansi.StringWidth(right)
 	gap := width - leftW - rightW
@@ -86,13 +124,19 @@ func (tb *topBar) Render(width int, s tuiStyles) string {
 		gap = 1
 	}
 
-	line := s.accent.Render(left) + strings.Repeat(" ", gap) + s.dimLabel.Render(right)
-	// Pad or truncate to exactly width visible columns.
-	lineW := ansi.StringWidth(line)
-	if lineW < width {
-		line += strings.Repeat(" ", width-lineW)
+	line1 := left + strings.Repeat(" ", gap) + right
+	// Pad/truncate to exactly width.
+	line1W := ansi.StringWidth(line1)
+	if line1W < width {
+		line1 += strings.Repeat(" ", width-line1W)
 	}
-	return s.topBar.Render(ansi.Truncate(line, width, ""))
+	line1 = ansi.Truncate(line1, width, "")
+	line1 = s.topBar.Render(line1)
+
+	// Line 2: bottom border rule of ─ in dimLabel (colorLine token).
+	line2 := s.dimLabel.Render(strings.Repeat("─", width))
+
+	return line1 + "\n" + line2
 }
 
 // ---------------------------------------------------------------------------
@@ -110,18 +154,103 @@ func (fh *footerHints) SetScreen(s screenState) {
 	fh.screen = s
 }
 
-// Render returns a single-line footer hint string for the current screen.
+// Render returns a multi-line footer string for the current screen.
+// Layout (two rows):
+//  1. A full-width horizontal rule of ─ in the line token.
+//  2. Left hints (symbol in accent, label in inkMuted) + flexible spacer +
+//     right-aligned italic tagline "daimon listens." in inkFaint.
 func (fh *footerHints) Render(width int, s tuiStyles) string {
-	hints := fh.hintsForScreen()
-	return s.hint.Render(ansi.Truncate(hints, width, "…"))
+	// Row 1: horizontal rule of ─ characters in colorLine style.
+	rule := s.dimLabel.Render(strings.Repeat("─", width))
+
+	// Row 2: hints left + spacer + tagline right.
+	hintsStr := fh.renderHints(s)
+	taglineStr := s.tagline.Render("daimon listens.")
+
+	hintsW := ansi.StringWidth(hintsStr)
+	taglineW := ansi.StringWidth(taglineStr)
+	gap := width - hintsW - taglineW
+	if gap < 1 {
+		gap = 1
+	}
+	row2 := hintsStr + strings.Repeat(" ", gap) + taglineStr
+	// Pad/truncate row2 to exactly width.
+	row2W := ansi.StringWidth(row2)
+	if row2W < width {
+		row2 += strings.Repeat(" ", width-row2W)
+	} else if row2W > width {
+		row2 = ansi.Truncate(row2, width, "")
+	}
+
+	return rule + "\n" + row2
 }
 
+// renderHints returns the left-side hint string for the current screen,
+// with symbols in accent color and labels in inkMuted.
+func (fh *footerHints) renderHints(s tuiStyles) string {
+	type hint struct {
+		sym   string
+		label string
+	}
+
+	renderHint := func(sym, label string) string {
+		return s.accent.Render(sym) + s.dimLabel.Render(" "+label)
+	}
+	sep := s.dimLabel.Render("   ")
+
+	switch fh.screen {
+	case screenChat:
+		hints := []hint{
+			{"⇥", "/commands"},
+			{"⌃C", "interrupt"},
+			{"⌃R", "retry turn"},
+			{"⌃E", "edit last"},
+			{"⌃S", "save session"},
+		}
+		parts := make([]string, len(hints))
+		for i, h := range hints {
+			parts[i] = renderHint(h.sym, h.label)
+		}
+		return strings.Join(parts, sep)
+	case screenWelcome:
+		return renderHint("enter", "send") + sep +
+			renderHint("⌃C", "quit") + sep +
+			renderHint("⇥", "sessions") + sep +
+			renderHint("^t", "tools")
+	case screenDiff:
+		return renderHint("↑↓", "scroll hunks") + sep +
+			renderHint("q", "back") + sep +
+			renderHint("⌃C", "quit")
+	case screenSlash:
+		return renderHint("↑↓", "navigate") + sep +
+			renderHint("enter", "run") + sep +
+			renderHint("esc", "close") + sep +
+			renderHint("⌃C", "quit")
+	case screenTools:
+		return renderHint("↑↓", "navigate") + sep +
+			renderHint("esc", "back") + sep +
+			renderHint("⌃C", "quit")
+	case screenSessions:
+		return renderHint("↑↓", "navigate") + sep +
+			renderHint("enter", "resume") + sep +
+			renderHint("esc", "back") + sep +
+			renderHint("⌃C", "quit")
+	case screenError:
+		return renderHint("esc", "back to chat") + sep +
+			renderHint("⌃C", "quit")
+	default:
+		return renderHint("⌃C", "quit")
+	}
+}
+
+// hintsForScreen returns the plain text hint string for the current screen.
+// Kept for backward compatibility with any callers that expect a plain string.
 func (fh *footerHints) hintsForScreen() string {
 	switch fh.screen {
 	case screenWelcome:
 		return "enter: send  ctrl+c: quit  tab: sessions  ^t: tools"
 	case screenChat:
-		return "enter: send  /: commands  tab: sessions  ^t: tools  ctrl+c: quit"
+		return "⇥ /commands   ⌃C interrupt   ⌃R retry turn   ⌃E edit last   ⌃S save session"
 	case screenDiff:
 		return "↑↓: scroll hunks  q: back to chat  ctrl+c: quit"
 	case screenSlash:
@@ -151,8 +280,11 @@ type inputBar struct {
 // newInputBar constructs a ready-to-use inputBar.
 func newInputBar() inputBar {
 	ti := textinput.New()
-	ti.Placeholder = "message daimon…"
+	ti.Placeholder = "add a follow-up, or ⌃C to interrupt…"
 	ti.CharLimit = 4096
+	// Set Prompt to "" so the textinput does not render its own "> " prompt;
+	// the sentinel "› " is prepended manually in Render to avoid double-prompt.
+	ti.Prompt = ""
 	ti.Focus()
 	return inputBar{ti: ti}
 }
@@ -187,11 +319,69 @@ func (ib *inputBar) Blur() {
 
 // Render returns the rendered input bar capped to `width` visible columns.
 // The sentinel string inputBarSentinel is always present so tests can detect it.
+//
+// Layout (inside the inputBarStyle border+padding box):
+//
+//	Row 1: › (accent sentinel) + textinput view
+//	Row 2: ⇥ /commands  @ mention file  # add to memory  ⌃R retry  <spacer>  BUILD MODE  ⇧⇥ switch
 func (ib *inputBar) Render(width int, s tuiStyles) string {
-	ib.ti.Width = width - 4 // subtract border + padding (2 each side)
+	// Width math (lipgloss v1.1.0): inputBarStyle.Width(N).Render → outer = N+2.
+	// Padding(0,1) is inside N, so text content area = N-2.
+	// To get outer = width: N = width-2.  Content area = width-4.
+	lipglossW := width - 2
+	if lipglossW < 1 {
+		lipglossW = 1
+	}
+	contentW := lipglossW - 2 // text area inside padding
+	if contentW < 1 {
+		contentW = 1
+	}
+	// Textinput width: content area minus the "› " sentinel (2 visible chars).
+	ib.ti.Width = contentW - 2
 	if ib.ti.Width < 1 {
 		ib.ti.Width = 1
 	}
-	inner := inputBarSentinel + ib.ti.View()
-	return s.inputBarStyle.Width(width - 2).Render(inner)
+
+	// Row 1: accent sentinel + input view.
+	row1 := s.accent.Render(inputBarSentinel) + ib.ti.View()
+
+	// Row 2: chips left + spacer + mode pill + switch hint right.
+	sep := s.dimLabel.Render("    ")
+	chip := func(sym, label string) string {
+		return s.accent.Render(sym) + s.dimLabel.Render(" "+label)
+	}
+	chipsLeft := chip("⇥", "/commands") + sep +
+		chip("@", "mention file") + sep +
+		chip("#", "add to memory") + sep +
+		chip("⌃R", "retry")
+
+	// Render the mode pill as inline bracketed text (single line, amber).
+	// A lipgloss bordered box would produce 3 lines; inline brackets keep it on one line.
+	modePillStr := s.amber.Render("[BUILD MODE]")
+	switchHint := chip("⇧⇥", "switch")
+
+	chipsLeftW := ansi.StringWidth(chipsLeft)
+	modeW := ansi.StringWidth(modePillStr)
+	switchW := ansi.StringWidth(switchHint)
+	// gap between chips and mode pill + switch hint: at least 1 space.
+	gap := contentW - chipsLeftW - modeW - 1 - switchW
+	if gap < 1 {
+		gap = 1
+	}
+	row2 := chipsLeft + strings.Repeat(" ", gap) + modePillStr + " " + switchHint
+
+	// Pre-truncate to contentW-1 to avoid lipgloss word-wrap edge case (wraps at Width-1).
+	truncW := contentW - 1
+	if truncW < 1 {
+		truncW = 1
+	}
+	if ansi.StringWidth(row1) > truncW {
+		row1 = ansi.Truncate(row1, truncW, "…")
+	}
+	if ansi.StringWidth(row2) > truncW {
+		row2 = ansi.Truncate(row2, truncW, "…")
+	}
+
+	content := row1 + "\n" + row2
+	return s.inputBarStyle.Width(lipglossW).Render(content)
 }
