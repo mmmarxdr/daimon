@@ -17,7 +17,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -185,11 +184,12 @@ func (m *MsgDaimon) Render(width int) string {
 // Reasoning — collapsed-by-default reasoning block
 // ---------------------------------------------------------------------------
 
-// Reasoning renders the model's internal reasoning text.
+// Reasoning renders the model's internal reasoning span.
 // Collapsed by default; Expand/Collapse toggles visibility.
 // Implements the Expandable interface (architecture.md).
 type Reasoning struct {
 	text     string
+	duration time.Duration // span duration from EventReasoningEnd; 0 → still streaming
 	expanded bool
 	styles   tuiStyles
 }
@@ -197,30 +197,42 @@ type Reasoning struct {
 // Expand shows the full reasoning text.
 func (r *Reasoning) Expand() { r.expanded = true }
 
-// Collapse hides the reasoning text (shows a summary line only).
+// Collapse hides the reasoning text (shows the summary line only).
 func (r *Reasoning) Collapse() { r.expanded = false }
 
 // Expanded reports whether the reasoning is currently expanded.
 func (r *Reasoning) Expanded() bool { return r.expanded }
 
-// Render implements threadItem. When collapsed, shows a one-line summary
-// that does NOT reveal the reasoning content — only a character count and
-// an expand affordance. When expanded, shows the full text.
-func (r *Reasoning) Render(width int) string {
-	prefix := r.styles.dimLabel.Render("△ reasoning  ")
-	if !r.expanded {
-		// Collapsed: show character count + expand affordance, no content.
-		charCount := utf8.RuneCountInString(r.text)
-		summary := fmt.Sprintf("(%d chars) — press r to expand", charCount)
-		return prefix + r.styles.hint.Render(ansi.Truncate(summary, width-ansi.StringWidth(prefix)-1, "…"))
+// ponderLabel is the chevron + "pondered for <duration>" summary line. While
+// the span is still streaming (duration == 0) it reads "pondering…" rather
+// than a fabricated duration. Per tui.jsx Reasoning.
+func (r *Reasoning) ponderLabel() string {
+	chevron := "▸"
+	if r.expanded {
+		chevron = "▾"
 	}
-	inner := wrapText(r.text, width-ansi.StringWidth(prefix)-2)
-	lines := strings.Split(inner, "\n")
-	out := make([]string, 0, len(lines)+1)
-	out = append(out, prefix+r.styles.hint.Render(lines[0]))
-	for _, line := range lines[1:] {
-		indent := strings.Repeat(" ", ansi.StringWidth(prefix))
-		out = append(out, indent+r.styles.hint.Render(line))
+	phrase := "pondering…"
+	if r.duration > 0 {
+		phrase = "pondered for " + formatDuration(r.duration)
+	}
+	return r.styles.inkFaint.Render(chevron) + " " + r.styles.dimLabel.Italic(true).Render(phrase)
+}
+
+// Render implements threadItem. Collapsed shows only the ponder summary (never
+// the reasoning content); expanded adds the body in a left-bordered, serif-
+// italic block beneath it, per tui.jsx Reasoning.
+func (r *Reasoning) Render(width int) string {
+	label := r.ponderLabel()
+	if !r.expanded {
+		return ansi.Truncate(label, width, "…")
+	}
+	// Expanded: body indented under a faint left-border bar, italic muted.
+	bar := r.styles.inkFaint.Render("│") + " "
+	barW := ansi.StringWidth(bar)
+	inner := wrapText(r.text, width-barW)
+	out := []string{label}
+	for _, line := range strings.Split(inner, "\n") {
+		out = append(out, bar+r.styles.inkSoft.Italic(true).Render(line))
 	}
 	return strings.Join(out, "\n")
 }

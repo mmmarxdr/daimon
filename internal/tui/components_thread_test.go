@@ -142,6 +142,47 @@ func TestReasoning_Expand_Toggle(t *testing.T) {
 	}
 }
 
+// TestReasoning_Collapsed_PonderedLabel asserts the design collapsed line —
+// "▸ pondered for <duration>" — without revealing the reasoning content.
+func TestReasoning_Collapsed_PonderedLabel(t *testing.T) {
+	s := newTuiStyles()
+	r := &Reasoning{text: "secret thoughts", duration: 6 * time.Second, styles: s}
+	got := r.Render(80)
+	for _, want := range []string{"▸", "pondered for", "6"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("collapsed reasoning missing %q\ngot: %q", want, got)
+		}
+	}
+	if strings.Contains(got, "secret thoughts") {
+		t.Errorf("collapsed reasoning must not reveal text\ngot: %q", got)
+	}
+}
+
+// TestReasoning_Expanded_ChevronAndBody asserts expanded shows the open chevron
+// "▾ pondered for <duration>" plus the reasoning body.
+func TestReasoning_Expanded_ChevronAndBody(t *testing.T) {
+	s := newTuiStyles()
+	r := &Reasoning{text: "the full reasoning", duration: 6 * time.Second, styles: s}
+	r.Expand()
+	got := r.Render(80)
+	for _, want := range []string{"▾", "pondered for", "the full reasoning"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expanded reasoning missing %q\ngot: %q", want, got)
+		}
+	}
+}
+
+// TestReasoning_Pondering_WhenNoDuration: an in-progress reasoning block (no
+// duration yet) shows "pondering…" rather than a fabricated duration.
+func TestReasoning_Pondering_WhenNoDuration(t *testing.T) {
+	s := newTuiStyles()
+	r := &Reasoning{text: "x", styles: s}
+	got := r.Render(80)
+	if !strings.Contains(got, "pondering") {
+		t.Errorf("reasoning without duration must show 'pondering…'\ngot: %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ToolLine
 // ---------------------------------------------------------------------------

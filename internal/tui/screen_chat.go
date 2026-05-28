@@ -245,6 +245,7 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 				if r, ok := m.thread.items[i].(*Reasoning); ok {
 					rCopy := *r
 					rCopy.text = ev.Text
+					rCopy.duration = time.Duration(ev.DurationMs) * time.Millisecond
 					newItems := make([]threadItem, len(m.thread.items))
 					copy(newItems, m.thread.items)
 					newItems[i] = &rCopy
