@@ -672,6 +672,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					Iteration:  i,
 					Meta: mergeSubagentMeta(conv, map[string]string{
 						"conv_id": conv.ID,
+						"input":   string(tc.Input),
 					}),
 				})
 			}

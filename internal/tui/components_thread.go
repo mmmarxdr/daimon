@@ -12,7 +12,9 @@ package tui
 // RULE: All colors come from the tuiStyles struct — no hex literals here.
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -254,12 +256,17 @@ type toolStats struct {
 type ToolLine struct {
 	callID       string    // matches notify.Event.ToolCallID
 	name         string    // tool name (e.g. "bash", "read_file")
+	input        string    // tool argument/input (e.g. a path or query); flex column
 	state        toolState // current lifecycle state
 	stats        toolStats // populated on completion
 	spinnerFrame int       // current braille frame index
-	expanded     bool      // show expand affordance when name is truncated
 	styles       tuiStyles
 }
+
+// toolNameCol is the minimum width of the tool-name column, so the argument
+// (input) columns align across consecutive tool lines (design: fixed name +
+// flexible input). Names longer than this are not truncated by the padding.
+const toolNameCol = 14
 
 // spinnerTickMsg is the tea.Msg returned by Tick() to advance the spinner.
 type spinnerTickMsg struct {
@@ -282,8 +289,14 @@ func (tl *ToolLine) AdvanceSpinner() {
 	tl.spinnerFrame = (tl.spinnerFrame + 1) % len(brailleSpinner)
 }
 
-// Render implements threadItem. Renders a single-line tool row (possibly
-// multi-line if expanded affordance is shown).
+// Render implements threadItem. Renders a single tool row laid out as
+//
+//	<glyph>  <name>        <input … flex>            <stats →>
+//
+// per tui.jsx ToolLine: a state glyph, a bold fixed-width name column, a
+// flexible input (argument) column that ellipsis-truncates, and right-aligned
+// stats. No view affordance is shown — expandable tool output is not wired on
+// the bus yet, so a ▸view hint would be dishonest.
 func (tl *ToolLine) Render(width int) string {
 	// State glyph + color.
 	var stateStr string
@@ -299,48 +312,44 @@ func (tl *ToolLine) Render(width int) string {
 		stateStr = tl.styles.dimLabel.Render("○")
 	}
 
-	// Tool name — truncate with expand affordance if it overflows.
-	// When expanded==false and the name was truncated, show "▸ view" hint.
-	nameField := "  " + tl.name
-	stateW := ansi.StringWidth(stateStr)
 	statsStr := tl.renderStats()
 	statsW := ansi.StringWidth(statsStr)
-	// Budget: width - stateW - " " - statsW - some padding.
-	nameBudget := width - stateW - 1 - statsW - 2
-	if nameBudget < 8 {
-		nameBudget = 8
+
+	// Name column: glyph + 2 spaces + bold name, padded to a min width so the
+	// input columns align. Names longer than the column are not truncated here
+	// (toolRow truncates the whole row if width is exceeded).
+	name := tl.styles.label.Render(tl.name)
+	leftBlock := stateStr + "  " + name
+	if pad := toolNameCol - ansi.StringWidth(tl.name); pad > 0 {
+		leftBlock += strings.Repeat(" ", pad)
 	}
-	wasTruncated := false
-	if ansi.StringWidth(nameField) > nameBudget {
-		truncated := ansi.Truncate(nameField, nameBudget-3, "")
-		if !tl.expanded {
-			nameField = truncated + "…"
-		} else {
-			nameField = "  " + tl.name // show full name when expanded
+
+	// Flexible input column, ellipsis-truncated to the space left between the
+	// name column and the right-aligned stats.
+	if tl.input != "" {
+		avail := width - ansi.StringWidth(leftBlock) - 1 - statsW - 1
+		if avail < 1 {
+			avail = 1
 		}
-		wasTruncated = true
+		leftBlock += " " + tl.styles.inkSoft.Render(ansi.Truncate(tl.input, avail, "…"))
 	}
 
-	line := stateStr + nameField
-	lineW := ansi.StringWidth(line)
-	if statsW > 0 {
-		gap := width - lineW - statsW
-		if gap < 1 {
-			gap = 1
-		}
-		line += strings.Repeat(" ", gap) + tl.styles.dimLabel.Render(statsStr)
-	}
+	return toolRow(leftBlock, statsStr, statsW, width, tl.styles)
+}
 
-	// Expand affordance: when the name was truncated and the tool is not
-	// yet expanded, append a "▸ view" hint on its own line so the user
-	// knows they can expand it.
-	if wasTruncated && !tl.expanded {
-		hint := tl.styles.dimLabel.Render("  " + glyphExpand + " view")
-		hint = ansi.Truncate(hint, width, "")
-		line += "\n" + hint
+// toolRow places leftBlock on the left and the (plain) stats string
+// right-aligned within width, padding the gap with spaces. When the two would
+// collide, leftBlock is ellipsis-truncated so the row never exceeds width.
+func toolRow(leftBlock, stats string, statsW, width int, s tuiStyles) string {
+	if statsW == 0 {
+		return ansi.Truncate(leftBlock, width, "…")
 	}
-
-	return line
+	gap := width - ansi.StringWidth(leftBlock) - statsW
+	if gap < 1 {
+		leftBlock = ansi.Truncate(leftBlock, max(width-statsW-1, 1), "…")
+		gap = 1
+	}
+	return leftBlock + strings.Repeat(" ", gap) + s.dimLabel.Render(stats)
 }
 
 // renderStats formats the 4 stat slots as a compact string.
@@ -433,6 +442,38 @@ func wrapLine(line string, maxWidth int) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// toolInputSummary turns a tool's raw JSON input into a compact, human-readable
+// argument for the ToolLine input column. It prefers a salient single value
+// (path/file/pattern/query/command/url) when present; otherwise it shows a
+// single-key value, joins "k=v" pairs for multi-key objects, or returns the
+// raw string when the input is not a JSON object.
+func toolInputSummary(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil || len(m) == 0 {
+		return raw
+	}
+	for _, k := range []string{"path", "file", "filename", "pattern", "query", "command", "cmd", "url"} {
+		if v, ok := m[k]; ok {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	if len(m) == 1 {
+		for _, v := range m {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+	parts := make([]string, 0, len(m))
+	for k, v := range m {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, " ")
 }
 
 // nowHHMM returns the current wall-clock time formatted as "HH:MM" for use in

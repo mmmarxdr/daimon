@@ -493,61 +493,82 @@ func TestMsgUser_Render_GlyphUser(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 1a.5 — ToolLine must show ▸ view when output is truncated, not otherwise
+// Inc.2 slice 3 — ToolLine argument column + honest affordances
 // ---------------------------------------------------------------------------
 
-// TestToolLine_Expand_ShowsHintWhenTruncated verifies that when a ToolLine's
-// name is truncated (overflows display budget) and expanded==false, the
-// rendered output contains the expand hint "▸ view".
-func TestToolLine_Expand_ShowsHintWhenTruncated(t *testing.T) {
+// TestToolLine_Render_NameAndInput verifies the design column split: a bold
+// tool name followed by a separate input (argument) column, name first.
+func TestToolLine_Render_NameAndInput(t *testing.T) {
 	s := newTuiStyles()
-	// A very long name that will exceed any reasonable display budget at width=40.
-	longName := "a_very_long_tool_name_that_definitely_exceeds_the_budget_at_width_40_for_sure"
 	tl := &ToolLine{
-		callID:   "call-expand",
-		name:     longName,
-		state:    toolDone,
-		expanded: false,
-		styles:   s,
+		name:   "read_file",
+		input:  "/var/log/payments/2026-04-18.log",
+		state:  toolDone,
+		styles: s,
 	}
-	got := tl.Render(40)
-	if !strings.Contains(got, "▸ view") {
-		t.Errorf("ToolLine with truncated name and expanded=false must show '▸ view', got: %q", got)
+	got := tl.Render(90)
+	if !strings.Contains(got, "read_file") {
+		t.Errorf("ToolLine must show the tool name\ngot: %q", got)
+	}
+	if !strings.Contains(got, "/var/log/payments/2026-04-18.log") {
+		t.Errorf("ToolLine must show the input argument\ngot: %q", got)
+	}
+	if strings.Index(got, "read_file") > strings.Index(got, "/var/log") {
+		t.Errorf("name must precede the input column\ngot: %q", got)
 	}
 }
 
-// TestToolLine_Expand_HidesHintWhenNotTruncated verifies that when a ToolLine's
-// name fits within the budget (no truncation), "▸ view" does NOT appear.
-func TestToolLine_Expand_HidesHintWhenNotTruncated(t *testing.T) {
+// TestToolLine_Render_NoViewAffordance verifies the misleading name-truncation
+// "▸ view" hint is gone: with no expandable tool output wired, no view
+// affordance is shown regardless of name/input length.
+func TestToolLine_Render_NoViewAffordance(t *testing.T) {
 	s := newTuiStyles()
 	tl := &ToolLine{
-		callID:   "call-short",
-		name:     "bash",
-		state:    toolDone,
-		expanded: false,
-		styles:   s,
+		name:   "a_very_long_tool_name_that_exceeds_the_width",
+		input:  "some/very/long/argument/path/that/keeps/going/and/going",
+		state:  toolDone,
+		styles: s,
 	}
-	got := tl.Render(80)
-	if strings.Contains(got, "▸ view") {
-		t.Errorf("ToolLine with short name must NOT show '▸ view', got: %q", got)
+	if got := tl.Render(40); strings.Contains(got, "view") {
+		t.Errorf("ToolLine must not show a view affordance without output\ngot: %q", got)
 	}
 }
 
-// TestToolLine_Expand_HidesHintWhenExpanded verifies that when expanded==true,
-// "▸ view" does NOT appear even if the name was originally truncated.
-func TestToolLine_Expand_HidesHintWhenExpanded(t *testing.T) {
-	s := newTuiStyles()
-	longName := "a_very_long_tool_name_that_definitely_exceeds_the_budget_at_width_40_for_sure"
-	tl := &ToolLine{
-		callID:   "call-expanded",
-		name:     longName,
-		state:    toolDone,
-		expanded: true,
-		styles:   s,
+// TestToolInputSummary verifies raw JSON tool input is reduced to a clean
+// argument (salient key first, then single-key value, then raw passthrough).
+func TestToolInputSummary(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{``, ``},
+		{`{"path":"/var/log/x.log"}`, `/var/log/x.log`},
+		{`{"pattern":"webhook timeout"}`, `webhook timeout`},
+		{`{"command":"bun test"}`, `bun test`},
+		{`{"foo":"bar"}`, `bar`},
+		{`{"a":"1","b":"2"}`, `a=1 b=2`},
+		{`not json`, `not json`},
 	}
-	got := tl.Render(40)
-	if strings.Contains(got, "▸ view") {
-		t.Errorf("ToolLine with expanded=true must NOT show '▸ view', got: %q", got)
+	for _, c := range cases {
+		if got := toolInputSummary(c.in); got != c.want {
+			t.Errorf("toolInputSummary(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestToolLine_Render_InputTruncated_WidthRespected verifies a long input is
+// truncated so the row never exceeds the available width.
+func TestToolLine_Render_InputTruncated_WidthRespected(t *testing.T) {
+	s := newTuiStyles()
+	tl := &ToolLine{
+		name:   "grep",
+		input:  strings.Repeat("x", 200),
+		state:  toolDone,
+		styles: s,
+		stats:  toolStats{duration: 89 * time.Millisecond},
+	}
+	got := tl.Render(50)
+	for i, line := range strings.Split(got, "\n") {
+		if w := visibleWidth(line); w > 50 {
+			t.Errorf("ToolLine.Render(50) line %d width=%d > 50: %q", i, w, line)
+		}
 	}
 }
 

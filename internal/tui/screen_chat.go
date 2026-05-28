@@ -158,6 +158,7 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		tl := &ToolLine{
 			callID: ev.ToolCallID,
 			name:   ev.ToolName,
+			input:  toolInputSummary(ev.Meta["input"]),
 			state:  toolRunning,
 			styles: m.styles,
 		}
