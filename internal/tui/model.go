@@ -308,7 +308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dispatchCommandMsg:
 		m.overlays.Pop()
 		if m.ag == nil {
-			m.thread.append(&MsgDaimon{text: "no agent connected", styles: m.styles})
+			m.thread.append(&MsgDaimon{text: "no agent connected", time: nowHHMM(), styles: m.styles})
 			return m, nil
 		}
 		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
@@ -318,7 +318,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			text = "command failed: " + msg.err.Error()
 		}
-		m.thread.append(&MsgDaimon{text: text, styles: m.styles})
+		m.thread.append(&MsgDaimon{text: text, time: nowHHMM(), styles: m.styles})
 		return m, nil
 
 	case switchModeMsg:
@@ -328,6 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.thread.append(&MsgDaimon{
 				text:   "mode switch failed: " + msg.err.Error(),
+				time:   nowHHMM(),
 				styles: m.styles,
 			})
 		}
@@ -378,7 +379,7 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "enter":
 			if text := m.input.Value(); text != "" {
-				m.thread.append(&MsgUser{text: text, styles: m.styles})
+				m.thread.append(&MsgUser{text: text, time: nowHHMM(), styles: m.styles})
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}

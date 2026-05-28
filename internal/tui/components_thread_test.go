@@ -46,6 +46,37 @@ func TestMsgUser_Render_Width_Respected(t *testing.T) {
 	}
 }
 
+// TestMsgUser_Render_HeaderLine asserts the design speaker header:
+// first line is "▌ <name> · <time>" and the body text appears on a LATER
+// line (not the header), matching tui.jsx MsgUser (header row + indented body).
+func TestMsgUser_Render_HeaderLine(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgUser{text: "hello there", name: "you", time: "14:32", styles: s}
+	got := m.Render(80)
+	header := strings.Split(got, "\n")[0]
+	for _, want := range []string{glyphUser, "you", "·", "14:32"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("MsgUser header missing %q\nheader: %q", want, header)
+		}
+	}
+	if strings.Contains(header, "hello there") {
+		t.Errorf("body text must not be on the header line: %q", header)
+	}
+	if !strings.Contains(got, "hello there") {
+		t.Errorf("body text missing from render: %q", got)
+	}
+}
+
+// TestMsgUser_Render_DefaultName verifies an empty name falls back to "you".
+func TestMsgUser_Render_DefaultName(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgUser{text: "hi", styles: s}
+	header := strings.Split(m.Render(80), "\n")[0]
+	if !strings.Contains(header, "you") {
+		t.Errorf("empty MsgUser name must default to 'you'\nheader: %q", header)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // MsgDaimon
 // ---------------------------------------------------------------------------
@@ -56,6 +87,23 @@ func TestMsgDaimon_Render_ContainsText(t *testing.T) {
 	got := m.Render(80)
 	if !strings.Contains(got, "response from agent") {
 		t.Errorf("MsgDaimon.Render(80) does not contain expected text\ngot: %q", got)
+	}
+}
+
+// TestMsgDaimon_Render_HeaderLine asserts the design speaker header:
+// first line is "⫶ daimon speaks · <time>" and the body appears on a LATER line.
+func TestMsgDaimon_Render_HeaderLine(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgDaimon{text: "the answer", time: "14:33", styles: s}
+	got := m.Render(80)
+	header := strings.Split(got, "\n")[0]
+	for _, want := range []string{glyphDaimon, "daimon", "speaks", "14:33"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("MsgDaimon header missing %q\nheader: %q", want, header)
+		}
+	}
+	if strings.Contains(header, "the answer") {
+		t.Errorf("body text must not be on the header line: %q", header)
 	}
 }
 

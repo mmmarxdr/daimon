@@ -76,7 +76,7 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len([]rune(shortID)) > 8 {
 					shortID = string([]rune(shortID)[:8])
 				}
-				m.thread.append(&MsgDaimon{text: "↩ resumed session " + shortID, styles: m.styles})
+				m.thread.append(&MsgDaimon{text: "↩ resumed session " + shortID, time: nowHHMM(), styles: m.styles})
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}

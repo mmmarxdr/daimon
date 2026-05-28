@@ -36,7 +36,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Agent reply (TUIChannel.Send → agentReplyMsg via pumpEvents)
 	// ------------------------------------------------------------------
 	case agentReplyMsg:
-		md := &MsgDaimon{text: msg.text, styles: m.styles}
+		md := &MsgDaimon{text: msg.text, time: nowHHMM(), styles: m.styles}
 		m.thread.append(md)
 		// Re-issue pump so the drain continues.
 		return m, pumpEvents(m.events)
@@ -296,7 +296,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, cmd
 			}
 			// Append user message to thread immediately (optimistic).
-			mu := &MsgUser{text: text, styles: m.styles}
+			mu := &MsgUser{text: text, time: nowHHMM(), styles: m.styles}
 			m.thread.append(mu)
 			// Submit via channel (IO-free: runs in Cmd goroutine).
 			// Pass activeConvID so a resumed session binds to the right conversation (AD-7).

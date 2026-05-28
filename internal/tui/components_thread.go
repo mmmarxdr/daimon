@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -45,7 +46,11 @@ func (t *thread) append(item threadItem) {
 	t.items = append(t.items, item)
 }
 
-// Render renders all items joined by newlines.
+// Render renders all items joined by newlines. A blank separator line is
+// inserted before each user turn (every *MsgUser except the first rendered
+// item) so consecutive turns get breathing room, matching the design's
+// per-turn marginBottom — without splitting a daimon turn from the tool lines
+// that follow it as sibling items.
 func (t *thread) Render(width int) string {
 	if len(t.items) == 0 {
 		return ""
@@ -53,9 +58,13 @@ func (t *thread) Render(width int) string {
 	parts := make([]string, 0, len(t.items))
 	for _, item := range t.items {
 		s := item.Render(width)
-		if s != "" {
-			parts = append(parts, s)
+		if s == "" {
+			continue
 		}
+		if _, isUser := item.(*MsgUser); isUser && len(parts) > 0 {
+			parts = append(parts, "")
+		}
+		parts = append(parts, s)
 	}
 	return strings.Join(parts, "\n")
 }
@@ -92,25 +101,56 @@ func (t *thread) findToolLineIdx(callID string) int {
 // ---------------------------------------------------------------------------
 
 // MsgUser renders a user-submitted message in the chat thread.
+// Per tui.jsx MsgUser: a speaker header row ("▌ name · time") followed by the
+// body indented under it. name defaults to "you" when empty; time is omitted
+// from the header when empty.
 type MsgUser struct {
 	text   string
+	name   string // speaker name; "" → "you"
+	time   string // "HH:MM"; "" → header shows no "· time" segment
 	styles tuiStyles
 }
 
-// Render implements threadItem. Returns the user message styled as a bubble.
+// bodyIndent is the column indent applied to message bodies so they sit under
+// the speaker header (matches tui.jsx paddingLeft: 14 ≈ 2 terminal cols).
+const bodyIndent = "  "
+
+// Render implements threadItem. Renders the speaker header then the indented body.
 func (m *MsgUser) Render(width int) string {
-	prefix := m.styles.inkSoft.Render(glyphUser + " ")
-	inner := wrapText(m.text, width-ansi.StringWidth(prefix)-2)
-	lines := strings.Split(inner, "\n")
-	out := make([]string, 0, len(lines))
-	for i, line := range lines {
-		if i == 0 {
-			out = append(out, prefix+m.styles.accent.Render(line))
-		} else {
-			// Indent continuation lines to align with message start.
-			indent := strings.Repeat(" ", ansi.StringWidth(prefix))
-			out = append(out, indent+m.styles.accent.Render(line))
-		}
+	name := m.name
+	if name == "" {
+		name = "you"
+	}
+	header := speakerHeader(m.styles,
+		m.styles.inkSoft.Render(glyphUser),
+		m.styles.ink.Bold(true).Render(name),
+		"", m.time)
+
+	return joinHeaderBody(header, m.text, width, m.styles.ink)
+}
+
+// speakerHeader builds a "<glyph> <name>[ <suffix>][ · <time>]" header line.
+// suffix is an optional italic-muted word (e.g. "speaks" for daimon); empty
+// suffix and empty time are each dropped so the header stays clean.
+func speakerHeader(s tuiStyles, glyph, name, suffix, t string) string {
+	parts := []string{glyph, name}
+	if suffix != "" {
+		parts = append(parts, s.dimLabel.Italic(true).Render(suffix))
+	}
+	if t != "" {
+		parts = append(parts, s.inkFaint.Render("·"), s.dimLabel.Render(t))
+	}
+	return strings.Join(parts, " ")
+}
+
+// joinHeaderBody wraps body to the available width and indents each body line
+// under the header by bodyIndent, rendering the body with bodyStyle.
+func joinHeaderBody(header, body string, width int, bodyStyle lipgloss.Style) string {
+	indentW := ansi.StringWidth(bodyIndent)
+	inner := wrapText(body, width-indentW)
+	out := []string{header}
+	for _, line := range strings.Split(inner, "\n") {
+		out = append(out, bodyIndent+bodyStyle.Render(line))
 	}
 	return strings.Join(out, "\n")
 }
@@ -121,26 +161,22 @@ func (m *MsgUser) Render(width int) string {
 
 // MsgDaimon renders a completed assistant message in the chat thread.
 // It appears on chat (02) and error (07) screens per the panel matrix.
+// Per tui.jsx MsgDaimon: a "⫶ daimon speaks · time" header followed by the
+// indented body. time is omitted from the header when empty.
 type MsgDaimon struct {
 	text   string
+	time   string // "HH:MM"; "" → header shows no "· time" segment
 	styles tuiStyles
 }
 
-// Render implements threadItem. Returns the daimon message styled as a bubble.
+// Render implements threadItem. Renders the speaker header then the indented body.
 func (m *MsgDaimon) Render(width int) string {
-	prefix := m.styles.accent.Render(glyphDaimon + " ")
-	inner := wrapText(m.text, width-ansi.StringWidth(prefix)-2)
-	lines := strings.Split(inner, "\n")
-	out := make([]string, 0, len(lines))
-	for i, line := range lines {
-		if i == 0 {
-			out = append(out, prefix+line)
-		} else {
-			indent := strings.Repeat(" ", ansi.StringWidth(prefix))
-			out = append(out, indent+line)
-		}
-	}
-	return strings.Join(out, "\n")
+	header := speakerHeader(m.styles,
+		m.styles.accent.Render(glyphDaimon),
+		m.styles.accent.Bold(true).Render("daimon"),
+		"speaks", m.time)
+
+	return joinHeaderBody(header, m.text, width, m.styles.ink)
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +434,11 @@ func wrapLine(line string, maxWidth int) []string {
 	}
 	return out
 }
+
+// nowHHMM returns the current wall-clock time formatted as "HH:MM" for use in
+// message speaker headers. Called from Update (never from Render) so it does
+// not break render determinism; golden tests construct messages without a time.
+func nowHHMM() string { return time.Now().Format("15:04") }
 
 // formatDuration formats a duration as a human-readable compact string.
 func formatDuration(d time.Duration) string {
