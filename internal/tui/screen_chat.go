@@ -254,6 +254,19 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		}
 
 	case notify.EventTokensUsage:
+		// Inc.2: accumulate the session breadcrumb (one EventTokensUsage per turn).
+		// tokens in/out and elapsed come from ev.Meta; the event timestamp is the
+		// autosave proxy (the conversation is persisted at turn end — loop.go).
+		bc := m.breadcrumb
+		bc.turns++
+		bc.tokensIn += atoiSafe(ev.Meta["input_tokens"])
+		bc.tokensOut += atoiSafe(ev.Meta["output_tokens"])
+		bc.lastTurn = ev.Timestamp
+		if bc.label == "" {
+			bc.label = breadcrumbLabel(ev.Meta["conv_id"], m.activeConvID)
+		}
+		m.breadcrumb = bc
+
 		// PR2b: Update telemetry and context-meter rail panels.
 		// Copy-on-write: copy each panel value, mutate the copy, replace in map.
 		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
@@ -404,6 +417,10 @@ func renderChat(m Model, width, height int) string {
 	content := m.thread.Render(width)
 	if content == "" {
 		return renderCenterPlaceholder(screenChat, width, height)
+	}
+	// Inc.2: prepend the session breadcrumb above the thread when it has data.
+	if bc := m.breadcrumb.Render(width); bc != "" {
+		return bc + "\n" + content
 	}
 	return content
 }

@@ -140,6 +140,10 @@ type Model struct {
 	thread thread // ordered list of threadItems for the chat center column
 	rail   rail
 
+	// breadcrumb (Inc.2): chat session header row under the topbar.
+	// Accumulated from EventTokensUsage in handleBusEvent (copy-on-write).
+	breadcrumb breadcrumb
+
 	// overlays (PR3): dialog stack drawn last
 	overlays overlayManager
 
@@ -462,14 +466,15 @@ func (m Model) View() string {
 func newTestModel() Model {
 	s := newTuiStyles()
 	return Model{
-		styles:    s,
-		ch:        newTUIChannel(),
-		channelID: "tui",
-		senderID:  "local_user",
-		screen:    screenWelcome,
-		focus:     focusEditor,
-		input:     newInputBar(),
-		rail:      newRail(s),
+		styles:     s,
+		ch:         newTUIChannel(),
+		channelID:  "tui",
+		senderID:   "local_user",
+		screen:     screenWelcome,
+		focus:      focusEditor,
+		input:      newInputBar(),
+		rail:       newRail(s),
+		breadcrumb: breadcrumb{styles: s},
 	}
 }
 
