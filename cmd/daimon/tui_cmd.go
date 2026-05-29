@@ -15,7 +15,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"daimon/internal/agent"
 	"daimon/internal/audit"
@@ -27,6 +31,43 @@ import (
 	"daimon/internal/tool"
 	"daimon/internal/tui"
 )
+
+// configureTUILogging redirects slog away from stderr for the lifetime of the
+// TUI. The TUI owns the terminal via the alt-screen, so any slog write to
+// stderr corrupts the rendered UI (mode warnings, "agent loop started", etc.
+// bleed into the thread). Logs go to the configured log file, or a default
+// temp file, falling back to io.Discard if neither can be opened — never stderr.
+func configureTUILogging(cfg config.LoggingConfig) {
+	var level slog.Level
+	switch strings.ToLower(cfg.Level) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	path := cfg.File
+	if path == "" {
+		path = filepath.Join(os.TempDir(), "daimon-tui.log")
+	}
+
+	var w io.Writer = io.Discard
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		w = f // open for the TUI's lifetime; OS closes on exit.
+	}
+
+	var h slog.Handler
+	if strings.ToLower(cfg.Format) == "json" {
+		h = slog.NewJSONHandler(w, &slog.HandlerOptions{Level: level})
+	} else {
+		h = slog.NewTextHandler(w, &slog.HandlerOptions{Level: level})
+	}
+	slog.SetDefault(slog.New(h))
+}
 
 // runTUICommand is the entry function for `daimon tui`.
 // args are the remaining os.Args after "tui"; cfgPath is the pre-extracted
@@ -48,6 +89,10 @@ func runTUICommand(args []string, cfgPath string) error {
 			return fmt.Errorf("tui: failed to load config: %w", err)
 		}
 	}
+
+	// 1b. Redirect logging off stderr BEFORE building anything that logs — the
+	// TUI is about to take over the terminal, and stderr writes would corrupt it.
+	configureTUILogging(cfg.Logging)
 
 	// 2. Store.
 	st, err := store.New(cfg.Store)
