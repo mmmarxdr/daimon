@@ -14,10 +14,12 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"daimon/internal/notify"
+	"daimon/internal/store"
 	"daimon/internal/tool"
 )
 
@@ -461,5 +463,53 @@ func TestModel_TodolistRefreshMsg_UpdatesPanel(t *testing.T) {
 	}
 	if !strings.Contains(got, "Refactor rail panels") {
 		t.Errorf("todolistPanel.Render: expected 'Refactor rail panels' in output:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.7 — WU-b: resumeListPanel pre-computed ago (RED → GREEN with WU-b)
+// ---------------------------------------------------------------------------
+
+// TestResumeListPanel_PrecomputedAgo verifies that after setSessions, the panel's
+// ago slice is populated and that Render reads from it rather than calling
+// relativeTime live. The test uses a fixed "ago" value injected via the
+// sessionsLoadedMsg → setSessions path and checks the rendered output contains
+// that exact string (not a freshly-computed one that might differ).
+func TestResumeListPanel_PrecomputedAgo(t *testing.T) {
+	s := newTuiStyles()
+	p := newResumeListPanel(s)
+
+	convs := []store.Conversation{
+		{
+			ID:        "abc12345",
+			Status:    "active",
+			UpdatedAt: time.Now().Add(-7 * time.Minute),
+			Metadata:  map[string]string{"title": "Test conv"},
+		},
+	}
+	p.setSessions(convs)
+
+	// Verify ago slice is populated.
+	if len(p.ago) != len(convs) {
+		t.Fatalf("p.ago len = %d, want %d", len(p.ago), len(convs))
+	}
+	if p.ago[0] == "" {
+		t.Fatal("p.ago[0] is empty after setSessions, want non-empty ago string")
+	}
+
+	// Capture the pre-computed ago value.
+	precomputed := p.ago[0]
+
+	// Render must contain the pre-computed string, not a re-computed one.
+	out := p.Render(40, 20)
+	if !strings.Contains(out, precomputed) {
+		t.Errorf("Render output does not contain pre-computed ago %q\noutput:\n%s", precomputed, out)
+	}
+
+	// Override p.ago with a sentinel to confirm Render reads from the field.
+	p.ago[0] = "SENTINEL"
+	out2 := p.Render(40, 20)
+	if !strings.Contains(out2, "SENTINEL") {
+		t.Errorf("Render output does not contain overridden ago sentinel %q — Render is not reading p.ago\noutput:\n%s", "SENTINEL", out2)
 	}
 }

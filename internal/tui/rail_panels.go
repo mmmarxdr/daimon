@@ -570,6 +570,7 @@ func (p *recentDenialsPanel) Render(width, _ int) string {
 type resumeListPanel struct {
 	styles   tuiStyles
 	sessions []store.Conversation
+	ago      []string // WU-b: pre-computed "ago" strings parallel to sessions
 }
 
 // newResumeListPanel constructs an empty resumeListPanel.
@@ -577,10 +578,15 @@ func newResumeListPanel(s tuiStyles) *resumeListPanel {
 	return &resumeListPanel{styles: s}
 }
 
-// setSessions updates the panel's session list. Called from copyRailWith in
-// the global sessionsLoadedMsg handler (model.go Update).
+// setSessions updates the panel's session list and pre-computes the "ago"
+// strings so Render never calls relativeTime (i.e. time.Since) from the
+// View path. Called from copyRailWith in the global sessionsLoadedMsg handler.
 func (p *resumeListPanel) setSessions(convs []store.Conversation) {
 	p.sessions = convs
+	p.ago = make([]string, len(convs))
+	for i, c := range convs {
+		p.ago[i] = relativeTime(c.UpdatedAt) // clock read happens here, in Update
+	}
 }
 
 // Render implements Panel. Returns "" when there are no sessions.
@@ -604,15 +610,20 @@ func (p *resumeListPanel) Render(width, _ int) string {
 		convs = convs[:maxSessions]
 	}
 
-	for _, conv := range convs {
+	for i, conv := range convs {
 		// Short ID: first 8 runes — rune-safe, no byte-slicing.
 		shortID := conv.ID
 		if len([]rune(shortID)) > 8 {
 			shortID = string([]rune(shortID)[:8])
 		}
 
-		// Relative updated-ago time.
-		ago := relativeTime(conv.UpdatedAt)
+		// WU-b: read pre-computed ago string; never call relativeTime from Render.
+		// Guard i < len(p.ago) defensively — slices are always parallel but this
+		// protects against a future divergence without a visible breakage.
+		ago := ""
+		if i < len(p.ago) {
+			ago = p.ago[i]
+		}
 
 		// Title from metadata or fallback.
 		title := conv.Metadata["title"]

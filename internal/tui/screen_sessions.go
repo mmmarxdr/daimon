@@ -130,8 +130,12 @@ func renderSessions(m Model, width, height int) string {
 			shortID = string([]rune(shortID)[:8])
 		}
 
-		// Relative time from UpdatedAt.
-		ago := relativeTime(conv.UpdatedAt)
+		// WU-b: read pre-computed ago string so renderSessions never calls
+		// relativeTime (time.Since) from the View path.
+		ago := ""
+		if i < len(m.sessionsAgo) {
+			ago = m.sessionsAgo[i]
+		}
 
 		// Title: from metadata or "(untitled)".
 		title := conv.Metadata["title"]
