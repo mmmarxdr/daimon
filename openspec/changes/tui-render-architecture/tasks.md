@@ -31,7 +31,7 @@ Chain strategy: stacked-to-main
 
 Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do NOT `-update`.
 
-### 1.1 Test harness: viewport.New(0,0) in newTestModel [RED unblock]
+### [x] 1.1 Test harness: viewport.New(0,0) in newTestModel [RED unblock]
 
 - **RED**: confirm non-chat tests that call `newTestModel()` do not panic after WU-c lands
   (viewport nil-deref). Write a placeholder assertion or note in `internal/tui/run_test.go`
@@ -42,7 +42,7 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
 > Note: this task is listed first in PR-1 because it must land before WU-c's golden
 > adaptation; placing it here means PR-1 already ships the safe default.
 
-### 1.2 Determinism guard test: TestView_Deterministic [RED]
+### [x] 1.2 Determinism guard test: TestView_Deterministic [RED]
 
 - **RED**: create `internal/tui/purity_test.go`; implement `TestView_Deterministic` exactly
   as spec §D.5/design §Determinism: build a populated model (screenChat, mode, running
@@ -50,14 +50,14 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
   Test must FAIL at this point (mode is still live).
 - Files: `internal/tui/purity_test.go` (new)
 
-### 1.3 Determinism guard: sessions + rail variants [RED]
+### [x] 1.3 Determinism guard: sessions + rail variants [RED]
 
 - **RED**: in `purity_test.go`, add `TestView_Deterministic_Sessions` (screenSessions,
   m.sessionsAgo populated) and `TestView_Deterministic_Rail` (resumeListPanel.ago populated).
   Both fail before WU-a/b are green.
 - Files: `internal/tui/purity_test.go`
 
-### 1.4 WU-a RED: mode-cache unit tests
+### [x] 1.4 WU-a RED: mode-cache unit tests
 
 - **RED**: in `internal/tui/model_test.go` (or new `purity_test.go` section):
   - `TestMode_CachedField`: call `cycleMode`, assert `m.mode` updated without calling
@@ -69,7 +69,7 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
     assert `m.mode` is updated to `ag.CurrentMode()` return value.
 - Files: `internal/tui/model_test.go` or `internal/tui/purity_test.go`
 
-### 1.5 WU-a GREEN: add mode field + wire it
+### [x] 1.5 WU-a GREEN: add mode field + wire it
 
 - **GREEN** for 1.4:
   - `internal/tui/model.go`: add `mode string` to `Model` struct.
@@ -82,14 +82,14 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
 - Run `make test` (must be GREEN). Run `make test-race`.
 - Files: `internal/tui/model.go`, `internal/tui/run.go`, `internal/tui/layout.go`
 
-### 1.6 WU-a: verify golden byte-identical
+### [x] 1.6 WU-a: verify golden byte-identical
 
 - Confirm `TestModel_View_ChatScreen_Golden` still passes without `-update`.
   No mode change should affect the golden because `mode:""` → "BUILD" default is unchanged.
   If it fails, investigate rather than blind-update.
 - Files: `internal/tui/golden_test.go` (read-only verify)
 
-### 1.7 WU-b RED: ago pre-compute unit tests
+### [x] 1.7 WU-b RED: ago pre-compute unit tests
 
 - **RED**:
   - `TestResumeListPanel_PrecomputedAgo` in `internal/tui/rail_panels_test.go`:
@@ -102,7 +102,7 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
     is no longer computed in View. Confirm they pass after this step.
 - Files: `internal/tui/rail_panels_test.go`, `internal/tui/screen_sessions_test.go`
 
-### 1.8 WU-b GREEN: pre-compute ago in Update
+### [x] 1.8 WU-b GREEN: pre-compute ago in Update
 
 - **GREEN** for 1.7:
   - `internal/tui/rail_panels.go`: add `ago []string` field to `resumeListPanel`; in
@@ -117,7 +117,7 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
 - Run `make test`, `make test-race`, `make lint`.
 - Files: `internal/tui/rail_panels.go`, `internal/tui/model.go`, `internal/tui/screen_sessions.go`
 
-### 1.9 PR-1 determinism tests GREEN + commit
+### [x] 1.9 PR-1 determinism tests GREEN + commit
 
 - All three `TestView_Deterministic*` variants must be GREEN at this point.
   Run `make test-race`. Confirm no race on View or any Render path.
