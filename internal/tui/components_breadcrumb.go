@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -33,7 +32,7 @@ type breadcrumb struct {
 	turns     int    // completed turns this session
 	tokensIn  int    // cumulative input tokens
 	tokensOut int    // cumulative output tokens
-	lastTurn  time.Time
+	ago       string // pre-computed "autosave ago" string (e.g. "just now"); "" → no autosave segment
 }
 
 // hasData reports whether the breadcrumb has anything worth rendering.
@@ -62,18 +61,20 @@ func (b breadcrumb) Render(width int) string {
 		" " + s.inkSoft.Render(formatTokensK(b.tokensIn)+" in") +
 		" " + s.inkFaint.Render("·") + " " + s.inkSoft.Render(formatTokensK(b.tokensOut)+" out")
 
+	// The "ago" string is pre-computed in Update (see handleBusEvent) so Render
+	// stays pure — no time.Now()/IO here.
 	right := ""
-	if !b.lastTurn.IsZero() {
-		right = s.dimLabel.Italic(true).Render("autosave · " + relativeTime(b.lastTurn))
+	if b.ago != "" {
+		right = s.dimLabel.Italic(true).Render("autosave · " + b.ago)
 	}
 
 	leftW := ansi.StringWidth(left)
 	rightW := ansi.StringWidth(right)
 
-	// Drop the right segment if it doesn't fit alongside the left.
+	// Drop the right segment if it doesn't fit alongside the left. After this,
+	// right is non-empty only when it fits, so gap is guaranteed ≥ 1 below.
 	if right != "" && leftW+1+rightW > width {
 		right = ""
-		rightW = 0
 	}
 
 	if right == "" {
@@ -81,11 +82,6 @@ func (b breadcrumb) Render(width int) string {
 	}
 
 	gap := width - leftW - rightW
-	if gap < 1 {
-		// Left is too wide to coexist with right; truncate left to make room.
-		left = ansi.Truncate(left, width-rightW-1, "…")
-		gap = 1
-	}
 	return left + strings.Repeat(" ", gap) + right
 }
 

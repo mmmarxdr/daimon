@@ -672,7 +672,10 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					Iteration:  i,
 					Meta: mergeSubagentMeta(conv, map[string]string{
 						"conv_id": conv.ID,
-						"input":   string(tc.Input),
+						// Cap the bus payload: the TUI only shows a short argument
+						// summary, and a large tool input (e.g. write_file) would
+						// otherwise put MBs on the event bus.
+						"input": truncateTelemetry(string(tc.Input), 512),
 					}),
 				})
 			}

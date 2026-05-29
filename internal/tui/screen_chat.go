@@ -263,7 +263,9 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		bc.turns++
 		bc.tokensIn += atoiSafe(ev.Meta["input_tokens"])
 		bc.tokensOut += atoiSafe(ev.Meta["output_tokens"])
-		bc.lastTurn = ev.Timestamp
+		// Pre-compute the relative "ago" string here (Update may read the clock);
+		// breadcrumb.Render stays pure.
+		bc.ago = relativeTime(ev.Timestamp)
 		if bc.label == "" {
 			bc.label = breadcrumbLabel(ev.Meta["conv_id"], m.activeConvID)
 		}

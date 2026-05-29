@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestBreadcrumb_Render_Empty: a breadcrumb with no turns and no label renders
@@ -23,7 +22,7 @@ func TestBreadcrumb_Render_Fields(t *testing.T) {
 	b := breadcrumb{
 		styles: s, label: "payment-anomalies",
 		turns: 47, tokensIn: 34210, tokensOut: 8942,
-		lastTurn: time.Now(),
+		ago: "just now",
 	}
 	got := b.Render(120)
 	for _, want := range []string{"~/chat/", "payment-anomalies", "47 turns", "34.2k in", "8.9k out", "autosave"} {
@@ -36,7 +35,7 @@ func TestBreadcrumb_Render_Fields(t *testing.T) {
 // TestBreadcrumb_Render_WidthRespected: the breadcrumb never exceeds its width.
 func TestBreadcrumb_Render_WidthRespected(t *testing.T) {
 	s := newTuiStyles()
-	b := breadcrumb{styles: s, label: "x", turns: 3, tokensIn: 100, tokensOut: 50, lastTurn: time.Now()}
+	b := breadcrumb{styles: s, label: "x", turns: 3, tokensIn: 100, tokensOut: 50, ago: "just now"}
 	got := b.Render(60)
 	for i, line := range strings.Split(got, "\n") {
 		if w := visibleWidth(line); w > 60 {
@@ -47,10 +46,22 @@ func TestBreadcrumb_Render_WidthRespected(t *testing.T) {
 
 // TestFormatTokensK verifies the compact k-suffixed token formatting.
 func TestFormatTokensK(t *testing.T) {
-	cases := map[int]string{0: "0", 999: "999", 1000: "1.0k", 34210: "34.2k", 8942: "8.9k"}
-	for in, want := range cases {
-		if got := formatTokensK(in); got != want {
-			t.Errorf("formatTokensK(%d)=%q want %q", in, got, want)
-		}
+	cases := []struct {
+		name string
+		in   int
+		want string
+	}{
+		{"zero", 0, "0"},
+		{"below 1k", 999, "999"},
+		{"exactly 1k", 1000, "1.0k"},
+		{"tens of k", 34210, "34.2k"},
+		{"single k", 8942, "8.9k"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatTokensK(c.in); got != c.want {
+				t.Errorf("formatTokensK(%d)=%q want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
