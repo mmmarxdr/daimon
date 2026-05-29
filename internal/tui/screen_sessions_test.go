@@ -712,3 +712,22 @@ func TestUpdateSessions_EnterResume_ClearsThreadAndSetsMarker(t *testing.T) {
 		t.Errorf("thread after enter-resume: no resume marker item found; items = %v", rm.thread.items)
 	}
 }
+
+// TestUpdateSessions_EnterResume_ResetsBreadcrumb verifies the breadcrumb's
+// per-session counters do not bleed into a resumed session.
+func TestUpdateSessions_EnterResume_ResetsBreadcrumb(t *testing.T) {
+	convs := fakeConvs()
+	m := sessionModel(convs)
+	m.sessionIdx = 1
+
+	// Simulate an accumulated breadcrumb from the prior session.
+	m.breadcrumb = breadcrumb{styles: m.styles, label: "old-session", turns: 12, tokensIn: 9000, tokensOut: 1200, ago: "5m ago"}
+
+	next, _ := m.updateSessions(tea.KeyMsg{Type: tea.KeyEnter})
+	rm := next.(Model)
+
+	bc := rm.breadcrumb
+	if bc.turns != 0 || bc.tokensIn != 0 || bc.tokensOut != 0 || bc.label != "" || bc.ago != "" {
+		t.Errorf("breadcrumb not reset on resume: %+v", bc)
+	}
+}

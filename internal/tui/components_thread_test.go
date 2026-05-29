@@ -586,10 +586,27 @@ func TestToolInputSummary(t *testing.T) {
 		{`{"foo":"bar"}`, `bar`},
 		{`{"a":"1","b":"2"}`, `a=1 b=2`},
 		{`not json`, `not json`},
+		{"{\"command\":\"git log\\n--oneline\"}", `git log --oneline`},
 	}
 	for _, c := range cases {
 		if got := toolInputSummary(c.in); got != c.want {
 			t.Errorf("toolInputSummary(%q)=%q want %q", c.in, got, c.want)
+		}
+		if strings.ContainsAny(toolInputSummary(c.in), "\n\r\t") {
+			t.Errorf("toolInputSummary(%q) must not contain line-breaking whitespace", c.in)
+		}
+	}
+}
+
+// TestMsgDaimon_Render_NarrowWidth_HeaderClamped verifies the speaker header is
+// truncated to the available width on a narrow terminal (no overflow).
+func TestMsgDaimon_Render_NarrowWidth_HeaderClamped(t *testing.T) {
+	s := newTuiStyles()
+	m := &MsgDaimon{text: "body", time: "14:33", styles: s}
+	got := m.Render(10) // narrower than "⫶ daimon speaks · 14:33"
+	for i, line := range strings.Split(got, "\n") {
+		if w := visibleWidth(line); w > 10 {
+			t.Errorf("MsgDaimon.Render(10) line %d width=%d > 10: %q", i, w, line)
 		}
 	}
 }

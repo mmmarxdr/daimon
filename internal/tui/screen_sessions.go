@@ -72,6 +72,9 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeConvID = sel.ID
 				// V1: resume rebinds activeConvID and clears the thread; prior history is not replayed.
 				m.thread = thread{}
+				// Reset the breadcrumb too: turns/tokens/label belong to the prior
+				// session and must not bleed into the resumed one.
+				m.breadcrumb = breadcrumb{styles: m.styles}
 				shortID := sel.ID
 				if len([]rune(shortID)) > 8 {
 					shortID = string([]rune(shortID)[:8])

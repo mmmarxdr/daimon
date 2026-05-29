@@ -149,7 +149,7 @@ func speakerHeader(s tuiStyles, glyph, name, suffix, t string) string {
 func joinHeaderBody(header, body string, width int, bodyStyle lipgloss.Style) string {
 	indentW := ansi.StringWidth(bodyIndent)
 	inner := wrapText(body, width-indentW)
-	out := []string{header}
+	out := []string{ansi.Truncate(header, width, "…")}
 	for _, line := range strings.Split(inner, "\n") {
 		out = append(out, bodyIndent+bodyStyle.Render(line))
 	}
@@ -468,16 +468,16 @@ func toolInputSummary(raw string) string {
 	}
 	var m map[string]any
 	if err := json.Unmarshal([]byte(raw), &m); err != nil || len(m) == 0 {
-		return raw
+		return inlineWhitespace(raw)
 	}
 	for _, k := range []string{"path", "file", "filename", "pattern", "query", "command", "cmd", "url"} {
 		if v, ok := m[k]; ok {
-			return fmt.Sprintf("%v", v)
+			return inlineWhitespace(fmt.Sprintf("%v", v))
 		}
 	}
 	if len(m) == 1 {
 		for _, v := range m {
-			return fmt.Sprintf("%v", v)
+			return inlineWhitespace(fmt.Sprintf("%v", v))
 		}
 	}
 	parts := make([]string, 0, len(m))
@@ -485,7 +485,14 @@ func toolInputSummary(raw string) string {
 		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
 	}
 	sort.Strings(parts)
-	return strings.Join(parts, " ")
+	return inlineWhitespace(strings.Join(parts, " "))
+}
+
+// inlineWhitespace collapses newlines, carriage returns, and tabs to single
+// spaces so a tool argument stays a single ToolLine row (the row layout assumes
+// one line). Runs of spaces are left as-is; only line-breaking runes are mapped.
+func inlineWhitespace(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(s)
 }
 
 // nowHHMM returns the current wall-clock time formatted as "HH:MM" for use in
