@@ -18,6 +18,11 @@ func TestModel_View_WelcomeScreen_Golden(t *testing.T) {
 	m.screen = screenWelcome
 	m.topBar.SetData("⫶", "/home/user/project", "main", "claude-3-5", "build", "$0.00", "ready")
 	m.footer.SetScreen(screenWelcome)
+	// WU-a: renderLayout now reads m.mode (cached field) instead of the live
+	// modeAgent. Set m.mode to match the value passed to SetData so the golden
+	// output is byte-identical — the rendered content is unchanged, only the
+	// source of truth moved from topBar.mode to m.mode.
+	m.mode = "build"
 
 	got := m.View()
 

@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-isatty"
 
@@ -113,6 +114,11 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		rail:       r,
 		modeAgent:  newAgentModeAdapter(ag),
 		breadcrumb: breadcrumb{styles: s},
+		// WU-a: snapshot mode at startup so renderLayout never calls the live agent.
+		mode: ag.CurrentMode(),
+		// WU-c (PR-2) prerequisite: initialize viewport with zero dimensions.
+		// Dimensions are set when the first WindowSizeMsg arrives.
+		viewport: viewport.New(0, 0),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

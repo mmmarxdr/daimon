@@ -218,11 +218,13 @@ func (a *mockModeAgent) SetModeImmediate(name string) {
 }
 
 // newTestModelWithMode returns a test Model with a mockModeAgent stub attached
-// via the modeAgent interface. The model starts in screenWelcome with mode="build".
+// via the modeAgent interface. The model starts in screenWelcome with mode=startMode.
+// WU-a: m.mode is also set so renderLayout reads the cached field, not the live agent.
 func newTestModelWithMode(startMode string) (Model, *mockModeAgent) {
 	m := newTestModel()
 	stub := &mockModeAgent{currentMode: startMode}
 	m.modeAgent = stub
+	m.mode = startMode // WU-a: cache must agree with the stub at construction
 	return m, stub
 }
 

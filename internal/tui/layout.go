@@ -63,12 +63,11 @@ func renderLayout(m Model) string {
 	}
 
 	// 4. Render each zone.
-	// Resolve the current mode from modeAgent (live) or topBar.mode (startup snapshot).
-	// modeAgent is nil in tests that don't inject an agent; fall back to topBar.mode.
-	currentMode := m.topBar.mode
-	if m.modeAgent != nil {
-		currentMode = m.modeAgent.CurrentMode()
-	}
+	// WU-a: read the cached mode field — never call the live agent from View.
+	// m.mode is set at construction and updated in cycleMode / commandResultMsg(mode).
+	// Tests that set neither m.mode nor m.topBar.mode get "" → "BUILD" default from
+	// the rendering components; the golden output is unchanged (zero value == build).
+	currentMode := m.mode
 
 	// TopBar — update the mode slot dynamically from the live modeAgent, then render.
 	tb := m.topBar

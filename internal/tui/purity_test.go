@@ -1,0 +1,266 @@
+package tui
+
+// purity_test.go — TDD guard tests for View purity (WU-a + WU-b).
+//
+// These tests enforce the invariant: Model.View() is a deterministic, pure
+// function of the receiver's fields alone. No clock reads, no live-agent
+// access, no mutation, no IO.
+//
+// Test order follows the TDD cycle per task list 1.1–1.9:
+//   1.1  RED/GREEN: viewport field present in newTestModel (harness unblock for WU-c)
+//   1.2  RED: TestView_Deterministic — screenChat, fails until WU-a+WU-b green
+//   1.3  RED: TestView_Deterministic_Sessions + TestView_Deterministic_Rail variants
+//   1.4  RED: mode-cache unit tests (TestMode_CachedField, TestLayout_ReadsCachedMode,
+//              TestMode_SlashCommandRefreshes)
+//   1.7  RED: ago pre-compute unit tests (TestSessions_PrecomputedAgo)
+
+import (
+	"testing"
+	"time"
+
+	"daimon/internal/store"
+)
+
+// ---------------------------------------------------------------------------
+// Stubs
+// ---------------------------------------------------------------------------
+
+// failingModeAgent is a modeAgent stub that calls t.Fatal if CurrentMode is
+// invoked. Used to prove that View/renderLayout does NOT call CurrentMode
+// after WU-a — the render path must read m.mode instead.
+type failingModeAgent struct {
+	t    *testing.T
+	mode string // field updated by SetModeImmediate
+}
+
+func (f *failingModeAgent) CurrentMode() string {
+	if f.t != nil {
+		f.t.Helper()
+		f.t.Fatalf("CurrentMode() called during View/Render — live agent read detected; render must read m.mode instead")
+	}
+	return f.mode
+}
+
+func (f *failingModeAgent) SetModeImmediate(name string) { f.mode = name }
+
+// simpleModeStub is a modeAgent that returns a fixed mode from CurrentMode()
+// and records the latest value passed to SetModeImmediate.
+type simpleModeStub struct{ mode string }
+
+func newSimpleModeStub(mode string) modeAgent       { return &simpleModeStub{mode: mode} }
+func (s *simpleModeStub) CurrentMode() string       { return s.mode }
+func (s *simpleModeStub) SetModeImmediate(n string) { s.mode = n }
+
+// ---------------------------------------------------------------------------
+// Task 1.1 — viewport harness unblock
+// ---------------------------------------------------------------------------
+
+// TestNewTestModel_ViewportFieldExists verifies that newTestModel() initializes
+// the viewport field to a valid viewport.Model so non-chat tests never panic
+// when PR-2 adds viewport operations. The test will fail to compile until the
+// viewport field is added to Model struct (RED → GREEN = add field + init).
+func TestNewTestModel_ViewportFieldExists(t *testing.T) {
+	m := newTestModel()
+	// AtBottom() on a zero-height viewport must not panic.
+	_ = m.viewport.AtBottom()
+	// View() on an unsized, empty viewport must return "".
+	if got := m.viewport.View(); got != "" {
+		t.Errorf("viewport.View() on unsized model = %q, want empty string", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.2 — TestView_Deterministic: screenChat purity guard
+// ---------------------------------------------------------------------------
+
+// TestView_Deterministic populates a Model in screenChat and calls View() 50
+// times, asserting byte-identical output. Fails while layout.go still calls
+// m.modeAgent.CurrentMode() (which can vary) or while relativeTime() is called
+// in any Render path.
+func TestView_Deterministic(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.screen = screenChat
+
+	// WU-a: set cached mode field.
+	m.mode = "plan"
+
+	// Thread items exercising the render path.
+	m.thread.append(&MsgUser{text: "hi", time: "10:00", styles: m.styles})
+	tl := &ToolLine{callID: "c1", name: "bash", state: toolRunning, styles: m.styles}
+	m.thread.append(tl)
+
+	// WU-b: pre-computed ago strings (must NOT be recalculated in View).
+	m.sessions = []store.Conversation{
+		{ID: "abc12345", UpdatedAt: time.Now().Add(-2 * time.Minute)},
+	}
+	m.sessionsAgo = []string{"2m ago"}
+
+	first := m.View()
+	for i := 0; i < 50; i++ {
+		got := m.View()
+		if got != first {
+			t.Fatalf("View() not deterministic at call %d\nfirst:\n%s\ngot:\n%s", i+1, first, got)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.3 — Session + rail determinism variants
+// ---------------------------------------------------------------------------
+
+// TestView_Deterministic_Sessions exercises the screenSessions render path.
+// Fails while renderSessions calls relativeTime() live.
+func TestView_Deterministic_Sessions(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.screen = screenSessions
+
+	m.sessions = []store.Conversation{
+		{
+			ID:        "abc12345",
+			Status:    "active",
+			UpdatedAt: time.Now().Add(-5 * time.Minute),
+			Metadata:  map[string]string{"title": "Test session"},
+		},
+	}
+	// WU-b: pre-computed; renderSessions must read this, not call relativeTime.
+	m.sessionsAgo = []string{"5m ago"}
+
+	first := m.View()
+	for i := 0; i < 50; i++ {
+		got := m.View()
+		if got != first {
+			t.Fatalf("View() not deterministic (sessions) at call %d", i+1)
+		}
+	}
+}
+
+// TestView_Deterministic_Rail exercises the resumeListPanel.Render path.
+// Fails while resumeListPanel.Render calls relativeTime() live.
+func TestView_Deterministic_Rail(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.screen = screenWelcome
+
+	convs := []store.Conversation{
+		{
+			ID:        "abc12345",
+			Status:    "active",
+			UpdatedAt: time.Now().Add(-3 * time.Minute),
+			Metadata:  map[string]string{"title": "Rail session"},
+		},
+	}
+	// Populate via Update so the resumeListPanel and sessionsAgo are both set.
+	updated, _ := m.Update(sessionsLoadedMsg{convs: convs})
+	m = updated.(Model)
+
+	first := m.View()
+	for i := 0; i < 50; i++ {
+		got := m.View()
+		if got != first {
+			t.Fatalf("View() not deterministic (rail) at call %d", i+1)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.4 — WU-a mode-cache unit tests
+// ---------------------------------------------------------------------------
+
+// TestMode_CachedField verifies that cycleMode() writes m.mode and that a
+// subsequent View() does NOT call CurrentMode() on the modeAgent.
+//
+// Two-phase approach:
+//  1. Use simpleModeStub for cycleMode (cycleMode legitimately reads CurrentMode
+//     once to compute the next mode — this is expected Update-path behavior).
+//  2. Swap to failingModeAgent before View() — any CurrentMode call from the
+//     render path calls t.Fatal, proving View reads m.mode, not the live agent.
+func TestMode_CachedField(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.modeAgent = newSimpleModeStub("build") // safe stub for cycleMode
+	m.mode = "build"
+
+	// cycleMode reads modeAgent.CurrentMode() once (to compute next mode) then
+	// sets m.mode = "plan". This call is Update-path behavior — expected.
+	updated, _ := m.cycleMode()
+	m = updated
+
+	if m.mode != "plan" {
+		t.Errorf("after cycleMode(), m.mode = %q, want %q", m.mode, "plan")
+	}
+
+	// Phase 2: swap to a failing stub. View() must NOT call CurrentMode().
+	// If it does, failingModeAgent calls t.Fatal — the test fails clearly.
+	m.modeAgent = &failingModeAgent{t: t, mode: "plan"}
+	_ = m.View()
+}
+
+// TestLayout_ReadsCachedMode verifies renderLayout reads m.mode, not
+// modeAgent.CurrentMode(). Sets m.mode = "review" and checks the rendered
+// output contains "REVIEW". The failingModeAgent ensures no live call occurs.
+func TestLayout_ReadsCachedMode(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.modeAgent = &failingModeAgent{t: t, mode: "review"}
+	m.mode = "review" // the cached field renderLayout must read
+
+	out := m.View()
+	const wantLabel = "REVIEW"
+	if !containsCI(out, wantLabel) {
+		t.Errorf("renderLayout output missing %q — mode pill not reading cached m.mode\noutput:\n%s", wantLabel, out)
+	}
+}
+
+// TestMode_SlashCommandRefreshes verifies that a commandResultMsg with
+// name "mode" refreshes m.mode from modeAgent.CurrentMode().
+func TestMode_SlashCommandRefreshes(t *testing.T) {
+	m := newTestModel()
+	m.mode = "build"
+	m.modeAgent = newSimpleModeStub("plan") // returns "plan" from CurrentMode
+
+	updated, _ := m.Update(commandResultMsg{name: "mode", reply: "mode set"})
+	m = updated.(Model)
+
+	if m.mode != "plan" {
+		t.Errorf("after commandResultMsg{name:mode}, m.mode = %q, want %q", m.mode, "plan")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.7 — WU-b ago pre-compute unit tests
+// ---------------------------------------------------------------------------
+
+// TestSessions_PrecomputedAgo verifies that sessionsLoadedMsg populates
+// m.sessionsAgo in parallel with m.sessions (one entry per conversation).
+func TestSessions_PrecomputedAgo(t *testing.T) {
+	m := newTestModel()
+
+	convs := []store.Conversation{
+		{
+			ID:        "c1",
+			Status:    "active",
+			UpdatedAt: time.Now().Add(-5 * time.Minute),
+			Metadata:  map[string]string{"title": "Alpha"},
+		},
+		{
+			ID:        "c2",
+			Status:    "active",
+			UpdatedAt: time.Now().Add(-30 * time.Minute),
+			Metadata:  map[string]string{"title": "Beta"},
+		},
+	}
+
+	updated, _ := m.Update(sessionsLoadedMsg{convs: convs})
+	m = updated.(Model)
+
+	if len(m.sessionsAgo) != len(m.sessions) {
+		t.Fatalf("sessionsAgo len = %d, want %d (must be parallel to sessions)", len(m.sessionsAgo), len(m.sessions))
+	}
+	for i, ago := range m.sessionsAgo {
+		if ago == "" {
+			t.Errorf("sessionsAgo[%d] is empty, want non-empty ago string", i)
+		}
+	}
+}

@@ -6,6 +6,7 @@ package tui
 import (
 	"context"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"daimon/internal/agent"
@@ -119,6 +120,18 @@ type Model struct {
 	focus  focusRegion // intra-screen focus region (PR2)
 	styles tuiStyles
 
+	// mode — cached agent mode string (WU-a: written in Update, read in View).
+	// Eliminates the live modeAgent.CurrentMode() call from renderLayout.
+	// Initialized from ag.CurrentMode() at construction; updated in cycleMode,
+	// the /mode commandResultMsg handler, and (for purity) never in View.
+	mode string
+
+	// viewport — owns the chat-center scroll window (WU-c / PR-2).
+	// Stored by value; dimensions set via WindowSizeMsg, content pushed by
+	// refreshThreadViewport after every thread mutation. Initialized to
+	// viewport.New(0,0) in both constructors so non-chat tests never nil-deref.
+	viewport viewport.Model
+
 	// backend handles (injected by RunTUI; never constructed here)
 	ag    *agent.Agent // embedded dispatch + accessors (ToolRegistry, TodoListForConv)
 	bus   notify.Bus   // subscribe in Init; bus may be nil (welcome/static screens)
@@ -154,6 +167,7 @@ type Model struct {
 
 	// sessions screen (PR3b)
 	sessions    []store.Conversation // loaded from store on navigation
+	sessionsAgo []string             // WU-b: pre-computed "ago" strings parallel to sessions
 	sessionIdx  int                  // selected row index in the sessions list
 	prevScreen  screenState          // screen to return to on esc
 	sessionsErr error                // set when loadSessionsCmd fails; cleared on success
@@ -258,7 +272,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.sessionIdx >= len(m.sessions) {
 				m.sessionIdx = len(m.sessions) - 1
 			}
+			// WU-b: pre-compute "ago" strings in Update so renderSessions never
+			// calls relativeTime (i.e. time.Since) from the View path.
+			m.sessionsAgo = make([]string, len(m.sessions))
+			for i, c := range m.sessions {
+				m.sessionsAgo[i] = relativeTime(c.UpdatedAt)
+			}
 			// Update the resume-list panel (welcome + sessions rail) via copy-on-write.
+			// setSessions now also pre-computes panel-level ago strings (WU-b).
 			m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
 				if p, ok := panels[panelResumeList].(*resumeListPanel); ok {
 					cp := *p
@@ -318,6 +339,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
 
 	case commandResultMsg:
+		// WU-a: the /mode command changes the agent mode externally; refresh the
+		// cached m.mode so the render path sees the new value without a live call.
+		if msg.name == "mode" && m.modeAgent != nil {
+			m.mode = m.modeAgent.CurrentMode()
+		}
 		text := msg.reply
 		if msg.err != nil {
 			text = "command failed: " + msg.err.Error()
@@ -475,6 +501,10 @@ func newTestModel() Model {
 		input:      newInputBar(),
 		rail:       newRail(s),
 		breadcrumb: breadcrumb{styles: s},
+		// WU-c (PR-2) prerequisite: initialize viewport so non-chat tests that
+		// call newTestModel() never nil-deref when viewport methods are used.
+		// Zero dimensions are safe — AtBottom/View on an unsized viewport are no-ops.
+		viewport: viewport.New(0, 0),
 	}
 }
 
@@ -542,6 +572,9 @@ func (m Model) cycleMode() (Model, tea.Cmd) {
 	}
 	next := nextModeName(m.modeAgent.CurrentMode())
 	m.modeAgent.SetModeImmediate(next)
+	// WU-a: write the new mode into the cached field so renderLayout reads it
+	// without calling CurrentMode() on the live agent.
+	m.mode = next
 	// Issue async persistence via the real agent (if wired).
 	if m.ag != nil {
 		return m, switchModeCmd(m.ag, next, m.channelID, m.senderID)

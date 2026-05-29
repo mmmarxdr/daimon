@@ -17,6 +17,9 @@ func TestModel_View_ChatScreen_Golden(t *testing.T) {
 	m.focus = focusEditor
 	m.topBar.SetData("⫶", "/home/user/project", "main", "claude-opus-4", "build", "$0.12", "ready")
 	m.footer.SetScreen(screenChat)
+	// WU-a: renderLayout reads m.mode (cached field), not the live modeAgent.
+	// Set m.mode to match the value passed to SetData — golden output is unchanged.
+	m.mode = "build"
 
 	// Pre-populate with a realistic thread.
 	m.thread.append(&MsgUser{text: "Write a Go function that reverses a slice.", styles: s})

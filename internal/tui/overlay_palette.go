@@ -42,7 +42,10 @@ type dispatchCommandMsg struct {
 
 // commandResultMsg is returned by runCommandCmd when the agent completes
 // (or fails) a command execution. Model.Update appends a MsgDaimon.
+// name carries the command name so the handler can apply mode-specific logic
+// (WU-a: when name == "mode", refresh m.mode from modeAgent.CurrentMode()).
 type commandResultMsg struct {
+	name  string // command name that was dispatched
 	reply string
 	err   error
 }
@@ -322,8 +325,8 @@ func runCommandCmd(ag *agent.Agent, name, args string, allowDestructive bool) te
 			AllowDestructive: allowDestructive,
 		})
 		if err != nil {
-			return commandResultMsg{err: err}
+			return commandResultMsg{name: name, err: err}
 		}
-		return commandResultMsg{reply: res.Reply}
+		return commandResultMsg{name: name, reply: res.Reply}
 	}
 }
