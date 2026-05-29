@@ -199,8 +199,9 @@ func TestView_Deterministic_Rail(t *testing.T) {
 // subsequent View() does NOT call CurrentMode() on the modeAgent.
 //
 // Two-phase approach:
-//  1. Use simpleModeStub for cycleMode (cycleMode legitimately reads CurrentMode
-//     once to compute the next mode — this is expected Update-path behavior).
+//  1. Use simpleModeStub for cycleMode (cycleMode computes the next mode from
+//     m.mode and calls only SetModeImmediate — the stub is here to satisfy the
+//     interface, not to guard a CurrentMode() call).
 //  2. Swap to failingModeAgent before View() — any CurrentMode call from the
 //     render path calls t.Fatal, proving View reads m.mode, not the live agent.
 func TestMode_CachedField(t *testing.T) {
@@ -282,10 +283,14 @@ func TestSwitchModeMsg_ReconcilesOverride(t *testing.T) {
 	m.modeAgent = stub
 	m.mode = "plan"
 
-	m.Update(switchModeMsg{mode: "plan"})
+	updated, _ := m.Update(switchModeMsg{mode: "plan"})
+	nm := updated.(Model)
 
 	if stub.override != "" {
 		t.Errorf("switchModeMsg{plan} must clear a matching override, got override=%q", stub.override)
+	}
+	if nm.mode != "plan" {
+		t.Errorf("switchModeMsg must refresh m.mode from ground truth, got %q want %q", nm.mode, "plan")
 	}
 }
 
@@ -297,10 +302,14 @@ func TestSwitchModeMsg_ReconcileRaceSafe(t *testing.T) {
 	m.modeAgent = stub
 	m.mode = "review"
 
-	m.Update(switchModeMsg{mode: "plan"}) // older confirmation for a superseded switch
+	updated, _ := m.Update(switchModeMsg{mode: "plan"}) // older confirmation for a superseded switch
+	nm := updated.(Model)
 
 	if stub.override != "review" {
 		t.Errorf("stale switchModeMsg{plan} must NOT clear newer override; got override=%q want %q", stub.override, "review")
+	}
+	if nm.mode != "review" {
+		t.Errorf("m.mode must reflect the pending newer override, got %q want %q", nm.mode, "review")
 	}
 }
 

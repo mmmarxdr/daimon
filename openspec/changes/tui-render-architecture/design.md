@@ -105,10 +105,10 @@ Regression guards: `TestCycleMode_UsesCachedModeNotStaleOverride`,
 
 ### switchModeMsg handler
 
-The existing handler (model.go:328) only surfaces errors. Mode is already written
-optimistically in `cycleMode`, so on success there is nothing to do. On error, leave
-`m.mode` at the optimistic value (matches current UX — the adapter's `localOverride`
-already behaved this way). No change required beyond what cycleMode now writes.
+> SUPERSEDED by the AMENDMENT above. The original plan ("only surface errors; leave
+> m.mode at the optimistic value on error; no change required") was revised: the handler
+> now calls `ReconcileMode(msg.mode)` then `m.mode = m.trueMode()`, which both clears the
+> landed override race-safely AND reverts the optimistic value to ground truth on error.
 
 > Note: `/mode` slash command also changes mode via the agent. It currently relies on
 > the live `ag.CurrentMode()` read at render time to reflect the change. After this WU,
