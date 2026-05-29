@@ -335,6 +335,11 @@ func New(
 		channelName:     ch.Name(),
 		newProviderFn:   provider.NewFromConfig,
 		activeTurns:     make(map[string]*store.Conversation),
+		// Initialize to the default mode so modeSnapshot()/CurrentMode() never
+		// see an empty name before the first SetMode. The TUI reads CurrentMode()
+		// on every render; an empty currentMode would otherwise log a WARN per
+		// keystroke ("mode_snapshot: unknown mode, falling back to build").
+		currentMode: "build",
 	}
 	// Re-wire sub-components to use the live-snapshot closure now that `a` exists.
 	// The staticProvFn used at construction read the original `prov` by value.

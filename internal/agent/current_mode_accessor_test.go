@@ -33,11 +33,22 @@ func buildAgentForCurrentMode(t *testing.T) *Agent {
 	)
 }
 
-// TC-1: Default agent (currentMode == "") must fall back to "build" (mirrors modeSnapshot).
+// TC-1: A freshly constructed agent is INITIALIZED to the default "build" mode
+// (not left empty). This matters because the TUI reads CurrentMode() on every
+// render: an empty currentMode would hit modeSnapshot()'s warn-and-fallback
+// path on each keystroke, spamming "mode_snapshot: unknown mode" WARNs.
 func TestCurrentMode_DefaultIsBuild(t *testing.T) {
 	a := buildAgentForCurrentMode(t)
-	got := a.CurrentMode()
-	if got != "build" {
+
+	// The field itself must be set — not merely masked by the warn fallback.
+	a.modeMu.RLock()
+	raw := a.currentMode
+	a.modeMu.RUnlock()
+	if raw != "build" {
+		t.Errorf("new agent currentMode = %q, want \"build\" (must not rely on the warn fallback)", raw)
+	}
+
+	if got := a.CurrentMode(); got != "build" {
 		t.Errorf("CurrentMode() on new agent = %q, want \"build\"", got)
 	}
 }
