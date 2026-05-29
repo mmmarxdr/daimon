@@ -31,6 +31,11 @@ type modeAgent interface {
 	// The TUI uses this for optimistic UI; the real agent also persists asynchronously
 	// via a tea.Cmd (switchModeCmd).
 	SetModeImmediate(name string)
+	// ReconcileMode clears the optimistic override once the async switch to
+	// `confirmed` has landed, so CurrentMode() resumes delegating to the
+	// authoritative cache. It MUST be a no-op when a newer override has
+	// superseded `confirmed` (race-safe across rapid Tab presses).
+	ReconcileMode(confirmed string)
 }
 
 // switchModeMsg is delivered by switchModeCmd after a mode change attempt.
@@ -340,9 +345,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commandResultMsg:
 		// WU-a: the /mode command changes the agent mode externally; refresh the
-		// cached m.mode so the render path sees the new value without a live call.
-		if msg.name == "mode" && m.modeAgent != nil {
-			m.mode = m.modeAgent.CurrentMode()
+		// cached m.mode from the authoritative source (the real agent) so the
+		// render path sees the new value without a live call. trueMode() reads the
+		// agent's ground truth, never the adapter's optimistic Tab override.
+		if msg.name == "mode" {
+			m.mode = m.trueMode()
 		}
 		text := msg.reply
 		if msg.err != nil {
@@ -352,9 +359,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case switchModeMsg:
-		// A3: async mode-persistence result. On success, no further action needed
-		// (the modeAgent cache was updated optimistically in cycleMode before the
-		// Cmd was issued). On error, surface the message to the thread.
+		// A3: async mode-persistence result for a Tab cycle. Reconcile the
+		// adapter's optimistic override now that the switch has landed: clear it
+		// iff it still matches this confirmed mode (a newer Tab keeps its own
+		// override — race-safe, no flicker). Then re-sync m.mode from ground
+		// truth, which reverts the optimistic value on error.
+		if m.modeAgent != nil {
+			m.modeAgent.ReconcileMode(msg.mode)
+		}
+		m.mode = m.trueMode()
 		if msg.err != nil {
 			m.thread.append(&MsgDaimon{
 				text:   "mode switch failed: " + msg.err.Error(),
@@ -531,6 +544,21 @@ func newAgentModeAdapter(ag *agent.Agent) *agentModeAdapter {
 	return &agentModeAdapter{ag: ag}
 }
 
+// trueMode returns the authoritative current mode for refreshing the cached
+// m.mode in Update. It prefers the real agent (ground truth, bypassing the
+// adapter's optimistic Tab override); in tests where no agent is wired it falls
+// back to the modeAgent stub, then to the last cached value. Never called from
+// a render path.
+func (m Model) trueMode() string {
+	if m.ag != nil {
+		return m.ag.CurrentMode()
+	}
+	if m.modeAgent != nil {
+		return m.modeAgent.CurrentMode()
+	}
+	return m.mode
+}
+
 // CurrentMode returns the optimistic override if set, else delegates to
 // the real agent cache.
 func (a *agentModeAdapter) CurrentMode() string {
@@ -545,6 +573,17 @@ func (a *agentModeAdapter) CurrentMode() string {
 // agent.SetMode (persists to store + updates the real cache).
 func (a *agentModeAdapter) SetModeImmediate(name string) {
 	a.localOverride = name
+}
+
+// ReconcileMode clears the optimistic override iff it still equals the
+// confirmed mode — i.e. the async switch this override anticipated has landed
+// and the agent cache is now authoritative. If a newer Tab set a different
+// override, confirmed != localOverride and the override is preserved, so rapid
+// Tab cycling never flickers back to a stale agent value.
+func (a *agentModeAdapter) ReconcileMode(confirmed string) {
+	if a.localOverride == confirmed {
+		a.localOverride = ""
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -570,7 +609,12 @@ func (m Model) cycleMode() (Model, tea.Cmd) {
 	if m.modeAgent == nil {
 		return m, nil
 	}
-	next := nextModeName(m.modeAgent.CurrentMode())
+	// Compute the next mode from the cached m.mode, NOT from the adapter's
+	// optimistic override: the override can be stale relative to ground truth
+	// after a non-Tab mode change (e.g. the /mode command), whereas m.mode is
+	// always kept in sync (cycleMode here, trueMode() on /mode and switchModeMsg).
+	// This keeps Tab cycling correct after a /mode command.
+	next := nextModeName(m.mode)
 	m.modeAgent.SetModeImmediate(next)
 	// WU-a: write the new mode into the cached field so renderLayout reads it
 	// without calling CurrentMode() on the live agent.

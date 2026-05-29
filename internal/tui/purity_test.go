@@ -42,6 +42,7 @@ func (f *failingModeAgent) CurrentMode() string {
 }
 
 func (f *failingModeAgent) SetModeImmediate(name string) { f.mode = name }
+func (f *failingModeAgent) ReconcileMode(string)         {}
 
 // simpleModeStub is a modeAgent that returns a fixed mode from CurrentMode()
 // and records the latest value passed to SetModeImmediate.
@@ -50,6 +51,28 @@ type simpleModeStub struct{ mode string }
 func newSimpleModeStub(mode string) modeAgent       { return &simpleModeStub{mode: mode} }
 func (s *simpleModeStub) CurrentMode() string       { return s.mode }
 func (s *simpleModeStub) SetModeImmediate(n string) { s.mode = n }
+func (s *simpleModeStub) ReconcileMode(string)      {}
+
+// overridingModeStub faithfully mirrors agentModeAdapter's optimistic-override
+// semantics (used by the reconciliation regression tests): SetModeImmediate
+// sets an override that shadows the base mode until ReconcileMode clears it.
+type overridingModeStub struct {
+	base     string // authoritative mode (what the "agent" would report)
+	override string // optimistic Tab override; shadows base while non-empty
+}
+
+func (s *overridingModeStub) CurrentMode() string {
+	if s.override != "" {
+		return s.override
+	}
+	return s.base
+}
+func (s *overridingModeStub) SetModeImmediate(n string) { s.override = n }
+func (s *overridingModeStub) ReconcileMode(confirmed string) {
+	if s.override == confirmed {
+		s.override = ""
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Task 1.1 — viewport harness unblock
@@ -82,8 +105,12 @@ func TestView_Deterministic(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.screen = screenChat
 
-	// WU-a: set cached mode field.
+	// WU-a: set cached mode field. Attach a failingModeAgent so that ANY
+	// CurrentMode() call from the render path fails the test — this makes the
+	// determinism check a real regression guard against re-introducing a live
+	// agent read in renderLayout/View.
 	m.mode = "plan"
+	m.modeAgent = &failingModeAgent{t: t, mode: "plan"}
 
 	// Thread items exercising the render path.
 	m.thread.append(&MsgUser{text: "hi", time: "10:00", styles: m.styles})
@@ -225,6 +252,55 @@ func TestMode_SlashCommandRefreshes(t *testing.T) {
 
 	if m.mode != "plan" {
 		t.Errorf("after commandResultMsg{name:mode}, m.mode = %q, want %q", m.mode, "plan")
+	}
+}
+
+// TestCycleMode_UsesCachedModeNotStaleOverride is the regression guard for the
+// "Tab after /mode" bug: cycleMode must compute the next mode from the cached
+// m.mode (ground truth, refreshed by /mode), NOT from the adapter's optimistic
+// override, which can be stale after a non-Tab mode change.
+func TestCycleMode_UsesCachedModeNotStaleOverride(t *testing.T) {
+	m := newTestModel()
+	// Simulate state right after `/mode build`: m.mode is the ground truth, but
+	// the adapter still carries a stale override "plan" from an earlier Tab.
+	m.mode = "build"
+	m.modeAgent = &overridingModeStub{base: "build", override: "plan"}
+
+	nm, _ := m.cycleMode()
+
+	// Correct: build → plan. Bug would read the stale override "plan" → review.
+	if nm.mode != "plan" {
+		t.Errorf("cycleMode after /mode: m.mode = %q, want %q (must use cached mode, not stale override)", nm.mode, "plan")
+	}
+}
+
+// TestSwitchModeMsg_ReconcilesOverride verifies a landed Tab switch clears the
+// adapter's optimistic override so CurrentMode() resumes delegating to truth.
+func TestSwitchModeMsg_ReconcilesOverride(t *testing.T) {
+	stub := &overridingModeStub{base: "plan", override: "plan"}
+	m := newTestModel()
+	m.modeAgent = stub
+	m.mode = "plan"
+
+	m.Update(switchModeMsg{mode: "plan"})
+
+	if stub.override != "" {
+		t.Errorf("switchModeMsg{plan} must clear a matching override, got override=%q", stub.override)
+	}
+}
+
+// TestSwitchModeMsg_ReconcileRaceSafe verifies a stale (superseded) confirmation
+// does NOT clear a newer override — rapid Tab must not flicker to ground truth.
+func TestSwitchModeMsg_ReconcileRaceSafe(t *testing.T) {
+	stub := &overridingModeStub{base: "build", override: "review"} // newer Tab → review pending
+	m := newTestModel()
+	m.modeAgent = stub
+	m.mode = "review"
+
+	m.Update(switchModeMsg{mode: "plan"}) // older confirmation for a superseded switch
+
+	if stub.override != "review" {
+		t.Errorf("stale switchModeMsg{plan} must NOT clear newer override; got override=%q want %q", stub.override, "review")
 	}
 }
 

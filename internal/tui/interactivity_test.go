@@ -217,6 +217,11 @@ func (a *mockModeAgent) SetModeImmediate(name string) {
 	a.setModeCalls = append(a.setModeCalls, name)
 }
 
+// ReconcileMode is a no-op for this stub: it has no separate optimistic
+// override (SetModeImmediate writes currentMode directly), so there is nothing
+// to clear. Present only to satisfy the modeAgent interface.
+func (a *mockModeAgent) ReconcileMode(string) {}
+
 // newTestModelWithMode returns a test Model with a mockModeAgent stub attached
 // via the modeAgent interface. The model starts in screenWelcome with mode=startMode.
 // WU-a: m.mode is also set so renderLayout reads the cached field, not the live agent.

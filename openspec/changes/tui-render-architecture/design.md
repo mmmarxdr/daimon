@@ -74,12 +74,34 @@ renderLayout / input / tb  read m.mode                          ── NO live c
 
 ### Where modeAgent is STILL needed
 
-`modeAgent` is read in `cycleMode()` ONLY (`m.modeAgent.CurrentMode()` to compute
-`next`, and `SetModeImmediate`). `cycleMode` is called from `updateWelcome`/`handleChatKey`
-on Tab — both Update paths. The `agentModeAdapter.localOverride` field becomes redundant
-for RENDER purposes (render no longer reads the adapter), but it is kept so `cycleMode`'s
-`CurrentMode()` returns the optimistic value when computing the NEXT mode across rapid
-Tab presses before the async persist lands. Do NOT remove the adapter.
+`modeAgent` is consulted ONLY in Update (`SetModeImmediate` in `cycleMode`,
+`ReconcileMode` in the `switchModeMsg` handler, and as the test-only fallback in
+`trueMode()`). The `agentModeAdapter.localOverride` field is kept for the
+optimistic-Tab window. Do NOT remove the adapter.
+
+### AMENDMENT (apply-time, judgment-day R1 fix)
+
+Implementation refined the mode-refresh decisions after dual review found that
+reading the adapter for the `/mode` refresh returned a stale optimistic override
+(localOverride was never cleared), and that the original "read `m.ag.CurrentMode()`"
+plan left a second bug: a Tab pressed AFTER `/mode` computed the next mode from
+the stale override. Final, implemented design:
+
+1. **`trueMode()` helper** — `m.ag.CurrentMode()` when an agent is wired (ground
+   truth, race-proof, bypasses the override); falls back to `m.modeAgent` then
+   `m.mode` so it stays unit-testable (tui tests wire no real agent). Used by the
+   `/mode` `commandResultMsg` handler and the `switchModeMsg` handler to refresh
+   `m.mode`. NEVER called from a render path.
+2. **`cycleMode` computes `next` from `m.mode`**, NOT `modeAgent.CurrentMode()`.
+   `m.mode` is always kept in sync (cycleMode + trueMode on /mode and switchModeMsg),
+   so Tab cycling is correct even after a `/mode` command.
+3. **`ReconcileMode(confirmed string)`** added to the `modeAgent` interface +
+   adapter + stubs: the `switchModeMsg` handler clears `localOverride` iff it still
+   equals the confirmed mode (race-safe — a newer Tab keeps its override, no flicker).
+
+Regression guards: `TestCycleMode_UsesCachedModeNotStaleOverride`,
+`TestSwitchModeMsg_ReconcilesOverride`, `TestSwitchModeMsg_ReconcileRaceSafe`, and
+`failingModeAgent` added to `TestView_Deterministic`.
 
 ### switchModeMsg handler
 
