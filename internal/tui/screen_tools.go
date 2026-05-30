@@ -123,6 +123,15 @@ func (m Model) updateTools(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.screen = m.prevScreen
 			m.footer = footerHints{screen: m.prevScreen}
+			// FIX-3: recompute viewport size when returning to chat.
+			// Tools has no input bar; chat reserves 4 rows — without a recompute the
+			// viewport retains the tools-screen height and renderChat overflows.
+			// enterChatViewport() is called AFTER m.screen is set so chatViewportSize
+			// reads the correct geometry. Only applies when landing on screenChat;
+			// welcome has the same input-bar geometry as chat so no correction needed.
+			if m.screen == screenChat {
+				m = m.enterChatViewport()
+			}
 			return m, nil
 		}
 	}

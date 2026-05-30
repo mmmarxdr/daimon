@@ -365,6 +365,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.overlays.Pop()
 		if m.ag == nil {
 			m.thread.append(&MsgDaimon{text: "no agent connected", time: nowHHMM(), styles: m.styles})
+			m = m.refreshThreadViewport()
 			return m, nil
 		}
 		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
@@ -454,10 +455,10 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}
-				// WU-c §C.6: reset viewport scroll on welcome→chat transition.
-				m.viewport.SetContent("")
-				m.viewport.GotoTop()
-				m = m.refreshThreadViewport()
+				// WU-c §C.6 + FIX-3: recompute viewport size for chat geometry on entry.
+				// enterChatViewport() is called AFTER m.screen = screenChat so
+				// chatViewportSize reads the correct geometry.
+				m = m.enterChatViewport()
 				return m, m.ch.submit(text, m.activeConvID)
 			}
 

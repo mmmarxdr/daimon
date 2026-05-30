@@ -625,7 +625,7 @@ func TestThreadCap_TruncationMarker(t *testing.T) {
 
 	got := th.Render(80)
 	// The truncation marker must appear at the top.
-	if !contains(got, "earlier messages trimmed") {
+	if !strings.Contains(got, "earlier messages trimmed") {
 		t.Errorf("Render with truncated=true must show truncation marker\ngot: %q", got)
 	}
 }
@@ -642,19 +642,6 @@ func TestThreadCap_NilStylesSafe(t *testing.T) {
 		}
 	}()
 	_ = th.Render(80)
-}
-
-// contains is a helper for test assertions (avoids importing strings at package level).
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
 }
 
 // TestToolInputSummary verifies raw JSON tool input is reduced to a clean

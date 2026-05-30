@@ -71,7 +71,8 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 				sel := m.sessions[m.sessionIdx]
 				m.activeConvID = sel.ID
 				// V1: resume rebinds activeConvID and clears the thread; prior history is not replayed.
-				m.thread = thread{}
+				// Preserve styles so the resume marker and subsequent items render correctly.
+				m.thread = thread{styles: m.styles}
 				// Reset the breadcrumb too: turns/tokens/label belong to the prior
 				// session and must not bleed into the resumed one.
 				m.breadcrumb = breadcrumb{styles: m.styles}
@@ -83,11 +84,12 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}
-				// WU-c §C.6: reset viewport scroll on session resume + transition to chat.
-				// Stale content/offset from the prior session must not bleed through.
-				m.viewport.SetContent("")
-				m.viewport.GotoTop()
-				m = m.refreshThreadViewport()
+				// WU-c §C.6 + FIX-3: recompute viewport size for chat geometry on entry.
+				// Sessions has no input bar; chat reserves 4 rows for it — recomputing
+				// here ensures the correct height is used, not the sessions-screen value.
+				// enterChatViewport() is called AFTER m.screen = screenChat so
+				// chatViewportSize reads the correct geometry.
+				m = m.enterChatViewport()
 			}
 			return m, nil
 

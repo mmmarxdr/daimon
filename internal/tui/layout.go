@@ -61,6 +61,24 @@ func chatViewportSize(m Model) (vw, vh int) {
 	return vw, vh
 }
 
+// enterChatViewport recomputes the viewport dimensions for the chat screen
+// geometry and resets content. Call this AFTER m.screen has been set to
+// screenChat so chatViewportSize reads the correct screen state.
+//
+// This helper is the single call site for chat-entry viewport resets, keeping
+// chatViewportSize as the sole source of truth for layout math (design §C.5).
+// It mirrors the WindowSizeMsg handler logic so the viewport is always correctly
+// sized when entering chat from a screen with different chrome geometry
+// (e.g. tools or sessions, which have no input bar and therefore different height).
+func (m Model) enterChatViewport() Model {
+	vw, vh := chatViewportSize(m)
+	m.viewport.Width = vw
+	m.viewport.Height = vh
+	m.viewport.SetContent("")
+	m.viewport.GotoTop()
+	return m.refreshThreadViewport()
+}
+
 // renderLayout composes the full TUI view for the given model state.
 // It is called from Model.View() and is the only place where vertical/horizontal
 // joining happens. Screen-specific center content is delegated to renderCenter.
