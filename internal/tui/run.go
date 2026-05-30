@@ -119,6 +119,8 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		// WU-c (PR-2) prerequisite: initialize viewport with zero dimensions.
 		// Dimensions are set when the first WindowSizeMsg arrives.
 		viewport: viewport.New(0, 0),
+		// WU-c (task 2.11): thread.styles for truncation marker rendering.
+		thread: thread{styles: s},
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

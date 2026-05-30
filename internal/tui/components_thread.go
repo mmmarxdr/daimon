@@ -37,14 +37,28 @@ type threadItem interface {
 // thread — ordered list of threadItems
 // ---------------------------------------------------------------------------
 
+// maxThreadItems is the maximum number of items the thread will hold.
+// When exceeded, the oldest items are dropped (drop-oldest) and the
+// truncated flag is set to show a truncation marker in Render (design §C.8).
+const maxThreadItems = 500
+
 // thread holds an ordered slice of threadItems for the chat screen center column.
 type thread struct {
-	items []threadItem
+	items     []threadItem
+	truncated bool      // true once any drop-oldest trim has occurred (§C.8)
+	styles    tuiStyles // for the truncation marker; set in both constructors
 }
 
-// append adds a threadItem to the end of the thread.
+// append adds a threadItem to the end of the thread. When the cap is exceeded,
+// the oldest items are dropped and truncated is set to true (design §C.8).
 func (t *thread) append(item threadItem) {
 	t.items = append(t.items, item)
+	if len(t.items) > maxThreadItems {
+		// Drop oldest; keep the most recent maxThreadItems.
+		drop := len(t.items) - maxThreadItems
+		t.items = t.items[drop:]
+		t.truncated = true
+	}
 }
 
 // Render renders all items joined by newlines. A blank separator line is
@@ -52,11 +66,18 @@ func (t *thread) append(item threadItem) {
 // item) so consecutive turns get breathing room, matching the design's
 // per-turn marginBottom — without splitting a daimon turn from the tool lines
 // that follow it as sibling items.
+//
+// When t.truncated is true, a synthetic truncation marker line is prepended
+// at the top so the user knows earlier history was elided (design §C.8).
 func (t *thread) Render(width int) string {
 	if len(t.items) == 0 {
+		if t.truncated {
+			// Edge case: all items were somehow trimmed. Show the marker alone.
+			return "  ⋮ earlier messages trimmed"
+		}
 		return ""
 	}
-	parts := make([]string, 0, len(t.items))
+	parts := make([]string, 0, len(t.items)+1)
 	for _, item := range t.items {
 		s := item.Render(width)
 		if s == "" {
@@ -67,7 +88,15 @@ func (t *thread) Render(width int) string {
 		}
 		parts = append(parts, s)
 	}
-	return strings.Join(parts, "\n")
+	out := strings.Join(parts, "\n")
+	if t.truncated {
+		// Prepend the truncation marker styled via t.styles.inkFaint.
+		// Zero lipgloss.Style.Render() is an identity function, so this is safe
+		// even when t.styles is a zero-value tuiStyles (TestThreadCap_NilStylesSafe).
+		marker := t.styles.inkFaint.Render("  ⋮ earlier messages trimmed")
+		out = marker + "\n" + out
+	}
+	return out
 }
 
 // findToolLine returns the first ToolLine with the given callID, or nil.

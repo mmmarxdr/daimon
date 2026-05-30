@@ -575,6 +575,88 @@ func TestToolLine_Render_NoViewAffordance(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Task 2.3 — WU-c RED: thread cap tests
+// ---------------------------------------------------------------------------
+
+// TestThreadCap_DropsOldest verifies that appending item 501 drops the oldest
+// item and keeps exactly maxThreadItems (500).
+func TestThreadCap_DropsOldest(t *testing.T) {
+	s := newTuiStyles()
+	var th thread
+	th.styles = s
+
+	// Build 501 items with distinct text so we can identify position.
+	secondItem := &MsgUser{text: "item-1", styles: s} // will be items[0] after first append
+	// Append item 0 first.
+	th.append(&MsgUser{text: "item-0", styles: s})
+	// Save pointer to second item before appending.
+	th.append(secondItem)
+	// Append remaining 499 items to reach 501 total.
+	for i := 2; i < 501; i++ {
+		th.append(&MsgUser{text: "filler", styles: s})
+	}
+
+	if len(th.items) != maxThreadItems {
+		t.Errorf("after 501 appends: len(items) = %d, want %d", len(th.items), maxThreadItems)
+	}
+
+	// The first item in the slice must now be secondItem (item-0 was dropped).
+	if th.items[0] != secondItem {
+		t.Errorf("after drop-oldest: items[0] must be the second item originally appended (item-0 dropped)")
+	}
+}
+
+// TestThreadCap_TruncationMarker verifies that Render includes a truncation
+// marker at the top when t.truncated == true.
+func TestThreadCap_TruncationMarker(t *testing.T) {
+	s := newTuiStyles()
+	var th thread
+	th.styles = s
+
+	// Append 501 items to trigger truncation.
+	for i := 0; i < 501; i++ {
+		th.append(&MsgUser{text: "filler", styles: s})
+	}
+
+	if !th.truncated {
+		t.Fatal("thread.truncated must be true after exceeding maxThreadItems")
+	}
+
+	got := th.Render(80)
+	// The truncation marker must appear at the top.
+	if !contains(got, "earlier messages trimmed") {
+		t.Errorf("Render with truncated=true must show truncation marker\ngot: %q", got)
+	}
+}
+
+// TestThreadCap_NilStylesSafe verifies that a zero-value thread with
+// truncated=true does not panic on Render(80).
+func TestThreadCap_NilStylesSafe(t *testing.T) {
+	var th thread
+	th.truncated = true
+	// Must not panic even with zero styles.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Render panicked on zero-value thread with truncated=true: %v", r)
+		}
+	}()
+	_ = th.Render(80)
+}
+
+// contains is a helper for test assertions (avoids importing strings at package level).
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}
+
 // TestToolInputSummary verifies raw JSON tool input is reduced to a clean
 // argument (salient key first, then single-key value, then raw passthrough).
 func TestToolInputSummary(t *testing.T) {

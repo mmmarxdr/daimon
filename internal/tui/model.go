@@ -218,6 +218,27 @@ func (m Model) Init() tea.Cmd {
 	return loadSessionsCmd(m.store)
 }
 
+// refreshThreadViewport recomputes the viewport content from the current thread.
+// It is called in Update after any thread mutation or dimension change. It MUST
+// NOT be called from View() — this is the Update/View boundary (design §C.2).
+//
+// Auto-scroll policy (design §C.4): capture AtBottom BEFORE SetContent; only
+// call GotoBottom if the user was already at the bottom (stick-to-bottom).
+// If the user has scrolled up, the YOffset is left untouched (freeze-on-scroll).
+func (m Model) refreshThreadViewport() Model {
+	width := m.viewport.Width
+	content := m.thread.Render(width)
+	if bc := m.breadcrumb.Render(width); bc != "" {
+		content = bc + "\n" + content
+	}
+	atBottom := m.viewport.AtBottom()
+	m.viewport.SetContent(content)
+	if atBottom {
+		m.viewport.GotoBottom()
+	}
+	return m
+}
+
 // Update implements tea.Model. It dispatches messages globally first, then
 // to overlays (AD-9), then to the active screen handler. Unimplemented
 // screen stubs return (m, nil) until their respective PR fills them in.
@@ -234,6 +255,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		// WU-c: propagate dimensions to viewport and re-render content at new width.
+		vw, vh := chatViewportSize(m)
+		m.viewport.Width = vw
+		m.viewport.Height = vh
+		m = m.refreshThreadViewport()
 		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -356,6 +382,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text = "command failed: " + msg.err.Error()
 		}
 		m.thread.append(&MsgDaimon{text: text, time: nowHHMM(), styles: m.styles})
+		m = m.refreshThreadViewport()
 		return m, nil
 
 	case switchModeMsg:
@@ -374,6 +401,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				time:   nowHHMM(),
 				styles: m.styles,
 			})
+			m = m.refreshThreadViewport()
 		}
 		return m, nil
 	}
@@ -426,6 +454,10 @@ func (m Model) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}
+				// WU-c §C.6: reset viewport scroll on welcome→chat transition.
+				m.viewport.SetContent("")
+				m.viewport.GotoTop()
+				m = m.refreshThreadViewport()
 				return m, m.ch.submit(text, m.activeConvID)
 			}
 
@@ -518,6 +550,8 @@ func newTestModel() Model {
 		// call newTestModel() never nil-deref when viewport methods are used.
 		// Zero dimensions are safe — AtBottom/View on an unsized viewport are no-ops.
 		viewport: viewport.New(0, 0),
+		// WU-c (task 2.11): thread.styles for truncation marker rendering.
+		thread: thread{styles: s},
 	}
 }
 

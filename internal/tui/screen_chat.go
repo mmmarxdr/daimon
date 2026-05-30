@@ -38,6 +38,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentReplyMsg:
 		md := &MsgDaimon{text: msg.text, time: nowHHMM(), styles: m.styles}
 		m.thread.append(md)
+		m = m.refreshThreadViewport()
 		// Re-issue pump so the drain continues.
 		return m, pumpEvents(m.events)
 
@@ -57,6 +58,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				copy(newItems, m.thread.items)
 				newItems[idx] = &tlCopy
 				m.thread.items = newItems
+				m = m.refreshThreadViewport()
 				return m, tlCopy.Tick()
 			}
 		}
@@ -163,6 +165,7 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			styles: m.styles,
 		}
 		m.thread.append(tl)
+		m = m.refreshThreadViewport()
 		// Start spinner animation.
 		cmds = append(cmds, tl.Tick())
 		// PR2b: Update telemetry panel tool-call count (copy-on-write).
@@ -195,6 +198,7 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			copy(newItems, m.thread.items)
 			newItems[idx] = &tlCopy
 			m.thread.items = newItems
+			m = m.refreshThreadViewport()
 		}
 		// PR2b: Update telemetry panel error count (copy-on-write).
 		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
@@ -230,11 +234,13 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		}
 		sa := &Subagent{id: id, styles: m.styles}
 		m.thread.append(sa)
+		m = m.refreshThreadViewport()
 
 	case notify.EventReasoningStart:
 		// Insert a Reasoning block in collapsed state.
 		r := &Reasoning{styles: m.styles}
 		m.thread.append(r)
+		m = m.refreshThreadViewport()
 
 	case notify.EventReasoningEnd:
 		// Update the most recent Reasoning block with the completed text.
@@ -253,6 +259,7 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			m = m.refreshThreadViewport()
 		}
 
 	case notify.EventTokensUsage:
@@ -270,6 +277,8 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			bc.label = breadcrumbLabel(ev.Meta["conv_id"], m.activeConvID)
 		}
 		m.breadcrumb = bc
+		// WU-c: breadcrumb is baked into viewport content; refresh after change.
+		m = m.refreshThreadViewport()
 
 		// PR2b: Update telemetry and context-meter rail panels.
 		// Copy-on-write: copy each panel value, mutate the copy, replace in map.
@@ -300,8 +309,28 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 
 // handleChatKey routes keyboard input on the chat screen.
 // Focus routing: focusEditor → input bar; focusMain → thread navigation.
+//
+// Scroll key routing (design §C.7):
+//   - pgup/pgdown/ctrl+u/ctrl+d: always forward to viewport (never text-entry keys).
+//   - up/down: forward to viewport ONLY when focusMain (thread navigation);
+//     when focusEditor, they belong to the input bar.
 func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
+		// WU-c §C.7: always route page scroll keys to the viewport regardless of focus.
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+
+	case "up", "down":
+		// WU-c §C.7: route arrow keys to viewport only when in thread navigation mode.
+		if m.focus != focusEditor {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+		// focusEditor: fall through to input bar (handled at the bottom).
 
 	case "enter":
 		if m.focus == focusEditor || m.focus == focusNone {
@@ -315,6 +344,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Append user message to thread immediately (optimistic).
 			mu := &MsgUser{text: text, time: nowHHMM(), styles: m.styles}
 			m.thread.append(mu)
+			m = m.refreshThreadViewport()
 			// Submit via channel (IO-free: runs in Cmd goroutine).
 			// Pass activeConvID so a resumed session binds to the right conversation (AD-7).
 			submitCmd := m.ch.submit(text, m.activeConvID)
@@ -343,6 +373,7 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.thread.items = newItems
+			m = m.refreshThreadViewport()
 			return m, nil
 		}
 		// Focus is on editor — fall through to input bar below.
@@ -417,14 +448,17 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // renderChat renders the center column for the chat screen.
+//
+// WU-c (design §C.3): delegates to m.viewport.View() so only the visible
+// window is materialized (O(viewport-height), not O(N items)). The breadcrumb
+// is baked into the viewport content by refreshThreadViewport (called in
+// Update after every thread mutation), so it scrolls with the thread (ADR-3).
+//
+// Guard: when thread is empty, return the placeholder instead of an empty
+// viewport view so the welcome-like "start chatting" hint is still shown.
 func renderChat(m Model, width, height int) string {
-	content := m.thread.Render(width)
-	if content == "" {
+	if len(m.thread.items) == 0 {
 		return renderCenterPlaceholder(screenChat, width, height)
 	}
-	// Inc.2: prepend the session breadcrumb above the thread when it has data.
-	if bc := m.breadcrumb.Render(width); bc != "" {
-		return bc + "\n" + content
-	}
-	return content
+	return m.viewport.View()
 }

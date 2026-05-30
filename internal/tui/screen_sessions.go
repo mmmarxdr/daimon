@@ -83,6 +83,11 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenChat
 				m.focus = focusEditor
 				m.footer = footerHints{screen: screenChat}
+				// WU-c §C.6: reset viewport scroll on session resume + transition to chat.
+				// Stale content/offset from the prior session must not bleed through.
+				m.viewport.SetContent("")
+				m.viewport.GotoTop()
+				m = m.refreshThreadViewport()
 			}
 			return m, nil
 

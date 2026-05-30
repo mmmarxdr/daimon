@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // TestPlaceOverlay_BoxAppearsAtCenter verifies that placeOverlay places the box
@@ -77,17 +79,24 @@ func TestPlaceOverlay_EmptyBoxReturnsBase(t *testing.T) {
 
 // TestModel_View_WithPalette_ContainsBothPaletteAndBaseContent verifies that
 // View() with an active palette contains BOTH palette content AND base/chat content.
+//
+// WU-c adaptation: the test drives a WindowSizeMsg before pushing the palette so
+// the viewport is sized and thread content is pushed into it. Without this,
+// m.viewport has zero dimensions and viewport.View() returns "" — the chat base
+// content would be absent from the rendered output.
 func TestModel_View_WithPalette_ContainsBothPaletteAndBaseContent(t *testing.T) {
 	m := newTestModel()
-	m.width = 80
-	m.height = 24
 	m.screen = screenChat
 	m.focus = focusEditor
 
 	// Add a thread item so base has visible chat content.
 	m.thread.append(&MsgDaimon{text: "CHAT_BASE_MARKER", styles: m.styles})
 
-	// Push a palette.
+	// WU-c: drive WindowSizeMsg so viewport is sized + content is populated.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd.(Model)
+
+	// Push a palette after sizing so the palette renders on top of the content.
 	m.overlays.Push(newCommandPalette(testCmds, newTuiStyles()))
 
 	rendered := m.View()

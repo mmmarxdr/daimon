@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"daimon/internal/store"
 )
 
@@ -316,6 +318,54 @@ func TestSwitchModeMsg_ReconcileRaceSafe(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Task 1.7 — WU-b ago pre-compute unit tests
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Task 2.13 — TestView_Deterministic_Viewport: viewport determinism guard
+// ---------------------------------------------------------------------------
+
+// TestView_Deterministic_Viewport is the viewport-specific extension of the
+// determinism guard. It builds a model with a running tool, drives a WindowSizeMsg
+// (which sizes the viewport and pushes content via refreshThreadViewport), then
+// calls View() 50 times and asserts byte-identical output.
+//
+// This guards against any future regression that would re-introduce a clock
+// read or live-object access in the viewport render path.
+func TestView_Deterministic_Viewport(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	// Attach a failing mode agent so ANY live CurrentMode() call from View
+	// causes t.Fatal — same pattern as TestView_Deterministic.
+	m.mode = "plan"
+	m.modeAgent = &failingModeAgent{t: t, mode: "plan"}
+
+	// Populate thread with a running tool (exercises the spinner render path).
+	m.thread.append(&MsgUser{text: "hello viewport", time: "10:00", styles: m.styles})
+	tl := &ToolLine{callID: "vp-c1", name: "bash", state: toolRunning, styles: m.styles}
+	m.thread.append(tl)
+
+	// Drive WindowSizeMsg to size the viewport and populate its content.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd.(Model)
+
+	// Viewport must have non-zero dimensions after the size message.
+	if m.viewport.Width == 0 || m.viewport.Height == 0 {
+		t.Fatalf("viewport dimensions not set after WindowSizeMsg: %dx%d",
+			m.viewport.Width, m.viewport.Height)
+	}
+
+	// Call View() 50 times; every call must return the same bytes.
+	first := m.View()
+	if first == "" {
+		t.Fatal("View() returned empty string after WindowSizeMsg — viewport content not pushed")
+	}
+	for i := 0; i < 50; i++ {
+		got := m.View()
+		if got != first {
+			t.Fatalf("View() not deterministic (viewport) at call %d\nfirst:\n%s\ngot:\n%s",
+				i+1, first, got)
+		}
+	}
+}
 
 // TestSessions_PrecomputedAgo verifies that sessionsLoadedMsg populates
 // m.sessionsAgo in parallel with m.sessions (one entry per conversation).

@@ -29,6 +29,38 @@ var inputBarScreens = map[screenState]bool{
 	screenError:   true,
 }
 
+// chatViewportSize returns the content-area width and height for the chat
+// screen's viewport. It mirrors the chrome-reservation math in renderLayout
+// so the viewport window matches the slot renderChat occupies.
+//
+// This is the single source of truth for layout math shared by renderLayout
+// and the WindowSizeMsg handler in Model.Update (task 2.6 / design §C.5).
+func chatViewportSize(m Model) (vw, vh int) {
+	hasRail := HasPanels(m.screen)
+	hasInput := inputBarScreens[m.screen]
+
+	topBarHeight := 2
+	footerHeight := 2
+	inputHeight := 0
+	if hasInput {
+		inputHeight = 4
+	}
+	vh = m.height - topBarHeight - footerHeight - inputHeight
+	if vh < 0 {
+		vh = 0
+	}
+
+	vw = m.width
+	if hasRail {
+		rWidth := railWidth
+		if rWidth >= m.width {
+			rWidth = m.width / 3
+		}
+		vw = m.width - rWidth
+	}
+	return vw, vh
+}
+
 // renderLayout composes the full TUI view for the given model state.
 // It is called from Model.View() and is the only place where vertical/horizontal
 // joining happens. Screen-specific center content is delegated to renderCenter.
@@ -37,7 +69,7 @@ func renderLayout(m Model) string {
 	hasRail := HasPanels(m.screen)
 	hasInput := inputBarScreens[m.screen]
 
-	// 2. Reserve rows for chrome.
+	// 2. Reserve rows for chrome (matches chatViewportSize math).
 	// topBar now renders 2 lines: content row + bottom border rule.
 	topBarHeight := 2
 	// footer now renders 2 lines: top border rule + hints row.
