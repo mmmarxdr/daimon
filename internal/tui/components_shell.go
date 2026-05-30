@@ -249,29 +249,6 @@ func (fh *footerHints) renderHints(s tuiStyles) string {
 	}
 }
 
-// hintsForScreen returns the plain text hint string for the current screen.
-// Kept for backward compatibility with any callers that expect a plain string.
-func (fh *footerHints) hintsForScreen() string {
-	switch fh.screen {
-	case screenWelcome:
-		return "enter: send  ctrl+c: quit  tab: mode  /: commands  ^t: tools"
-	case screenChat:
-		return "⇥ /commands   ⌃C interrupt   ⌃R retry turn   ⌃E edit last   ⌃S save session"
-	case screenDiff:
-		return "↑↓: scroll hunks  q: back to chat  ctrl+c: quit"
-	case screenSlash:
-		return "↑↓: navigate  enter: run  esc: close  ctrl+c: quit"
-	case screenTools:
-		return "↑↓: navigate  esc: back  ctrl+c: quit"
-	case screenSessions:
-		return "↑↓: navigate  enter: resume  esc: back  ctrl+c: quit"
-	case screenError:
-		return "esc: back to chat  ctrl+c: quit"
-	default:
-		return "ctrl+c: quit"
-	}
-}
-
 // ---------------------------------------------------------------------------
 // inputBar
 // ---------------------------------------------------------------------------

@@ -31,11 +31,6 @@ func newHelpOverlay(styles tuiStyles) helpOverlay {
 	return helpOverlay{styles: styles}
 }
 
-// newHelpOverlayWithMode constructs a helpOverlay that shows the current mode.
-func newHelpOverlayWithMode(styles tuiStyles, mode string) helpOverlay {
-	return helpOverlay{styles: styles, mode: mode}
-}
-
 // ID implements dialog.
 func (h helpOverlay) ID() string { return "help-overlay" }
 
