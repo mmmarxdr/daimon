@@ -365,7 +365,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.overlays.Pop()
 		if m.ag == nil {
 			m.thread.append(&MsgDaimon{text: "no agent connected", time: nowHHMM(), styles: m.styles})
-			m = m.refreshThreadViewport()
+			// If we are not already on the chat screen, transition so the reply is
+			// visible. enterChatViewport() recomputes sizing for the chat geometry and
+			// calls refreshThreadViewport() internally — no separate refresh needed.
+			if m.screen != screenChat {
+				m.screen = screenChat
+				m.focus = focusEditor
+				m.footer = footerHints{screen: screenChat}
+				m = m.enterChatViewport()
+			} else {
+				m = m.refreshThreadViewport()
+			}
 			return m, nil
 		}
 		return m, runCommandCmd(m.ag, msg.name, "", msg.allowDestructive)
@@ -383,7 +393,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text = "command failed: " + msg.err.Error()
 		}
 		m.thread.append(&MsgDaimon{text: text, time: nowHHMM(), styles: m.styles})
-		m = m.refreshThreadViewport()
+		// If the reply arrives while on a non-chat screen (e.g. welcome), transition
+		// to chat so the output is visible. enterChatViewport() recomputes sizing for
+		// the chat geometry and calls refreshThreadViewport() — no separate refresh.
+		// When already in chat, keep the current behavior (preserve scroll position).
+		if m.screen != screenChat {
+			m.screen = screenChat
+			m.focus = focusEditor
+			m.footer = footerHints{screen: screenChat}
+			m = m.enterChatViewport()
+		} else {
+			m = m.refreshThreadViewport()
+		}
 		return m, nil
 
 	case switchModeMsg:
