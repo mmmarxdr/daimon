@@ -131,7 +131,7 @@ Est. ~110 lines. Base: `main`. Goldens MUST remain byte-identical — verify, do
 Est. ~230 lines. Base: PR-1 branch. After merge PR-1 → main, rebase/stack on main.
 Chat golden MUST be regenerated after human diff review — do NOT blind `-update`.
 
-### 2.1 Test harness: WindowSizeMsg in golden test [RED unblock]
+### [x] 2.1 Test harness: WindowSizeMsg in golden test [RED unblock]
 
 - **RED**: update `TestModel_View_ChatScreen_Golden` in `internal/tui/golden_test.go` to
   drive `m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})` before calling `View()`.
@@ -140,7 +140,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
   expected-to-fail (or skip) until WU-c GREEN is in place.
 - Files: `internal/tui/golden_test.go`
 
-### 2.2 WU-c RED: viewport unit tests (sizing + transitions)
+### [x] 2.2 WU-c RED: viewport unit tests (sizing + transitions)
 
 - **RED** — new tests in `internal/tui/screen_chat_test.go` or new `viewport_test.go`:
   - `TestViewport_WindowSizeMsg_Propagates`: send `WindowSizeMsg{80,24}`; assert
@@ -153,7 +153,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
     assert `YOffset == 0`.
 - Files: `internal/tui/screen_chat_test.go` (or new `internal/tui/viewport_test.go`)
 
-### 2.3 WU-c RED: thread cap tests
+### [x] 2.3 WU-c RED: thread cap tests
 
 - **RED** — in `internal/tui/components_thread_test.go`:
   - `TestThreadCap_DropsOldest`: append 501 items; assert `len(items) == 500` and first
@@ -164,7 +164,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
     not panic.
 - Files: `internal/tui/components_thread_test.go`
 
-### 2.4 WU-c RED: scroll key routing tests
+### [x] 2.4 WU-c RED: scroll key routing tests
 
 - **RED** — in `internal/tui/screen_chat_test.go`:
   - `TestScrollKeys_DoNotStealEditor`: focusEditor + PgDown; assert viewport YOffset changes
@@ -173,7 +173,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
   - `TestScrollKeys_ArrowsNoopWhenFocusEditor`: focusEditor + Down; assert viewport unchanged.
 - Files: `internal/tui/screen_chat_test.go`
 
-### 2.5 WU-c GREEN: add viewport field + constructors
+### [x] 2.5 WU-c GREEN: add viewport field + constructors
 
 - **GREEN** (unblocks 2.2):
   - `internal/tui/model.go`: add `viewport viewport.Model` to `Model` struct.
@@ -182,7 +182,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
   - `internal/tui/run.go` `newTestModel()`: set `viewport: viewport.New(0, 0)` (task 1.1 GREEN).
 - Files: `internal/tui/model.go`, `internal/tui/run.go`
 
-### 2.6 WU-c GREEN: chatViewportSize + layout math extraction
+### [x] 2.6 WU-c GREEN: chatViewportSize + layout math extraction
 
 - **GREEN**:
   - `internal/tui/layout.go`: extract chrome-reservation math into `chatViewportSize(m Model)
@@ -190,7 +190,7 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
   - Ensure existing layout tests pass; `make test`.
 - Files: `internal/tui/layout.go`, `internal/tui/layout_test.go`
 
-### 2.7 WU-c GREEN: refreshThreadViewport + WindowSizeMsg propagation
+### [x] 2.7 WU-c GREEN: refreshThreadViewport + WindowSizeMsg propagation
 
 - **GREEN** (resolves 2.2):
   - `internal/tui/model.go`: implement `refreshThreadViewport() Model` per design §C.2
@@ -204,14 +204,14 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
 - Run `make test`.
 - Files: `internal/tui/model.go`, `internal/tui/screen_chat.go`
 
-### 2.8 WU-c GREEN: renderChat delegates to viewport
+### [x] 2.8 WU-c GREEN: renderChat delegates to viewport
 
 - **GREEN**:
   - `internal/tui/screen_chat.go` `renderChat`: replace full thread render with
     `m.viewport.View()` (guard nil/empty items → placeholder).
 - Files: `internal/tui/screen_chat.go`
 
-### 2.9 WU-c GREEN: YOffset reset on screen transitions
+### [x] 2.9 WU-c GREEN: YOffset reset on screen transitions
 
 - **GREEN** (resolves 2.2 `TestViewport_ResetOnTransition`):
   - In each transition-into-chat site (`updateWelcome` Enter, `updateSessions` Enter,
@@ -219,14 +219,14 @@ Chat golden MUST be regenerated after human diff review — do NOT blind `-updat
 m = m.refreshThreadViewport()`.
 - Files: `internal/tui/model.go`, `internal/tui/screen_sessions.go`
 
-### 2.10 WU-c GREEN: scroll key routing
+### [x] 2.10 WU-c GREEN: scroll key routing
 
 - **GREEN** (resolves 2.4):
   - `internal/tui/screen_chat.go` `handleChatKey`: add PgUp/PgDn/ctrl+u/ctrl+d → always
     forward to viewport.Update; Up/Down → forward only when `m.focus != focusEditor`.
 - Files: `internal/tui/screen_chat.go`
 
-### 2.11 WU-c GREEN: thread cap + truncation marker
+### [x] 2.11 WU-c GREEN: thread cap + truncation marker
 
 - **GREEN** (resolves 2.3):
   - `internal/tui/components_thread.go`: add `truncated bool` and `styles tuiStyles` fields
@@ -246,7 +246,7 @@ m = m.refreshThreadViewport()`.
 - Confirm `make test` passes GREEN with new golden.
 - Files: `internal/tui/golden_test.go`, `internal/tui/testdata/golden/` (golden snapshots)
 
-### 2.13 WU-c: extend TestView_Deterministic with viewport variant
+### [x] 2.13 WU-c: extend TestView_Deterministic with viewport variant
 
 - Add `TestView_Deterministic_Viewport` in `internal/tui/purity_test.go`: build model with
   running tool, send WindowSizeMsg, call `View()` 50 times, assert byte-identical.
