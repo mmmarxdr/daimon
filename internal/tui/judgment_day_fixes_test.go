@@ -186,3 +186,62 @@ func TestViewportOverflow_ToolsToChat_ViewLineCount(t *testing.T) {
 			len(lines), rm.height)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Round 2 Fix 1 — sessions Esc → chat does not re-size the viewport
+//
+// Sessions has no input bar; chat reserves 4 input rows. When the user is on
+// sessions and presses Esc back to chat (prevScreen==screenChat), the viewport
+// keeps the sessions geometry (height h-4) instead of recomputing to the chat
+// geometry (height h-8). This is the same class as the tools-Esc fix from
+// Round 1: updateTools Esc already does the guarded enterChatViewport() call;
+// updateSessions Esc must do the same.
+// ---------------------------------------------------------------------------
+
+// TestViewportSize_SessionsEsc_ToChat_RecomputedOnTransition verifies that
+// when the user presses Esc from screenSessions back to screenChat, the
+// viewport is resized to the correct chat geometry (inputHeight=4, vh=h-8).
+//
+// Sequence:
+//  1. Build model on screenSessions with prevScreen=screenChat.
+//  2. Drive WindowSizeMsg{80,24} → viewport is sized for sessions (h-4=20).
+//  3. Press Esc → should land on screenChat with viewport sized for chat (h-8=16).
+//
+// Before the fix: the Esc branch does not call enterChatViewport(), so
+// viewport.Height remains 20 (sessions geometry) instead of becoming 16
+// (chat geometry). The test MUST fail before the fix is applied (RED).
+func TestViewportSize_SessionsEsc_ToChat_RecomputedOnTransition(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenSessions
+	m.prevScreen = screenChat
+
+	// Size the viewport while on screenSessions (no input bar → inputHeight=0).
+	// After WindowSizeMsg{80,24}: sessions geometry → vh = 24-2-2-0 = 20.
+	upd, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd.(Model)
+
+	// Sanity: sessions geometry gives vh=20 (no input bar).
+	if m.viewport.Height != 20 {
+		t.Logf("pre-Esc viewport.Height=%d (expected 20 for sessions geometry)", m.viewport.Height)
+	}
+
+	// Esc → prevScreen = screenChat.
+	upd2, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	rm := upd2.(Model)
+
+	// Chat geometry: inputHeight=4, vh = 24-2-2-4 = 16.
+	_, wantVH := chatViewportSize(rm)
+
+	if rm.viewport.Height != wantVH {
+		t.Errorf("viewport.Height after sessions Esc→chat = %d, want %d (chat geometry with inputHeight=4)",
+			rm.viewport.Height, wantVH)
+	}
+
+	// Bonus: View() line count must not exceed m.height.
+	view := rm.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) > rm.height {
+		t.Errorf("View() after sessions Esc→chat has %d lines, want <= %d (m.height) — viewport overflow",
+			len(lines), rm.height)
+	}
+}

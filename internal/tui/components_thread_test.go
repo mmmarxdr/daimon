@@ -644,6 +644,62 @@ func TestThreadCap_NilStylesSafe(t *testing.T) {
 	_ = th.Render(80)
 }
 
+// ---------------------------------------------------------------------------
+// Round 2 Fix 2 — thread.append trim must not alias prior snapshot backing array
+//
+// COW discipline (design §D.1/§D.6): every mutation site that copies thread
+// data does a fresh make+copy so a snapshot taken before the mutation is not
+// silently overwritten through a shared backing array. The reslice in
+// thread.append's trim path shares the backing array — a subsequent append to
+// the trimmed slice can overwrite elements visible through the prior slice
+// header.
+//
+// The deterministic RED assertion: a make+copy of exactly maxThreadItems
+// elements produces cap==len==maxThreadItems; a reslice of the original
+// backing array leaves cap > maxThreadItems (the full backing array capacity
+// minus the dropped prefix). We assert cap(t.items) == maxThreadItems after
+// the trim — this assertion FAILS before the fix and PASSES after.
+// ---------------------------------------------------------------------------
+
+// TestThreadCap_TrimDoesNotAliasPriorSnapshot verifies that after drop-oldest
+// trimming, the thread's backing array capacity equals exactly maxThreadItems.
+// A reslice leaves cap > maxThreadItems (shared backing array); a make+copy
+// produces cap == len == maxThreadItems. This is the COW discipline check:
+// the trimmed thread must own its backing array so it cannot overwrite a prior
+// snapshot through aliasing.
+func TestThreadCap_TrimDoesNotAliasPriorSnapshot(t *testing.T) {
+	s := newTuiStyles()
+	var th thread
+	th.styles = s
+
+	// Fill to exactly maxThreadItems (no trim yet).
+	for i := 0; i < maxThreadItems; i++ {
+		th.append(&MsgUser{text: "filler", styles: s})
+	}
+	if len(th.items) != maxThreadItems {
+		t.Fatalf("pre-condition: len=%d, want %d", len(th.items), maxThreadItems)
+	}
+
+	// Append one more item to trigger the drop-oldest trim.
+	th.append(&MsgUser{text: "trigger-trim", styles: s})
+
+	if len(th.items) != maxThreadItems {
+		t.Fatalf("post-trim: len=%d, want %d", len(th.items), maxThreadItems)
+	}
+
+	// KEY ASSERTION: cap must equal maxThreadItems.
+	// Reslice:   cap > maxThreadItems (backing array from original append still there)
+	// make+copy: cap == maxThreadItems (fresh allocation, owns its memory)
+	//
+	// Before the fix this assertion FAILS because reslice leaves cap=501 or
+	// similar. After make+copy it is exactly maxThreadItems.
+	if cap(th.items) != maxThreadItems {
+		t.Errorf("cap(thread.items) after trim = %d, want exactly %d (make+copy); "+
+			"reslice leaves cap > maxThreadItems and aliases the prior backing array",
+			cap(th.items), maxThreadItems)
+	}
+}
+
 // TestToolInputSummary verifies raw JSON tool input is reduced to a clean
 // argument (salient key first, then single-key value, then raw passthrough).
 func TestToolInputSummary(t *testing.T) {

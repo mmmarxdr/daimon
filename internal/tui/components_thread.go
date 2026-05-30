@@ -51,12 +51,21 @@ type thread struct {
 
 // append adds a threadItem to the end of the thread. When the cap is exceeded,
 // the oldest items are dropped and truncated is set to true (design §C.8).
+//
+// COW discipline (design §D.1/§D.6): the trim path uses make+copy rather than
+// a reslice so the trimmed thread owns its backing array. A reslice would share
+// the original backing array with any prior model snapshot, silently aliasing it
+// on the next append — inconsistent with every other mutation site in this package.
 func (t *thread) append(item threadItem) {
 	t.items = append(t.items, item)
 	if len(t.items) > maxThreadItems {
 		// Drop oldest; keep the most recent maxThreadItems.
+		// Use make+copy (not reslice) to give the trimmed slice its own backing
+		// array, consistent with COW discipline at other mutation sites.
 		drop := len(t.items) - maxThreadItems
-		t.items = t.items[drop:]
+		trimmed := make([]threadItem, maxThreadItems)
+		copy(trimmed, t.items[drop:])
+		t.items = trimmed
 		t.truncated = true
 	}
 }
@@ -73,7 +82,10 @@ func (t *thread) Render(width int) string {
 	if len(t.items) == 0 {
 		if t.truncated {
 			// Edge case: all items were somehow trimmed. Show the marker alone.
-			return "  ⋮ earlier messages trimmed"
+			// Use the same styled render as the normal truncated path below so both
+			// paths are visually consistent. Zero lipgloss.Style.Render() is an
+			// identity function, so this is safe even with a zero-value tuiStyles.
+			return t.styles.inkFaint.Render("  ⋮ earlier messages trimmed")
 		}
 		return ""
 	}

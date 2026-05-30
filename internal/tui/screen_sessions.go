@@ -96,6 +96,16 @@ func (m Model) updateSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			m.screen = m.prevScreen
 			m.footer = footerHints{screen: m.prevScreen}
+			// FIX-Round2: recompute viewport size when returning to chat.
+			// Sessions has no input bar; chat reserves 4 rows — without a recompute
+			// the viewport retains the sessions-screen height and renderChat overflows.
+			// Mirrors the same guard already in updateTools Esc (FIX-3 from Round 1).
+			// enterChatViewport() is called AFTER m.screen is set so chatViewportSize
+			// reads the correct geometry. Only applies when landing on screenChat;
+			// welcome has the same input-bar geometry as chat so no correction needed.
+			if m.screen == screenChat {
+				m = m.enterChatViewport()
+			}
 			return m, nil
 		}
 	}
