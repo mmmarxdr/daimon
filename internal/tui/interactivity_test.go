@@ -353,20 +353,21 @@ func TestTopBar_ModePill_ReflectsCurrentMode(t *testing.T) {
 	}
 }
 
-// TestFooterHints_Welcome_ShowsModeHint verifies the welcome footer no longer
-// says "sessions" for Tab but shows a mode switch hint instead.
+// TestFooterHints_Welcome_ShowsModeHint verifies the welcome footer matches the
+// design source (tui-screens-a.jsx:103-108): ⇥ switch agent · ⌃P palette · etc.
+// PR 1c updated this from "⇥ mode" to "⇥ switch agent" to align with outer TUIFooter.
 func TestFooterHints_Welcome_ShowsModeHint(t *testing.T) {
 	fh := footerHints{screen: screenWelcome}
 	s := newTuiStyles()
 	rendered := fh.Render(80, s)
 
-	// "⇥ mode" should be present.
-	if !strings.Contains(rendered, "mode") {
-		t.Errorf("welcome footer: expected 'mode' hint for Tab\n%s", rendered)
+	// "⇥ switch agent" should be present (design: tui-screens-a.jsx:103-108).
+	if !strings.Contains(rendered, "switch agent") {
+		t.Errorf("welcome footer: expected '⇥ switch agent' hint for Tab\n%s", rendered)
 	}
-	// "sessions" should NOT be there for Tab (Tab no longer goes to sessions).
+	// "sessions" should NOT be there for Tab (Tab no longer goes to sessions directly).
 	if strings.Contains(rendered, "sessions") {
-		t.Errorf("welcome footer: found 'sessions' hint for Tab; Tab now cycles mode\n%s", rendered)
+		t.Errorf("welcome footer: found 'sessions' hint for Tab; Tab now cycles agent\n%s", rendered)
 	}
 }
 

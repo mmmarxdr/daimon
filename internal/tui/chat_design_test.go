@@ -110,14 +110,17 @@ func TestRail_PanelHeaderWithBadge_Format(t *testing.T) {
 // ─── TASK B: Footer hints ────────────────────────────────────────────────────
 
 // TestFooter_ChatScreen_ContainsDesignHints asserts the chat-screen footer
-// lists ONLY the keys that are actually wired (no dead/lying hints).
+// matches the canonical design source (tui-screens-a.jsx:302-308).
+// PR 1c updated the chat footer from old wired-only hints to the full design set.
 func TestFooter_ChatScreen_ContainsDesignHints(t *testing.T) {
 	s := newTuiStyles()
 	fh := footerHints{}
 	fh.SetScreen(screenChat)
-	rendered := fh.Render(120, s)
+	// Use width=160 so all 5 hints fit without truncation.
+	rendered := fh.Render(160, s)
 
-	tokens := []string{"commands", "mode", "tools", "help", "quit"}
+	// Design source: tui-screens-a.jsx:302-308 outer TUIFooter.
+	tokens := []string{"/commands", "interrupt", "retry turn", "edit last", "save session"}
 	for _, tok := range tokens {
 		if !strings.Contains(rendered, tok) {
 			t.Errorf("footerHints.Render(screenChat): missing hint token %q\nrendered: %q", tok, rendered)

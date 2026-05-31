@@ -118,3 +118,154 @@ func TestInputBar_Render_NarrowWidth_NoPanic(t *testing.T) {
 		}()
 	}
 }
+
+// ---------------------------------------------------------------------------
+// PR 1c tests — per-screen footer hint sets (design source canonical)
+// ---------------------------------------------------------------------------
+//
+// Design source: docs/tui-design/daimon/project/tui-screens-a.jsx (screens 01, 02, 03)
+//               docs/tui-design/daimon/project/tui-screens-b.jsx (screens 04, 05, 06, 07)
+//
+// 1c.0 VERIFIED FINDINGS (design source vs spec deltas):
+//
+//   Welcome (01): design tui-screens-a.jsx:103-108 → / commands · ⇥ switch agent · ⌃P palette · ? help
+//     Delta: spec had "⇥ /commands · ⌃R resume last · ⌃C exit" — those are
+//     the inline nav hints in the center div, NOT the outer TUIFooter.
+//     Implementation follows DESIGN SOURCE (outer TUIFooter).
+//
+//   Chat (02): design tui-screens-a.jsx:302-308 → ⇥ /commands · ⌃C interrupt · ⌃R retry turn · ⌃E edit last · ⌃S save session
+//     Matches spec. No delta.
+//
+//   Diff (03): design tui-screens-a.jsx:489-495 → a/A apply/apply-all · r reject hunk · e open in $EDITOR · n/p next/prev hunk · q cancel patch
+//     Phase 3 screen — migrated to struct, semantics preserved.
+//
+//   Slash (04): design tui-screens-b.jsx:153-157 → esc close palette · / search prefix · ? help
+//     Delta: spec inferred "↑↓ select · ↵ run · esc close · ⇥ autocomplete" from
+//     INNER palette overlay footer (not the outer TUIScreen footer). Outer footer
+//     is 3 items only. Implementation follows DESIGN SOURCE (outer TUIFooter).
+//
+//   Tools (05): design tui-screens-b.jsx:319-325 → space toggle enabled · ↵ open detail · a add MCP server · d remove · / filter
+//     Delta: spec had "↑↓ select · ↵ toggle · f filter · a add-MCP" — differs.
+//     Implementation follows DESIGN SOURCE.
+//
+//   Sessions (06): design tui-screens-b.jsx:492-497 → ↵ resume thread · n new from this · d delete · m change model · / filter
+//     Mostly matches spec. Label differences: "↵ resume thread" vs "↵ open",
+//     "n new from this" vs "n new", "m change model" vs "m model".
+//     Implementation follows DESIGN SOURCE (more descriptive labels).
+//
+//   Error (07): design tui-screens-b.jsx:682-687 → a/A allow once/always · d/D deny/never ask · e edit path · p open policy file
+//     Phase 3 screen — migrated to struct, semantics preserved.
+
+// TestFooterHints_WelcomeScreen verifies the welcome footer matches the design's
+// outer TUIFooter (tui-screens-a.jsx:103-108): / commands · ⇥ switch agent · ⌃P palette · ? help.
+// Delta from spec: spec had inline nav hints from center div, not the outer footer.
+// [Req: Footer hint sets — Welcome footer scenario]
+func TestFooterHints_WelcomeScreen(t *testing.T) {
+	s := newTuiStyles()
+	fh := footerHints{}
+	fh.SetScreen(screenWelcome)
+
+	rendered := fh.Render(120, s)
+	stripped := ansi.Strip(rendered)
+
+	wantTokens := []string{"/", "commands", "⇥", "switch agent", "⌃P", "palette", "?", "help"}
+	for _, tok := range wantTokens {
+		if !strings.Contains(stripped, tok) {
+			t.Errorf("welcome footer missing %q\nrendered (stripped): %q", tok, stripped)
+		}
+	}
+}
+
+// TestFooterHints_ChatScreen verifies the chat footer matches the design's
+// outer TUIFooter (tui-screens-a.jsx:302-308).
+// [Req: Footer hint sets — Chat footer scenario]
+func TestFooterHints_ChatScreen(t *testing.T) {
+	s := newTuiStyles()
+	fh := footerHints{}
+	fh.SetScreen(screenChat)
+
+	rendered := fh.Render(160, s)
+	stripped := ansi.Strip(rendered)
+
+	wantTokens := []string{"⇥", "/commands", "⌃C", "interrupt", "⌃R", "retry turn"}
+	for _, tok := range wantTokens {
+		if !strings.Contains(stripped, tok) {
+			t.Errorf("chat footer missing %q\nrendered (stripped): %q", tok, stripped)
+		}
+	}
+}
+
+// TestFooterHints_AllScreens_StructuredHints verifies all screen hint sets
+// use the structured footerHint model with design-source-verified content.
+// Each screen's key tokens must appear in the stripped render output.
+// [Req: Footer hint sets — all screens table-driven]
+func TestFooterHints_AllScreens_StructuredHints(t *testing.T) {
+	s := newTuiStyles()
+
+	tests := []struct {
+		name       string
+		screen     screenState
+		wantTokens []string
+	}{
+		// Welcome (01) — design: tui-screens-a.jsx:103-108
+		// Delta: design outer footer differs from spec's inline nav hints
+		{
+			name:       "welcome",
+			screen:     screenWelcome,
+			wantTokens: []string{"/", "commands", "⇥", "switch agent", "⌃P", "palette", "?", "help"},
+		},
+		// Chat (02) — design: tui-screens-a.jsx:302-308
+		{
+			name:       "chat",
+			screen:     screenChat,
+			wantTokens: []string{"⇥", "/commands", "⌃C", "interrupt", "⌃R", "retry turn"},
+		},
+		// Slash (04) — design outer TUIFooter: tui-screens-b.jsx:153-157
+		// Delta: spec inferred inner palette overlay footer; outer is esc/close palette, //search prefix, ?/help
+		{
+			name:       "slash",
+			screen:     screenSlash,
+			wantTokens: []string{"esc", "close palette", "/", "search prefix", "?", "help"},
+		},
+		// Tools (05) — design: tui-screens-b.jsx:319-325
+		// Delta: spec had ↑↓ select · ↵ toggle · f filter · a add-MCP
+		{
+			name:       "tools",
+			screen:     screenTools,
+			wantTokens: []string{"space", "toggle enabled", "↵", "open detail", "a", "add MCP server", "d", "remove", "/", "filter"},
+		},
+		// Sessions (06) — design: tui-screens-b.jsx:492-497
+		{
+			name:       "sessions",
+			screen:     screenSessions,
+			wantTokens: []string{"↵", "resume thread", "n", "new from this", "d", "delete", "m", "change model", "/", "filter"},
+		},
+		// Diff (03) — design: tui-screens-a.jsx:489-495 (Phase 3 screen)
+		{
+			name:       "diff",
+			screen:     screenDiff,
+			wantTokens: []string{"a/A", "apply", "r", "reject hunk", "q", "cancel patch"},
+		},
+		// Error (07) — design: tui-screens-b.jsx:682-687 (Phase 3 screen)
+		{
+			name:       "error",
+			screen:     screenError,
+			wantTokens: []string{"a/A", "allow once", "d/D", "deny", "e", "edit path", "p", "open policy file"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fh := footerHints{}
+			fh.SetScreen(tc.screen)
+			rendered := fh.Render(200, s)
+			stripped := ansi.Strip(rendered)
+
+			for _, tok := range tc.wantTokens {
+				if !strings.Contains(stripped, tok) {
+					t.Errorf("screen %s footer missing %q\nrendered (stripped): %q", tc.name, tok, stripped)
+				}
+			}
+		})
+	}
+}

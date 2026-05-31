@@ -144,6 +144,13 @@ func (tb *topBar) Render(width int, s tuiStyles) string {
 // footerHints
 // ---------------------------------------------------------------------------
 
+// footerHint holds a single key+label pair for footer rendering.
+// key is rendered with s.accent (e.g. "⇥"); label with s.dimLabel (e.g. "switch agent").
+type footerHint struct {
+	key   string
+	label string
+}
+
 // footerHints is the persistent footer bar rendered on all 7 screens.
 // Content is contextual to the active screen's keymap.
 type footerHints struct {
@@ -158,7 +165,7 @@ func (fh *footerHints) SetScreen(s screenState) {
 // Render returns a multi-line footer string for the current screen.
 // Layout (two rows):
 //  1. A full-width horizontal rule of ─ in the line token.
-//  2. Left hints (symbol in accent, label in inkMuted) + flexible spacer +
+//  2. Left hints (key in accent, label in dimLabel) + flexible spacer +
 //     right-aligned italic tagline "daimon listens." in inkFaint.
 func (fh *footerHints) Render(width int, s tuiStyles) string {
 	// Row 1: horizontal rule of ─ characters in colorLine style.
@@ -186,67 +193,121 @@ func (fh *footerHints) Render(width int, s tuiStyles) string {
 	return rule + "\n" + row2
 }
 
-// renderHints returns the left-side hint string for the current screen,
-// with symbols in accent color and labels in inkMuted.
-func (fh *footerHints) renderHints(s tuiStyles) string {
-	type hint struct {
-		sym   string
-		label string
-	}
+// hintsForScreen returns the canonical []footerHint for each screen.
+//
+// Per-screen hint sets are sourced verbatim from the design's outer TUIFooter in
+// docs/tui-design/daimon/project/tui-screens-a.jsx and tui-screens-b.jsx.
+// Where the spec.md inferred a different set, the DESIGN SOURCE is canonical;
+// differences are noted below.
+//
+// Note on deferred actions: some hint keys reference features not yet wired
+// (e.g. ⌃P palette on welcome, ↵ open-detail on tools). The hint TEXT is
+// rendered faithfully; the keybinding behavior is deferred to the appropriate
+// phase. This is intentional per the Phase 1 scope boundary.
+func (fh *footerHints) hintsForScreen() []footerHint {
+	switch fh.screen {
+	// Screen 01 — Welcome
+	// Design source: tui-screens-a.jsx:103-108 (outer TUIFooter).
+	// Delta from spec: spec had "⇥ /commands · ⌃R resume last · ⌃C exit"
+	// (those are the INLINE nav hints in the center div, not the outer TUIScreen footer).
+	// Canonical outer footer: / commands · ⇥ switch agent · ⌃P palette · ? help
+	case screenWelcome:
+		return []footerHint{
+			{key: "/", label: "commands"},
+			{key: "⇥", label: "switch agent"},
+			{key: "⌃P", label: "palette"},
+			{key: "?", label: "help"},
+		}
 
-	renderHint := func(sym, label string) string {
-		return s.accent.Render(sym) + s.dimLabel.Render(" "+label)
+	// Screen 02 — Chat
+	// Design source: tui-screens-a.jsx:302-308 (outer TUIFooter).
+	// Note: ⌃C/⌃R/⌃E/⌃S are design hints; wiring is phased. Text rendered as-is per Phase 1 scope.
+	case screenChat:
+		return []footerHint{
+			{key: "⇥", label: "/commands"},
+			{key: "⌃C", label: "interrupt"},
+			{key: "⌃R", label: "retry turn"},
+			{key: "⌃E", label: "edit last"},
+			{key: "⌃S", label: "save session"},
+		}
+
+	// Screen 03 — Diff (Phase 3 screen — render hints per design, no new keybindings wired)
+	// Design source: tui-screens-a.jsx:489-495 (outer TUIFooter).
+	case screenDiff:
+		return []footerHint{
+			{key: "a/A", label: "apply / apply-all"},
+			{key: "r", label: "reject hunk"},
+			{key: "e", label: "open in $EDITOR"},
+			{key: "n/p", label: "next/prev hunk"},
+			{key: "q", label: "cancel patch"},
+		}
+
+	// Screen 04 — Slash palette
+	// Design source: tui-screens-b.jsx:153-157 (outer TUIFooter).
+	// Delta from spec: spec inferred hints from the inner palette overlay footer
+	// (↑↓ select · ↵ run · esc close · ⇥ autocomplete). The outer screen TUIFooter
+	// has only 3 entries: esc close palette · / search prefix · ? help
+	case screenSlash:
+		return []footerHint{
+			{key: "esc", label: "close palette"},
+			{key: "/", label: "search prefix"},
+			{key: "?", label: "help"},
+		}
+
+	// Screen 05 — Tools & MCPs
+	// Design source: tui-screens-b.jsx:319-325 (outer TUIFooter).
+	// Delta from spec: spec had "↑↓ select · ↵ toggle · f filter · a add-MCP"
+	// Canonical footer: space toggle enabled · ↵ open detail · a add MCP server · d remove · / filter
+	case screenTools:
+		return []footerHint{
+			{key: "space", label: "toggle enabled"},
+			{key: "↵", label: "open detail"},
+			{key: "a", label: "add MCP server"},
+			{key: "d", label: "remove"},
+			{key: "/", label: "filter"},
+		}
+
+	// Screen 06 — Sessions browser
+	// Design source: tui-screens-b.jsx:492-497 (outer TUIFooter).
+	// Mostly matches spec except label differences: "↵ resume thread" vs "↵ open",
+	// "n new from this" vs "n new", "m change model" vs "m model".
+	case screenSessions:
+		return []footerHint{
+			{key: "↵", label: "resume thread"},
+			{key: "n", label: "new from this"},
+			{key: "d", label: "delete"},
+			{key: "m", label: "change model"},
+			{key: "/", label: "filter"},
+		}
+
+	// Screen 07 — Error / permission denied (Phase 3 screen — render hints per design)
+	// Design source: tui-screens-b.jsx:682-687 (outer TUIFooter).
+	case screenError:
+		return []footerHint{
+			{key: "a/A", label: "allow once / always"},
+			{key: "d/D", label: "deny / never ask"},
+			{key: "e", label: "edit path"},
+			{key: "p", label: "open policy file"},
+		}
+
+	default:
+		return []footerHint{
+			{key: "⌃C", label: "quit"},
+		}
 	}
+}
+
+// renderHints returns the left-side hint string for the current screen,
+// with keys in accent color and labels in dimLabel color, separated by two spaces.
+func (fh *footerHints) renderHints(s tuiStyles) string {
+	hints := fh.hintsForScreen()
 	sep := s.dimLabel.Render("   ")
 
-	switch fh.screen {
-	case screenChat:
-		// Hints list ONLY keys that handleChatKey actually wires (enter, r, tab→
-		// mode, ⌃t→tools, esc, ⌃p+/→palette, ?→help) plus the global ⌃C quit.
-		// retry/edit/save are design hints but not yet implemented — do NOT
-		// advertise them until they work.
-		hints := []hint{
-			{"/", "commands"},
-			{"⇥", "mode"},
-			{"⌃T", "tools"},
-			{"?", "help"},
-			{"⌃C", "quit"},
-		}
-		parts := make([]string, len(hints))
-		for i, h := range hints {
-			parts[i] = renderHint(h.sym, h.label)
-		}
-		return strings.Join(parts, sep)
-	case screenWelcome:
-		return renderHint("enter", "send") + sep +
-			renderHint("⌃C", "quit") + sep +
-			renderHint("⇥", "mode") + sep +
-			renderHint("/", "commands") + sep +
-			renderHint("^t", "tools")
-	case screenDiff:
-		return renderHint("↑↓", "scroll hunks") + sep +
-			renderHint("q", "back") + sep +
-			renderHint("⌃C", "quit")
-	case screenSlash:
-		return renderHint("↑↓", "navigate") + sep +
-			renderHint("enter", "run") + sep +
-			renderHint("esc", "close") + sep +
-			renderHint("⌃C", "quit")
-	case screenTools:
-		return renderHint("↑↓", "navigate") + sep +
-			renderHint("esc", "back") + sep +
-			renderHint("⌃C", "quit")
-	case screenSessions:
-		return renderHint("↑↓", "navigate") + sep +
-			renderHint("enter", "resume") + sep +
-			renderHint("esc", "back") + sep +
-			renderHint("⌃C", "quit")
-	case screenError:
-		return renderHint("esc", "back to chat") + sep +
-			renderHint("⌃C", "quit")
-	default:
-		return renderHint("⌃C", "quit")
+	parts := make([]string, 0, len(hints))
+	for _, h := range hints {
+		parts = append(parts, s.accent.Render(h.key)+s.dimLabel.Render(" "+h.label))
 	}
+	return strings.Join(parts, sep)
 }
 
 // ---------------------------------------------------------------------------

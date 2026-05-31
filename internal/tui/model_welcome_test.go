@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestUpdateWelcome_EnterWithText_TransitionsToChat verifies the welcome→chat
@@ -55,5 +57,63 @@ func TestUpdateWelcome_EnterEmpty_StaysOnWelcome(t *testing.T) {
 	}
 	if len(rm.thread.items) != 0 {
 		t.Errorf("thread items = %d, want 0 (empty input must not append)", len(rm.thread.items))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PR 1c tests — Welcome ASCII logo + narrow-terminal fallback
+// ---------------------------------------------------------------------------
+
+// TestWelcomeCenter_ASCIILogoPresent verifies that renderWelcomeCenter at
+// width>=80 includes the first distinctive ASCII logo line (▄▄▄▄▄) and the
+// tagline. [Req: Welcome ASCII logo — present scenario]
+func TestWelcomeCenter_ASCIILogoPresent(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 24
+
+	out := renderWelcomeCenter(m, 80, 19)
+
+	stripped := ansi.Strip(out)
+	if !strings.Contains(stripped, "▄▄▄▄▄") {
+		t.Errorf("renderWelcomeCenter(80) missing ASCII logo line '▄▄▄▄▄'\noutput:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "speak, and daimon listens.") {
+		t.Errorf("renderWelcomeCenter(80) missing tagline 'speak, and daimon listens.'\noutput:\n%s", stripped)
+	}
+}
+
+// TestWelcomeCenter_NarrowTerminal_FallbackToSimpleLogo verifies that
+// renderWelcomeCenter on a narrow terminal (width < art width) falls back to
+// "⫶ daimon" rather than wrapping the multi-line ASCII art.
+// [Req: Welcome ASCII logo — narrow terminal fallback]
+func TestWelcomeCenter_NarrowTerminal_FallbackToSimpleLogo(t *testing.T) {
+	m := newTestModel()
+
+	// Use a width that is definitely narrower than the ~67-col logo.
+	out := renderWelcomeCenter(m, 40, 19)
+	stripped := ansi.Strip(out)
+
+	if strings.Contains(stripped, "▄▄▄▄▄") {
+		t.Errorf("renderWelcomeCenter(40) rendered ASCII art on narrow terminal — should fall back to ⫶ daimon")
+	}
+	if !strings.Contains(stripped, "⫶ daimon") {
+		t.Errorf("renderWelcomeCenter(40) narrow fallback missing '⫶ daimon'\noutput:\n%s", stripped)
+	}
+}
+
+// TestWelcomeCenter_LogoAbsentOnChatScreen verifies that the chat screen render
+// does NOT contain the ASCII logo block. [Req: Logo absent in non-welcome screens]
+func TestWelcomeCenter_LogoAbsentOnChatScreen(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 24
+	m.screen = screenChat
+
+	view := m.View()
+	stripped := ansi.Strip(view)
+
+	if strings.Contains(stripped, "▄▄▄▄▄") {
+		t.Errorf("chat screen View() contains ASCII logo line '▄▄▄▄▄' — must be absent on non-welcome screens")
 	}
 }

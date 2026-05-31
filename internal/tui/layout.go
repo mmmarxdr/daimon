@@ -180,21 +180,67 @@ func renderCenter(m Model, width, height int) string {
 	}
 }
 
-// renderWelcomeCenter renders the welcome screen center column:
-// the ⫶ daimon logo centered, with no thread content.
+// welcomeLogo is the ASCII δ block art from docs/tui-design/daimon/project/tui-screens-a.jsx:9–17.
+// Stored verbatim; each line is rendered with s.accent and centered independently.
+// The art is ~67 columns wide (measured via ansi.StringWidth on welcomeLogo[0]).
+// On narrow terminals (width < artWidth) fall back to the single-line "⫶ daimon" mark.
+//
+// Delta from old tagline: previous code used "your embedded AI agent" (dimLabel).
+// Design source uses "speak, and daimon listens." as the tagline in hint/italic style.
+var welcomeLogo = []string{
+	`       ▄▄▄▄▄                                                        `,
+	`     ▄█▀   ▀█▄    ▐█▌                                               `,
+	`    █▀       ▀█   ▐█▌  ┌───────────────────────────────────┐        `,
+	`   █▀  ▄▄▄    █   ▐█▌  │  daimon · v0.4.2 · MIT             │        `,
+	`   █  ▐█ █▌   █   ▐█▌  │  agent runtime, on your hardware   │        `,
+	`   █▄  ▀▀▀    █   ▐█▌  └───────────────────────────────────┘        `,
+	`    █▄       ▄█   ▐█▌                                               `,
+	`     ▀█▄▄▄▄▄█▀     ▀                                                `,
+}
+
+// renderWelcomeCenter renders the welcome screen center column.
+// At width >= artWidth: renders the ASCII δ logo block (accent color) + tagline (hint style).
+// At width < artWidth: falls back to the single-line "⫶ daimon" mark to prevent art wrapping.
 func renderWelcomeCenter(m Model, width, height int) string {
-	logo := m.styles.accent.Render("⫶ daimon")
-	// Center the logo horizontally and vertically.
+	s := m.styles
+
+	// Measure the art width once (first line determines the block width).
+	artWidth := ansi.StringWidth(welcomeLogo[0])
+
+	if width >= artWidth {
+		// Full logo path: 8 art lines + blank + tagline = blockHeight 10.
+		blockHeight := len(welcomeLogo) + 1 + 1 // art + blank + tagline
+		padTop := (height - blockHeight) / 2
+		if padTop < 0 {
+			padTop = 0
+		}
+
+		lines := make([]string, 0, padTop+blockHeight)
+		for i := 0; i < padTop; i++ {
+			lines = append(lines, "")
+		}
+		// Render each art line centered independently (ANSI-width-safe).
+		for _, artLine := range welcomeLogo {
+			lines = append(lines, centerText(s.accent.Render(artLine), width))
+		}
+		// Blank separator.
+		lines = append(lines, "")
+		// Tagline: italic hint style — design source uses "speak, and daimon listens."
+		lines = append(lines, centerText(s.hint.Render("speak, and daimon listens."), width))
+		return strings.Join(lines, "\n")
+	}
+
+	// Narrow terminal fallback: single-line "⫶ daimon" mark.
+	fallbackLogo := s.accent.Render("⫶ daimon")
 	padTop := height / 3
 	if padTop < 0 {
 		padTop = 0
 	}
-	lines := make([]string, 0, padTop+3)
+	lines := make([]string, 0, padTop+2)
 	for i := 0; i < padTop; i++ {
 		lines = append(lines, "")
 	}
-	lines = append(lines, centerText(logo, width))
-	lines = append(lines, centerText(m.styles.dimLabel.Render("your embedded AI agent"), width))
+	lines = append(lines, centerText(fallbackLogo, width))
 	lines = append(lines, "")
 	return strings.Join(lines, "\n")
 }

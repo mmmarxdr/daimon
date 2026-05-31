@@ -6,11 +6,10 @@
 
 
                     ⫶ daimon
-             your embedded AI agent
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ › add a follow-up, or ⌃C to interrupt…                                    …  │
 │ ⇥ mode    @ mention file    # add to memory    ⌃R retry [BUILD MODE] / com…  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ────────────────────────────────────────────────────────────────────────────────
-enter send   ⌃C quit   ⇥ mode   / commands   ^t tools            daimon listens.
+/ commands   ⇥ switch agent   ⌃P palette   ? help                daimon listens.
