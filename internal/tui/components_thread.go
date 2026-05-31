@@ -111,6 +111,35 @@ func (t *thread) Render(width int) string {
 	return out
 }
 
+// own returns a thread backed by a private copy of the items slice.
+// The returned thread's items slice is freshly allocated (make + copy),
+// so in-place slot writes on the owned thread (items[i] = x) do NOT alias
+// any prior model snapshot's backing array — this is the COW invariant
+// required by design §D.3/§D.6.
+//
+// Callers MUST use own() at the start of any Update branch that performs
+// ≥1 in-place slot write (spinnerTickMsg batch, EventToolEnd, EventReasoningEnd,
+// r-toggle). After own(), every m.thread.items[i] = &clone write within that
+// same Update call is provably non-aliasing (design §D.6 proof).
+func (t *thread) own() thread {
+	cp := make([]threadItem, len(t.items))
+	copy(cp, t.items)
+	return thread{items: cp, truncated: t.truncated, styles: t.styles}
+}
+
+// runningToolIdxs returns the slice indices of every ToolLine whose state
+// is toolRunning. Used by the batch spinner ticker (design §D.5) to find all
+// active lines in one pass so a single own() amortizes across all k writes.
+func (t *thread) runningToolIdxs() []int {
+	var idxs []int
+	for i, item := range t.items {
+		if tl, ok := item.(*ToolLine); ok && tl.state == toolRunning {
+			idxs = append(idxs, i)
+		}
+	}
+	return idxs
+}
+
 // findToolLine returns the first ToolLine with the given callID, or nil.
 // NOTE: callers that mutate the returned ToolLine MUST use findToolLineIdx
 // and copy-on-write to avoid pointer-aliasing into the prior model's slice.
@@ -321,20 +350,29 @@ type ToolLine struct {
 // flexible input). Names longer than this are not truncated by the padding.
 const toolNameCol = 14
 
-// spinnerTickMsg is the tea.Msg returned by Tick() to advance the spinner.
-type spinnerTickMsg struct {
-	callID string
+// spinnerInterval is the delay between batch spinner ticks (100 ms).
+// A single model-level ticker fires spinnerTickMsg{} and advances ALL running
+// ToolLines in one pass (design §D.5).
+const spinnerInterval = 100 * time.Millisecond
+
+// spinnerTickMsg is the tea.Msg delivered by spinnerTickCmd.
+// It carries NO callID — it advances every running ToolLine in one Update
+// (design §D.4/§D.5: batch own-once-per-tick, k in-place writes after own()).
+type spinnerTickMsg struct{}
+
+// spinnerTickCmd returns a tea.Cmd that fires spinnerTickMsg{} after spinnerInterval.
+// It is armed once on the first EventToolStart (when !m.spinnerActive) and
+// re-armed by the spinnerTickMsg handler as long as ≥1 tool is running.
+// When runningToolIdxs() is empty the handler returns nil (self-stop).
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(time.Time) tea.Msg { return spinnerTickMsg{} })
 }
 
-// Tick implements Animatable. Returns a tea.Cmd that fires spinnerTickMsg
-// for this ToolLine after a 100ms delay, advancing the spinner frame on the
-// next Update. The delay is essential — without it the pump spins at 100% CPU.
-// Only meaningful when state == toolRunning.
+// Tick is retained for backwards-compat with existing tests (TestToolLine_Tick_ReturnsCmd).
+// It now returns spinnerTickCmd() — a batch model-level tick — rather than a
+// per-ToolLine tick, because the single-ticker design (§D.5) replaced per-line tickers.
 func (tl *ToolLine) Tick() tea.Cmd {
-	id := tl.callID
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return spinnerTickMsg{callID: id}
-	})
+	return spinnerTickCmd()
 }
 
 // AdvanceSpinner increments the spinner frame (called from Update on spinnerTickMsg).
