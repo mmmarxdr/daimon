@@ -33,6 +33,17 @@ var testCmds = []agent.CommandInfo{
 	{Name: "help", Description: "show help text", Source: "builtin", Destructive: false},
 }
 
+// confirmDecoupleCmds exercises the decoupling of the REST allow_destructive
+// security gate from the TUI double-Enter confirmation. All three are
+// backend-destructive (Destructive:true), but only reset/compact require an
+// in-TUI confirmation; "mode" must dispatch on the first Enter while still
+// carrying allowDestructive=true so the backend gate passes.
+var confirmDecoupleCmds = []agent.CommandInfo{
+	{Name: "mode", Description: "switch agent mode", Source: "builtin", Destructive: true},
+	{Name: "reset", Description: "reset conversation state", Source: "builtin", Destructive: true},
+	{Name: "compact", Description: "compact history", Source: "builtin", Destructive: true},
+}
+
 // execCmd executes a tea.Cmd and returns the emitted tea.Msg (or nil).
 func execCmd(cmd tea.Cmd) tea.Msg {
 	if cmd == nil {
@@ -247,6 +258,64 @@ func TestCommandPalette_Enter_NonDestructive_EmitsDispatch(t *testing.T) {
 	}
 	if dispatch.allowDestructive {
 		t.Error("dispatch.allowDestructive = true, want false for non-destructive command")
+	}
+}
+
+func TestCommandPalette_NeedsConfirm_OnlyResetAndCompact(t *testing.T) {
+	for _, name := range []string{"reset", "compact", "RESET", "Compact"} {
+		if !needsConfirm(name) {
+			t.Errorf("needsConfirm(%q) = false, want true", name)
+		}
+	}
+	// Every other backend-destructive command must NOT require a TUI confirm.
+	for _, name := range []string{
+		"mode", "model", "fork", "save", "cancel", "cd",
+		"export", "resume", "schedule", "retry", "task-cancel", "ping",
+	} {
+		if needsConfirm(name) {
+			t.Errorf("needsConfirm(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestCommandPalette_Enter_BackendDestructive_NonConfirm_DispatchesImmediately(t *testing.T) {
+	p := newCommandPalette(confirmDecoupleCmds, newTuiStyles())
+	// selIdx 0 = "mode": backend-destructive but NOT in the TUI confirm set.
+	if p.filtered[p.selIdx].Name != "mode" {
+		t.Fatalf("expected selIdx 0 to be 'mode', got %q", p.filtered[p.selIdx].Name)
+	}
+	next, cmd, consumed := p.HandleMsg(keySpecial(tea.KeyEnter))
+	p = next.(commandPalette)
+	if !consumed {
+		t.Error("enter should be consumed")
+	}
+	if p.confirmingDestructive {
+		t.Error("mode is not in the TUI confirm set — first enter must NOT enter confirming state")
+	}
+	if cmd == nil {
+		t.Fatal("expected immediate dispatch for a non-confirm command")
+	}
+	msg := execCmd(cmd)
+	dispatch, ok := msg.(dispatchCommandMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want dispatchCommandMsg", msg)
+	}
+	if dispatch.name != "mode" {
+		t.Errorf("dispatch.name = %q, want %q", dispatch.name, "mode")
+	}
+	if !dispatch.allowDestructive {
+		t.Error("dispatch.allowDestructive = false; the backend gate still requires true for destructive commands")
+	}
+}
+
+func TestCommandPalette_Render_AmberMarker_OnlyConfirmCommands(t *testing.T) {
+	p := newCommandPalette(confirmDecoupleCmds, newTuiStyles())
+	out := p.Render(80, 24, newTuiStyles())
+	// Exactly two confirm commands (reset, compact) carry the ⚠ marker;
+	// the backend-destructive "mode" must not. confirmingDestructive is false
+	// here, so the only ⚠ glyphs come from the list markers.
+	if n := strings.Count(out, "⚠"); n != 2 {
+		t.Errorf("expected exactly 2 ⚠ markers (reset, compact), got %d\n%s", n, out)
 	}
 }
 

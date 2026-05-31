@@ -26,6 +26,34 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// TUI confirmation set
+// ---------------------------------------------------------------------------
+
+// tuiConfirmCommands is the set of commands that require an in-TUI double-Enter
+// confirmation (the amber ⚠ guard) before they are dispatched.
+//
+// This is deliberately distinct from agent.IsDestructiveCommand, which is the
+// REST allow_destructive *security* gate (which commands need allow_destructive
+// =true over the HTTP API). The TUI is a trusted, local, interactive surface,
+// so reusing the REST set over-fires the guard on harmless commands like /mode
+// and /model. Here we confirm only the genuinely irreversible actions: reset
+// (wipes conversation state) and compact (lossy history summarisation).
+//
+// Note: allowDestructive on the dispatched command is still driven by the
+// command's Destructive flag (the REST gate), so backend-destructive commands
+// that are NOT in this set still execute — they just dispatch on the first
+// Enter without a confirmation step.
+var tuiConfirmCommands = map[string]bool{
+	"reset":   true,
+	"compact": true,
+}
+
+// needsConfirm reports whether name requires the TUI double-Enter confirmation.
+func needsConfirm(name string) bool {
+	return tuiConfirmCommands[strings.ToLower(name)]
+}
+
+// ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
 
@@ -139,11 +167,12 @@ func (p commandPalette) HandleMsg(msg tea.Msg) (dialog, tea.Cmd, bool) {
 			return p, nil, true // empty list — consumed no-op
 		}
 		sel := p.filtered[p.selIdx]
-		if sel.Destructive && !p.confirmingDestructive {
+		if needsConfirm(sel.Name) && !p.confirmingDestructive {
 			p.confirmingDestructive = true
 			return p, nil, true
 		}
-		// Dispatch the command.
+		// Dispatch the command. allowDestructive stays tied to the REST gate
+		// (sel.Destructive) so backend-destructive commands still execute.
 		name := sel.Name
 		allow := sel.Destructive
 		cmd := func() tea.Msg {
@@ -253,9 +282,9 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 		nameStr := cmd.Name
 		descStr := cmd.Description
 
-		// Destructive marker.
+		// Confirmation marker (only commands that require double-Enter).
 		marker := ""
-		if cmd.Destructive {
+		if needsConfirm(cmd.Name) {
 			marker = styles.amber.Render("⚠ ")
 		}
 
@@ -273,7 +302,7 @@ func (p commandPalette) Render(width, height int, styles tuiStyles) string {
 		if i == p.selIdx {
 			// Highlight selected row.
 			row = styles.selected.Render(nameStr)
-			if cmd.Destructive {
+			if needsConfirm(cmd.Name) {
 				row = styles.amber.Render("⚠ ") + styles.selected.Render(nameStr)
 			}
 			rowW := ansi.StringWidth(row)
