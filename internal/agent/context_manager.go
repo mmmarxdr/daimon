@@ -14,6 +14,7 @@ import (
 type TokenUsage struct {
 	SystemPrompt int
 	Messages     int
+	Tools        int // tool-definition token estimate (smart strategy only)
 	Total        int
 	Max          int
 	UsagePercent float64
@@ -36,6 +37,10 @@ type ContextManager struct {
 	postCompactUsage int                      // token count right after last compaction
 	currentTurn      int                      // incremented on every Manage call
 	legacyFn         LegacyTruncateFn         // optional: called when strategy == "legacy"
+
+	// Per-category breakdown cache (smart strategy only). Written under cm.mu.
+	lastUsage    TokenUsage // last computed per-category breakdown
+	hasBreakdown bool       // true once smartManage has populated lastUsage
 }
 
 // NewContextManager creates a new ContextManager, applying config defaults and
@@ -97,6 +102,16 @@ func resolveContextSize(prov provider.Provider, cfg config.ContextConfig) int {
 // MaxTokens returns the resolved context window size in tokens.
 func (cm *ContextManager) MaxTokens() int {
 	return cm.resolvedMaxToks
+}
+
+// LastUsage returns the cached per-category token breakdown from the most
+// recent smartManage call. The bool is false until at least one smart-strategy
+// Manage() call has run; callers must treat false as "no breakdown available".
+// Safe for concurrent use under the existing cm.mu mutex.
+func (cm *ContextManager) LastUsage() (TokenUsage, bool) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return cm.lastUsage, cm.hasBreakdown
 }
 
 // Usage calculates a token usage breakdown for the given system prompt and messages.
@@ -191,6 +206,24 @@ func (cm *ContextManager) smartManage(
 	msgToks := EstimateMessagesTokens(messages)
 	total := sysToks + toolToks + msgToks
 	max := cm.resolvedMaxToks
+
+	// Cache the per-category breakdown BEFORE the early return so the meter
+	// updates on every turn, not only on turns that trigger compaction (ADR-1).
+	// This write is safe under the existing cm.mu lock held by Manage().
+	cm.lastUsage = TokenUsage{
+		SystemPrompt: sysToks,
+		Messages:     msgToks,
+		Tools:        toolToks,
+		Total:        total,
+		Max:          max,
+		UsagePercent: func() float64 {
+			if max <= 0 {
+				return 0
+			}
+			return float64(total) / float64(max) * 100
+		}(),
+	}
+	cm.hasBreakdown = true
 
 	// Compute thresholds.
 	threshold := int(float64(max) * cm.cfg.CompactThreshold)

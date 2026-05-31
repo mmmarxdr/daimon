@@ -448,6 +448,147 @@ func TestNewContextManager_WithBus(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Seam 1 — ADR-1: LastUsage() cache (RED → GREEN → REFACTOR)
+// ---------------------------------------------------------------------------
+
+// TestContextManager_LastUsage_BeforeManage: before any Manage call, LastUsage()
+// returns (TokenUsage{}, false).
+func TestContextManager_LastUsage_BeforeManage(t *testing.T) {
+	cfg := config.ContextConfig{MaxTokens: 200000, Strategy: "smart"}
+	prov := &cmMockProvider{name: "test", model: "test-model"}
+	cm := NewContextManager(cfg, staticFn(prov), nil)
+
+	usage, ok := cm.LastUsage()
+	if ok {
+		t.Error("LastUsage() before Manage: want ok=false, got true")
+	}
+	if usage != (TokenUsage{}) {
+		t.Errorf("LastUsage() before Manage: want zero TokenUsage, got %+v", usage)
+	}
+}
+
+// TestContextManager_LastUsage_AfterSmartManage: after Manage() with smart strategy,
+// LastUsage() returns hasBreakdown==true and non-zero fields.
+// KEY invariant: the below-threshold path ALSO updates the cache.
+func TestContextManager_LastUsage_AfterSmartManage(t *testing.T) {
+	tests := []struct {
+		name      string
+		maxTokens int
+		threshold float64
+		msgs      []provider.ChatMessage
+		wantTrue  bool // hasBreakdown must be true
+	}{
+		{
+			name:      "below-threshold turn still updates cache",
+			maxTokens: 200000,
+			threshold: 0.8,
+			msgs:      makeMessages(3), // tiny, well below threshold
+			wantTrue:  true,
+		},
+		{
+			name:      "above-threshold turn updates cache",
+			maxTokens: 100,
+			threshold: 0.1,
+			msgs:      largeMessages(2, 50), // exceeds threshold
+			wantTrue:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.ContextConfig{
+				MaxTokens:        tc.maxTokens,
+				CompactThreshold: tc.threshold,
+				Strategy:         "smart",
+				CooldownTurns:    0,
+				FallbackCtxSize:  tc.maxTokens,
+			}
+			prov := &summarizingMockProvider{
+				cmMockProvider: cmMockProvider{name: "test", model: "test-model"},
+				summaryText:    "summary",
+			}
+			cm := NewContextManager(cfg, staticFn(prov), nil)
+
+			cm.Manage(context.Background(), "system prompt", nil, tc.msgs)
+
+			usage, ok := cm.LastUsage()
+			if !ok {
+				t.Error("LastUsage() after smart Manage: want ok=true, got false")
+			}
+			if usage.SystemPrompt <= 0 {
+				t.Errorf("LastUsage().SystemPrompt = %d, want > 0", usage.SystemPrompt)
+			}
+			if usage.Messages <= 0 {
+				t.Errorf("LastUsage().Messages = %d, want > 0", usage.Messages)
+			}
+			if usage.Tools < 0 {
+				t.Errorf("LastUsage().Tools = %d, want >= 0", usage.Tools)
+			}
+			if usage.Total <= 0 {
+				t.Errorf("LastUsage().Total = %d, want > 0", usage.Total)
+			}
+		})
+	}
+}
+
+// TestContextManager_LastUsage_LegacyStrategy: strategy "legacy" and "none" never
+// populate hasBreakdown; LastUsage() returns (TokenUsage{}, false).
+func TestContextManager_LastUsage_LegacyStrategy(t *testing.T) {
+	for _, strategy := range []string{"legacy", "none"} {
+		t.Run(strategy, func(t *testing.T) {
+			cfg := config.ContextConfig{
+				MaxTokens: 200000,
+				Strategy:  strategy,
+			}
+			prov := &cmMockProvider{name: "test", model: "test-model"}
+			cm := NewContextManager(cfg, staticFn(prov), nil)
+
+			msgs := makeMessages(3)
+			cm.Manage(context.Background(), "sys", nil, msgs)
+
+			usage, ok := cm.LastUsage()
+			if ok {
+				t.Errorf("strategy %q: LastUsage() ok=true, want false", strategy)
+			}
+			if usage != (TokenUsage{}) {
+				t.Errorf("strategy %q: LastUsage() = %+v, want zero value", strategy, usage)
+			}
+		})
+	}
+}
+
+// TestContextManager_LastUsage_Race: spawn N goroutines alternating Manage() and
+// LastUsage() to ensure no data race under the -race flag.
+func TestContextManager_LastUsage_Race(t *testing.T) {
+	cfg := config.ContextConfig{
+		MaxTokens:        200000,
+		CompactThreshold: 0.8,
+		Strategy:         "smart",
+		FallbackCtxSize:  200000,
+	}
+	prov := &summarizingMockProvider{
+		cmMockProvider: cmMockProvider{name: "test", model: "test-model"},
+		summaryText:    "summary",
+	}
+	cm := NewContextManager(cfg, staticFn(prov), nil)
+	msgs := makeMessages(3)
+
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		go func() {
+			for j := 0; j < 10; j++ {
+				cm.Manage(context.Background(), "sys", nil, msgs)
+				_, _ = cm.LastUsage()
+			}
+			done <- struct{}{}
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		<-done
+	}
+}
+
 // --- T5.1 tests: agent.context.compacted events ---
 
 // captureBus is a minimal notify.Bus that captures emitted events synchronously.
