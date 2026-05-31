@@ -236,7 +236,7 @@ m = m.refreshThreadViewport()`.
   - `internal/tui/run.go`: set `thread.styles` in production constructor and `newTestModel()`.
 - Files: `internal/tui/components_thread.go`, `internal/tui/run.go`
 
-### 2.12 WU-c: golden regen (human-reviewed)
+### [x] 2.12 WU-c: golden regen (human-reviewed)
 
 - Run `make test` — `TestModel_View_ChatScreen_Golden` fails (viewport changes output).
 - Inspect the diff against the existing golden file at
@@ -253,7 +253,7 @@ m = m.refreshThreadViewport()`.
 - Run `make test-race`. Confirm GREEN.
 - Files: `internal/tui/purity_test.go`
 
-### 2.14 PR-2 lint + commit
+### [x] 2.14 PR-2 lint + commit
 
 - `make lint` clean. Work-unit commits. PR-2 independently green on `make test` +
   `make test-race`. ~230 lines.

@@ -119,7 +119,7 @@ func renderLayout(m Model) string {
 	// the rendering components; the golden output is unchanged (zero value == build).
 	currentMode := m.mode
 
-	// TopBar — update the mode slot dynamically from the live modeAgent, then render.
+	// TopBar — set the mode slot from the cached currentMode (m.mode), then render.
 	tb := m.topBar
 	tb.mode = currentMode
 	topRendered := tb.Render(m.width, m.styles)
