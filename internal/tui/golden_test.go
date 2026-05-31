@@ -30,3 +30,22 @@ func TestModel_View_WelcomeScreen_Golden(t *testing.T) {
 	// when -update is passed, otherwise compares against the stored file.
 	golden.RequireEqual(t, []byte(got))
 }
+
+// TestModel_View_WelcomeScreen_Wide_Golden captures the welcome screen at a wide
+// terminal (120x40), where the center column clears the ASCII logo width so the
+// full δ block + tagline render instead of the narrow "⫶ daimon" fallback the
+// 80-col golden above captures. Together the two goldens pin both render paths of
+// renderWelcomeCenter: the block-centered art and the fallback mark.
+func TestModel_View_WelcomeScreen_Wide_Golden(t *testing.T) {
+	m := newTestModel()
+	m.width = 120
+	m.height = 40
+	m.screen = screenWelcome
+	m.topBar.SetData("⫶", "/home/user/project", "main", "claude-3-5", "build", "$0.00", "ready")
+	m.footer.SetScreen(screenWelcome)
+	m.mode = "build"
+
+	got := m.View()
+
+	golden.RequireEqual(t, []byte(got))
+}

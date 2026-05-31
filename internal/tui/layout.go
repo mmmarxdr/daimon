@@ -204,8 +204,14 @@ var welcomeLogo = []string{
 func renderWelcomeCenter(m Model, width, height int) string {
 	s := m.styles
 
-	// Measure the art width once (first line determines the block width).
-	artWidth := ansi.StringWidth(welcomeLogo[0])
+	// Measure the widest line — the art is a pyramid whose lines differ by a
+	// column, so the block width is the MAX, not line[0] (which is the narrowest).
+	artWidth := 0
+	for _, artLine := range welcomeLogo {
+		if w := ansi.StringWidth(artLine); w > artWidth {
+			artWidth = w
+		}
+	}
 
 	if width >= artWidth {
 		// Full logo path: 8 art lines + blank + tagline = blockHeight 10.
@@ -215,13 +221,22 @@ func renderWelcomeCenter(m Model, width, height int) string {
 			padTop = 0
 		}
 
+		// Center the art as a single block: one shared left pad keyed to the
+		// widest line, so every line keeps a common left edge. Per-line centering
+		// would shift the 69-col lines vs the 68-col lines and break the shape;
+		// the design renders the art as one `pre` block (tui-screens-a.jsx:28-32).
+		leftPad := (width - artWidth) / 2
+		if leftPad < 0 {
+			leftPad = 0
+		}
+		pad := strings.Repeat(" ", leftPad)
+
 		lines := make([]string, 0, padTop+blockHeight)
 		for i := 0; i < padTop; i++ {
 			lines = append(lines, "")
 		}
-		// Render each art line centered independently (ANSI-width-safe).
 		for _, artLine := range welcomeLogo {
-			lines = append(lines, centerText(s.accent.Render(artLine), width))
+			lines = append(lines, pad+s.accent.Render(artLine))
 		}
 		// Blank separator.
 		lines = append(lines, "")

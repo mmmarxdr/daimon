@@ -64,22 +64,51 @@ func TestUpdateWelcome_EnterEmpty_StaysOnWelcome(t *testing.T) {
 // PR 1c tests — Welcome ASCII logo + narrow-terminal fallback
 // ---------------------------------------------------------------------------
 
-// TestWelcomeCenter_ASCIILogoPresent verifies that renderWelcomeCenter at
-// width>=80 includes the first distinctive ASCII logo line (▄▄▄▄▄) and the
-// tagline. [Req: Welcome ASCII logo — present scenario]
+// TestWelcomeCenter_ASCIILogoPresent verifies that the full welcome View()
+// (through the real layout, which reserves the right rail) shows the ASCII logo
+// block and the tagline once the terminal is wide enough that the center column
+// clears the art width. The welcome screen carries a 32-col rail, so the logo
+// only fits at terminal width >= railWidth + artWidth (~99 cols); we use 110.
+// Driving m.View() — not renderWelcomeCenter directly — is what makes this test
+// honest: it exercises the width the layout actually passes the center column.
+// [Req: Welcome ASCII logo — present scenario]
 func TestWelcomeCenter_ASCIILogoPresent(t *testing.T) {
+	m := newTestModel()
+	m.width = 110
+	m.height = 40
+	m.screen = screenWelcome
+	m.mode = "build"
+
+	stripped := ansi.Strip(m.View())
+	if !strings.Contains(stripped, "▄▄▄▄▄") {
+		t.Errorf("welcome View() at width=110 missing ASCII logo line '▄▄▄▄▄'\noutput:\n%s", stripped)
+	}
+	if strings.Contains(stripped, "⫶ daimon") {
+		t.Errorf("welcome View() at width=110 fell back to '⫶ daimon' — logo should fit at 110 cols")
+	}
+	if !strings.Contains(stripped, "speak, and daimon listens.") {
+		t.Errorf("welcome View() at width=110 missing tagline 'speak, and daimon listens.'\noutput:\n%s", stripped)
+	}
+}
+
+// TestWelcomeCenter_NarrowTerminal_RealLayoutFallsBack verifies that at a typical
+// 80-col terminal — where the 32-col rail leaves the center column too narrow for
+// the art — the full View() degrades to the single-line "⫶ daimon" mark instead of
+// wrapping the block. This is the companion to the present-scenario test above and
+// guards the real (rail-aware) geometry, not the bare helper.
+func TestWelcomeCenter_NarrowTerminal_RealLayoutFallsBack(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
 	m.height = 24
+	m.screen = screenWelcome
+	m.mode = "build"
 
-	out := renderWelcomeCenter(m, 80, 19)
-
-	stripped := ansi.Strip(out)
-	if !strings.Contains(stripped, "▄▄▄▄▄") {
-		t.Errorf("renderWelcomeCenter(80) missing ASCII logo line '▄▄▄▄▄'\noutput:\n%s", stripped)
+	stripped := ansi.Strip(m.View())
+	if strings.Contains(stripped, "▄▄▄▄▄") {
+		t.Errorf("welcome View() at width=80 rendered ASCII art — center column is too narrow with the rail; want fallback")
 	}
-	if !strings.Contains(stripped, "speak, and daimon listens.") {
-		t.Errorf("renderWelcomeCenter(80) missing tagline 'speak, and daimon listens.'\noutput:\n%s", stripped)
+	if !strings.Contains(stripped, "⫶ daimon") {
+		t.Errorf("welcome View() at width=80 missing '⫶ daimon' fallback\noutput:\n%s", stripped)
 	}
 }
 

@@ -100,7 +100,7 @@ Chain strategy: stacked-to-main
 
 ### PR 1c — FIRST: verify footer hints against design source
 
-- [ ] 1c.0 **VERIFY footer hints for screens 04/05/06 against the design files BEFORE implementing.** Read `docs/tui-design/daimon/project/tui-screens-b.jsx` (the `TUIFooter hints={[...]}` blocks for screens 4, 5, 6) and reconcile against what the spec states. Record any discrepancies as inline comments in the implementation. Known findings to confirm:
+- [x] 1c.0 **VERIFY footer hints for screens 04/05/06 against the design files BEFORE implementing.** Read `docs/tui-design/daimon/project/tui-screens-b.jsx` (the `TUIFooter hints={[...]}` blocks for screens 4, 5, 6) and reconcile against what the spec states. Record any discrepancies as inline comments in the implementation. Known findings to confirm:
   - Screen 04 outer `TUIFooter` (`tui-screens-b.jsx:153–157`): `esc`/close palette · `/`/search prefix · `?`/help — differs from spec's `↑↓ select · ↵ run · esc close · ⇥ autocomplete` (the spec inferred from the inner palette overlay footer). Verify which is correct for the outer screen footer.
   - Screen 05 `TUIFooter` (`tui-screens-b.jsx:319–325`): `space`/toggle enabled · `↵`/open detail · `a`/add MCP server · `d`/remove · `/`/filter — differs from spec's `↑↓ select · ↵ toggle · f filter · a add-MCP`. Verify.
   - Screen 06 `TUIFooter` (`tui-screens-b.jsx:492–497`): `↵`/resume thread · `n`/new from this · `d`/delete · `m`/change model · `/`/filter — mostly matches spec except label differences. Verify.
@@ -108,23 +108,23 @@ Chain strategy: stacked-to-main
 
 ### PR 1c — RED: write failing tests first
 
-- [ ] 1c.1 In `internal/tui/model_welcome_test.go` (or `layout_test.go`): add a test rendering the welcome screen at width=80, assert output contains `▄▄▄▄▄` (first distinctive ASCII logo line) and `speak, and daimon listens.`. Assert non-welcome screen render does NOT contain `▄▄▄▄▄`. **[Req: Welcome ASCII logo — both scenarios]**
-- [ ] 1c.2 In `internal/tui/components_shell_test.go`: add a test for `footerHints.Render` on the welcome screen; assert ANSI-stripped output contains `⇥`, `/commands`, `⌃R`, `resume last`, `⌃C`, `exit`. **[Req: Footer hint sets — Welcome footer scenario]**
-- [ ] 1c.3 In `internal/tui/components_shell_test.go`: add a test for the chat screen footer; assert ANSI-stripped output contains `⇥ switch panel` (or `switch agent`) and `⌃P`. **[Req: Footer hint sets — Chat footer scenario]**
-- [ ] 1c.4 Add table-driven tests for all remaining screen hint sets (slash, tools, sessions) using verified values from step 1c.0. Use `t.Run` per screen.
-- [ ] 1c.5 Run `make test` — confirm all new cases fail (RED).
+- [x] 1c.1 In `internal/tui/model_welcome_test.go` (or `layout_test.go`): add a test rendering the welcome screen at width=80, assert output contains `▄▄▄▄▄` (first distinctive ASCII logo line) and `speak, and daimon listens.`. Assert non-welcome screen render does NOT contain `▄▄▄▄▄`. **[Req: Welcome ASCII logo — both scenarios]**
+- [x] 1c.2 In `internal/tui/components_shell_test.go`: add a test for `footerHints.Render` on the welcome screen; assert ANSI-stripped output contains `⇥`, `/commands`, `⌃R`, `resume last`, `⌃C`, `exit`. **[Req: Footer hint sets — Welcome footer scenario]**
+- [x] 1c.3 In `internal/tui/components_shell_test.go`: add a test for the chat screen footer; assert ANSI-stripped output contains `⇥ switch panel` (or `switch agent`) and `⌃P`. **[Req: Footer hint sets — Chat footer scenario]**
+- [x] 1c.4 Add table-driven tests for all remaining screen hint sets (slash, tools, sessions) using verified values from step 1c.0. Use `t.Run` per screen.
+- [x] 1c.5 Run `make test` — confirm all new cases fail (RED).
 
 ### PR 1c — GREEN: implement
 
-- [ ] 1c.6 In `internal/tui/layout.go`: define `var welcomeLogo = []string{ ... }` (8 lines from `tui-screens-a.jsx:9–17`). In `renderWelcomeCenter`: replace single-line `accent.Render("⫶ daimon")` + tagline with: (a) `artWidth` guard (`ansi.StringWidth(welcomeLogo[0])`; fall back to `⫶ daimon` if `width < artWidth`), (b) each logo line centered via `centerText(line, width)` with `s.accent`, (c) tagline `"speak, and daimon listens."` with `s.hint` (italic), (d) recompute `padTop` against new taller block height. **[Req: Welcome ASCII logo]**
-- [ ] 1c.7 In `internal/tui/components_shell.go`: define `type footerHint struct { key, label string }`. Replace flat per-screen footer strings in `hintsForScreen()` (or equivalent) with `[]footerHint` returns per `screenState`. Use verified hint data from step 1c.0. **[Req: Footer hint sets]**
-- [ ] 1c.8 In `internal/tui/components_shell.go`: update `footerHints.Render`: each hint = `s.accent.Render(h.key) + " " + s.dimLabel.Render(h.label)`, hints joined by `"  "` (two spaces), `ansi.Truncate` to width. Append right-aligned italic `"daimon listens."` with `s.hint` when width allows (drop first under truncation pressure). **[Req: Footer hint sets — hint style + separator]**
-- [ ] 1c.9 Run `make test` — confirm new direct tests pass (GREEN) before touching goldens.
+- [x] 1c.6 In `internal/tui/layout.go`: define `var welcomeLogo = []string{ ... }` (8 lines from `tui-screens-a.jsx:9–17`). In `renderWelcomeCenter`: replace single-line `accent.Render("⫶ daimon")` + tagline with: (a) `artWidth` guard (`ansi.StringWidth(welcomeLogo[0])`; fall back to `⫶ daimon` if `width < artWidth`), (b) each logo line centered via `centerText(line, width)` with `s.accent`, (c) tagline `"speak, and daimon listens."` with `s.hint` (italic), (d) recompute `padTop` against new taller block height. **[Req: Welcome ASCII logo]**
+- [x] 1c.7 In `internal/tui/components_shell.go`: define `type footerHint struct { key, label string }`. Replace flat per-screen footer strings in `hintsForScreen()` (or equivalent) with `[]footerHint` returns per `screenState`. Use verified hint data from step 1c.0. **[Req: Footer hint sets]**
+- [x] 1c.8 In `internal/tui/components_shell.go`: update `footerHints.Render`: each hint = `s.accent.Render(h.key) + " " + s.dimLabel.Render(h.label)`, hints joined by `"  "` (two spaces), `ansi.Truncate` to width. Append right-aligned italic `"daimon listens."` with `s.hint` when width allows (drop first under truncation pressure). **[Req: Footer hint sets — hint style + separator]**
+- [x] 1c.9 Run `make test` — confirm new direct tests pass (GREEN) before touching goldens.
 
 ### PR 1c — Golden regeneration
 
-- [ ] 1c.10 Regenerate welcome golden: `go test ./internal/tui -run 'TestModel_View_WelcomeScreen_Golden' -update`. Manually eyeball `internal/tui/testdata/TestModel_View_WelcomeScreen_Golden.golden` diff: confirm ASCII art block, tagline, footer hints, new color bytes. Confirm no prior `"⫶ daimon"` single-line heading remains.
-- [ ] 1c.11 Re-run `make test` WITHOUT `-update` — all tests must pass (GREEN). No `◈` or old footer strings in welcome output.
+- [x] 1c.10 Regenerate welcome golden: `go test ./internal/tui -run 'TestModel_View_WelcomeScreen_Golden' -update`. Manually eyeball `internal/tui/testdata/TestModel_View_WelcomeScreen_Golden.golden` diff: confirm ASCII art block, tagline, footer hints, new color bytes. Confirm no prior `"⫶ daimon"` single-line heading remains.
+- [x] 1c.11 Re-run `make test` WITHOUT `-update` — all tests must pass (GREEN). No `◈` or old footer strings in welcome output.
 
 ---
 
