@@ -810,5 +810,3 @@ ring buffer (more code, same external behavior). 500 is the committed value (pro
 Design complete. Approach B + the REVISED Option-3 (batch own-once-per-tick, ownedGen
 dropped per D.7) committed. Ready for `sdd-tasks` (after spec). Artifacts:
 `openspec/changes/tui-render-architecture/design.md`, engram `sdd/tui-render-architecture/design`.
-</content>
-</invoke>
