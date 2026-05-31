@@ -125,6 +125,13 @@ type Model struct {
 	focus  focusRegion // intra-screen focus region (PR2)
 	styles tuiStyles
 
+	// spinnerActive is true while the single model-level batch spinner ticker is
+	// running (design §D.7). It is set to true on the FIRST EventToolStart that
+	// creates a running ToolLine and guards against arming a second ticker.
+	// The spinnerTickMsg handler sets it to false when runningToolIdxs() is empty
+	// (self-stop). This is the dedup guard — arm if and only if !spinnerActive.
+	spinnerActive bool
+
 	// mode — cached agent mode string (WU-a: written in Update, read in View).
 	// Eliminates the live modeAgent.CurrentMode() call from renderLayout.
 	// Initialized from ag.CurrentMode() at construction; updated in cycleMode,

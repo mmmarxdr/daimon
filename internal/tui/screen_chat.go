@@ -43,26 +43,29 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, pumpEvents(m.events)
 
 	// ------------------------------------------------------------------
-	// Spinner tick for a running ToolLine
+	// Batch spinner tick — advances ALL running ToolLines in one pass
 	// ------------------------------------------------------------------
 	case spinnerTickMsg:
-		// W1 FIX: copy-on-write — never mutate the shared backing array
-		// through a pointer into the prior model's slice.
-		idx := m.thread.findToolLineIdx(msg.callID)
-		if idx >= 0 {
-			oldTL := m.thread.items[idx].(*ToolLine) //nolint:forcetypeassert // findToolLineIdx guarantees *ToolLine
-			if oldTL.state == toolRunning {
-				tlCopy := *oldTL
-				tlCopy.AdvanceSpinner()
-				newItems := make([]threadItem, len(m.thread.items))
-				copy(newItems, m.thread.items)
-				newItems[idx] = &tlCopy
-				m.thread.items = newItems
-				m = m.refreshThreadViewport()
-				return m, tlCopy.Tick()
-			}
+		// Design §D.5: single model-level ticker (no callID).
+		// runningToolIdxs() finds all toolRunning lines in one pass.
+		// If none are running, self-stop: return nil cmd (no re-arm).
+		idxs := m.thread.runningToolIdxs()
+		if len(idxs) == 0 {
+			m.spinnerActive = false
+			return m, nil
 		}
-		return m, nil
+		// own() allocates a fresh slice (O(n) copy, once per tick regardless of k).
+		// All k in-place slot writes below are provably non-aliasing (design §D.6).
+		nt := m.thread.own()
+		for _, i := range idxs {
+			old := nt.items[i].(*ToolLine) //nolint:forcetypeassert // runningToolIdxs guarantees *ToolLine
+			clone := *old                  // value copy of the ToolLine struct (deep-clone pointer)
+			clone.spinnerFrame = (clone.spinnerFrame + 1) % len(brailleSpinner)
+			nt.items[i] = &clone // replace pointer in the owned slice
+		}
+		m.thread = nt
+		m = m.refreshThreadViewport()
+		return m, spinnerTickCmd() // re-arm single ticker
 
 	// ------------------------------------------------------------------
 	// promptSentMsg: input bar submitted — clear and show waiting state
@@ -166,8 +169,13 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		}
 		m.thread.append(tl)
 		m = m.refreshThreadViewport()
-		// Start spinner animation.
-		cmds = append(cmds, tl.Tick())
+		// Arm the single model-level batch ticker — deduplicated by spinnerActive.
+		// Only arm when no ticker is already running; a second EventToolStart while
+		// an existing ticker is live must NOT stack a second ticker (design §D.7).
+		if !m.spinnerActive {
+			m.spinnerActive = true
+			cmds = append(cmds, spinnerTickCmd())
+		}
 		// PR2b: Update telemetry panel tool-call count (copy-on-write).
 		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
 			if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
@@ -179,12 +187,13 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 
 	case notify.EventToolEnd:
 		// Transition existing ToolLine to done or error.
-		// W1 FIX: copy-on-write — build a new items slice with the updated ToolLine
-		// value so we never mutate through a pointer into the prior model's slice.
+		// COW via own(): own() allocates a fresh backing array; the in-place slot
+		// write below is safe and cannot alias a prior model snapshot (design §D.7).
 		idx := m.thread.findToolLineIdx(ev.ToolCallID)
 		if idx >= 0 {
-			oldTL := m.thread.items[idx].(*ToolLine) //nolint:forcetypeassert // findToolLineIdx guarantees *ToolLine
-			tlCopy := *oldTL                         // value copy
+			nt := m.thread.own()
+			oldTL := nt.items[idx].(*ToolLine) //nolint:forcetypeassert // findToolLineIdx guarantees *ToolLine
+			tlCopy := *oldTL                   // value copy of the ToolLine struct
 			if ev.IsError {
 				tlCopy.state = toolError
 			} else {
@@ -194,10 +203,8 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			if ev.TokenCount > 0 {
 				tlCopy.stats.tokens = ev.TokenCount
 			}
-			newItems := make([]threadItem, len(m.thread.items))
-			copy(newItems, m.thread.items)
-			newItems[idx] = &tlCopy
-			m.thread.items = newItems
+			nt.items[idx] = &tlCopy
+			m.thread = nt
 			m = m.refreshThreadViewport()
 		}
 		// PR2b: Update telemetry panel error count (copy-on-write).
@@ -244,21 +251,20 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 
 	case notify.EventReasoningEnd:
 		// Update the most recent Reasoning block with the completed text.
-		// W1 FIX: copy-on-write — build a new items slice with the updated
-		// Reasoning value; never mutate through a pointer into the prior model's slice.
+		// COW via own(): own() allocates a fresh backing array; the in-place slot
+		// write below is safe and cannot alias a prior model snapshot (design §D.7).
 		if ev.Text != "" {
-			for i := len(m.thread.items) - 1; i >= 0; i-- {
-				if r, ok := m.thread.items[i].(*Reasoning); ok {
+			nt := m.thread.own()
+			for i := len(nt.items) - 1; i >= 0; i-- {
+				if r, ok := nt.items[i].(*Reasoning); ok {
 					rCopy := *r
 					rCopy.text = ev.Text
 					rCopy.duration = time.Duration(ev.DurationMs) * time.Millisecond
-					newItems := make([]threadItem, len(m.thread.items))
-					copy(newItems, m.thread.items)
-					newItems[i] = &rCopy
-					m.thread.items = newItems
+					nt.items[i] = &rCopy
 					break
 				}
 			}
+			m.thread = nt
 			m = m.refreshThreadViewport()
 		}
 
@@ -356,23 +362,22 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// the thread (focusMain). When focusEditor is active, 'r' must fall
 		// through to the input bar so the user can type 'r' normally.
 		if m.focus != focusEditor && m.focus != focusNone {
-			// Copy-on-write: build a new items slice with the updated Reasoning value.
-			newItems := make([]threadItem, len(m.thread.items))
-			copy(newItems, m.thread.items)
-			for i := len(newItems) - 1; i >= 0; i-- {
-				if r, ok := newItems[i].(*Reasoning); ok {
-					// Copy the Reasoning value so we don't mutate the prior model.
+			// COW via own(): own() allocates a fresh backing array; in-place
+			// slot write below cannot alias a prior model snapshot (design §D.7).
+			nt := m.thread.own()
+			for i := len(nt.items) - 1; i >= 0; i-- {
+				if r, ok := nt.items[i].(*Reasoning); ok {
 					rCopy := *r
 					if rCopy.Expanded() {
 						rCopy.Collapse()
 					} else {
 						rCopy.Expand()
 					}
-					newItems[i] = &rCopy
+					nt.items[i] = &rCopy
 					break
 				}
 			}
-			m.thread.items = newItems
+			m.thread = nt
 			m = m.refreshThreadViewport()
 			return m, nil
 		}
