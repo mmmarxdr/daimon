@@ -68,7 +68,7 @@ func TestUpdateWelcome_EnterEmpty_StaysOnWelcome(t *testing.T) {
 // (through the real layout, which reserves the right rail) shows the ASCII logo
 // block and the tagline once the terminal is wide enough that the center column
 // clears the art width. The welcome screen carries a 32-col rail, so the logo
-// only fits at terminal width >= railWidth + artWidth (~99 cols); we use 110.
+// only fits at terminal width >= railWidth(32) + artWidth(69) = 101 cols; we use 110.
 // Driving m.View() — not renderWelcomeCenter directly — is what makes this test
 // honest: it exercises the width the layout actually passes the center column.
 // [Req: Welcome ASCII logo — present scenario]

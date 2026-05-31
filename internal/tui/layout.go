@@ -181,9 +181,10 @@ func renderCenter(m Model, width, height int) string {
 }
 
 // welcomeLogo is the ASCII δ block art from docs/tui-design/daimon/project/tui-screens-a.jsx:9–17.
-// Stored verbatim; each line is rendered with s.accent and centered independently.
-// The art is ~67 columns wide (measured via ansi.StringWidth on welcomeLogo[0]).
-// On narrow terminals (width < artWidth) fall back to the single-line "⫶ daimon" mark.
+// Stored verbatim; rendered in s.accent and centered as ONE block (a single shared
+// left pad keyed to the widest line) so the pyramid keeps a common left edge.
+// The art is a pyramid: most lines are 68 cols, lines 3–4 are 69; artWidth is the
+// MAX (69). On narrow terminals (width < artWidth) fall back to the "⫶ daimon" mark.
 //
 // Delta from old tagline: previous code used "your embedded AI agent" (dimLabel).
 // Design source uses "speak, and daimon listens." as the tagline in hint/italic style.
