@@ -264,7 +264,7 @@ m = m.refreshThreadViewport()`.
 
 Est. ~120 lines. Base: PR-2 branch. Stack on PR-2.
 
-### 3.1 WU-d RED: snapshot isolation test
+### [x] 3.1 WU-d RED: snapshot isolation test
 
 - **RED** in `internal/tui/components_thread_test.go` (or new `internal/tui/spinner_test.go`):
   - `TestSpinner_SnapshotIsolation`: build model A with k=1 running ToolLine; call
@@ -279,7 +279,7 @@ Est. ~120 lines. Base: PR-2 branch. Stack on PR-2.
     ticker is running (`m.spinnerActive == true` after first; second arm is no-op).
 - Files: `internal/tui/components_thread_test.go` or `internal/tui/spinner_test.go` (new)
 
-### 3.2 WU-d GREEN: thread.own() + runningToolIdxs()
+### [x] 3.2 WU-d GREEN: thread.own() + runningToolIdxs()
 
 - **GREEN**:
   - `internal/tui/components_thread.go`: add `func (t *thread) own()` (make+copy as per D.3,
@@ -287,7 +287,7 @@ Est. ~120 lines. Base: PR-2 branch. Stack on PR-2.
 []int` (iterate items, return indices where item is `*ToolLine` with `state == toolRunning`).
 - Files: `internal/tui/components_thread.go`
 
-### 3.3 WU-d GREEN: single model-level spinner ticker
+### [x] 3.3 WU-d GREEN: single model-level spinner ticker
 
 - **GREEN** (resolves 3.1 batch + self-stop + dedup tests):
   - `internal/tui/model.go`: add `spinnerActive bool` to `Model`.
@@ -301,7 +301,7 @@ Est. ~120 lines. Base: PR-2 branch. Stack on PR-2.
     the per-line ticker; or repurpose as `AdvanceSpinner()` only.
 - Files: `internal/tui/model.go`, `internal/tui/screen_chat.go`, `internal/tui/components_thread.go`
 
-### 3.4 WU-d GREEN: refactor EventToolEnd / EventReasoningEnd / r-toggle onto own()
+### [x] 3.4 WU-d GREEN: refactor EventToolEnd / EventReasoningEnd / r-toggle onto own()
 
 - **GREEN** (behavior-identical, proven by D.6):
   - Replace each bespoke `make + copy` in EventToolEnd, EventReasoningEnd, and the `r`-toggle
@@ -310,14 +310,14 @@ Est. ~120 lines. Base: PR-2 branch. Stack on PR-2.
     needed beyond what already covers these handlers.
 - Files: `internal/tui/screen_chat.go` (or wherever these handlers live)
 
-### 3.5 WU-d: drop ownedGen / global counter (verify absent)
+### [x] 3.5 WU-d: drop ownedGen / global counter (verify absent)
 
 - Confirm no `ownedGen`, `threadGenSeq`, or `nextThreadGen` exists in the diff. Per D.7,
   these were explicitly rejected. If any leaked in from earlier drafts, remove them.
   `grep -r ownedGen internal/tui/` must return empty.
 - Files: `internal/tui/components_thread.go`, `internal/tui/model.go`
 
-### 3.6 PR-3 test-race + lint + commit
+### [x] 3.6 PR-3 test-race + lint + commit
 
 - `make test-race` clean. `make lint` clean.
 - Work-unit commit: `thread.own() + runningToolIdxs()` together, then batch ticker + refactor.
