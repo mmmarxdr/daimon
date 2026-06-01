@@ -18,7 +18,7 @@ func TestPanelsFor_ContractMatrix(t *testing.T) {
 		},
 		{
 			screenChat,
-			[]panelID{panelTodolist, panelContextMeter, panelTelemetry},
+			[]panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek},
 		},
 		{
 			screenDiff,

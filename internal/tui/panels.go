@@ -19,6 +19,7 @@ const (
 	panelTodolist      panelID = "todolist"       // chat
 	panelContextMeter  panelID = "context-meter"  // chat
 	panelTelemetry     panelID = "telemetry"      // chat, diff, error
+	panelMemoryPeek    panelID = "memory-peek"    // chat (PR-c: memory entries)
 	panelHunksNav      panelID = "hunks-nav"      // diff
 	panelRationale     panelID = "rationale"      // diff
 	panelImpact        panelID = "impact"         // diff
@@ -36,7 +37,7 @@ func panelsFor(screen screenState) []panelID {
 	case screenWelcome:
 		return []panelID{panelEnvironment, panelResumeList}
 	case screenChat:
-		return []panelID{panelTodolist, panelContextMeter, panelTelemetry}
+		return []panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek}
 	case screenDiff:
 		return []panelID{panelHunksNav, panelRationale, panelImpact, panelTelemetry}
 	case screenSlash:

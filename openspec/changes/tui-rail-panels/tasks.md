@@ -139,47 +139,47 @@ Files touched: `panels.go`, `rail_panels.go`, `rail_panels_cmd.go`, `screen_chat
 
 ### RED — failing tests first (deliberate break-then-fix for contract tests)
 
-- [ ] **c.1** In `model_test.go` (~:19–22), update `TestPanelsFor_ContractMatrix` `screenChat` row to expect `[]panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek}` (spec scenario TR-15). Run `make test` → RED (`panelMemoryPeek` undefined).
+- [x] **c.1** In `model_test.go` (~:19–22), update `TestPanelsFor_ContractMatrix` `screenChat` row to expect `[]panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek}` (spec scenario TR-15). Run `make test` → RED (`panelMemoryPeek` undefined).
 
-- [ ] **c.2** In `rail_panels_test.go` (~:329), update `TestRail_ChatScreen_PanelsRegistered` to include `panelMemoryPeek` in the panel-ID loop (spec scenario TR-15). Run `make test` → RED.
+- [x] **c.2** In `rail_panels_test.go` (~:329), update `TestRail_ChatScreen_PanelsRegistered` to include `panelMemoryPeek` in the panel-ID loop (spec scenario TR-15). Run `make test` → RED.
 
-- [ ] **c.3** In `rail_panels_test.go`, add `TestMemoryPeek_Render_Empty`: zero-value `memoryPeekPanel`, `Render(32, 0)`, assert `""` (spec scenario TR-10 "Empty entries — Render returns """). Run `make test` → RED (`memoryPeekPanel` undefined).
+- [x] **c.3** In `rail_panels_test.go`, add `TestMemoryPeek_Render_Empty`: zero-value `memoryPeekPanel`, `Render(32, 0)`, assert `""` (spec scenario TR-10 "Empty entries — Render returns """). Run `make test` → RED (`memoryPeekPanel` undefined).
 
-- [ ] **c.4** In `rail_panels_test.go`, add `TestMemoryPeek_Render_PopulatedTitles_Golden`: panel with 3 entries (non-empty `Title`); `Render(32, 0)`; assert output contains all 3 titles and `memory` header badge (spec scenario TR-10 "Populated entries — rows rendered"). Use `golden.RequireEqual` against `testdata/memory_peek_populated.golden`. Run `make test` → RED.
+- [x] **c.4** In `rail_panels_test.go`, add `TestMemoryPeek_Render_PopulatedTitles_Golden`: panel with 3 entries (non-empty `Title`); `Render(32, 0)`; assert output contains all 3 titles and `memory` header badge (spec scenario TR-10 "Populated entries — rows rendered"). Use `golden.RequireEqual` against `testdata/memory_peek_populated.golden`. Run `make test` → RED.
 
-- [ ] **c.5** In `rail_panels_test.go`, add `TestMemoryPeek_Render_Cap5`: 8 entries; `Render(32, 0)`; assert at most 5 entry rows (spec scenario TR-10 "Entries cap at 5"). Run `make test` → RED.
+- [x] **c.5** In `rail_panels_test.go`, add `TestMemoryPeek_Render_Cap5`: 8 entries; `Render(32, 0)`; assert at most 5 entry rows (spec scenario TR-10 "Entries cap at 5"). Run `make test` → RED.
 
-- [ ] **c.6** In `rail_panels_test.go`, add `TestMemoryPeek_Render_TitleFallback_Content`: one entry `Title=""`, `Content="some content text"`; `Render(32, 0)`; assert output contains a prefix of `"some content text"` and NOT an empty row (spec scenario TR-10 "Empty Title falls back to Content"). Run `make test` → RED.
+- [x] **c.6** In `rail_panels_test.go`, add `TestMemoryPeek_Render_TitleFallback_Content`: one entry `Title=""`, `Content="some content text"`; `Render(32, 0)`; assert output contains a prefix of `"some content text"` and NOT an empty row (spec scenario TR-10 "Empty Title falls back to Content"). Run `make test` → RED.
 
-- [ ] **c.7** In `rail_panels_test.go`, add `TestFetchMemory_NilStore_NoOp`: call `fetchMemory(nil, "scope-123")`; execute returned cmd; assert `memoryRefreshMsg{}` with empty entries, no panic (spec scenario TR-11 "Nil store produces empty msg"). Run `make test` → RED (`fetchMemory` undefined).
+- [x] **c.7** In `rail_panels_test.go`, add `TestFetchMemory_NilStore_NoOp`: call `fetchMemory(nil, "scope-123")`; execute returned cmd; assert `memoryRefreshMsg{}` with empty entries, no panic (spec scenario TR-11 "Nil store produces empty msg"). Run `make test` → RED (`fetchMemory` undefined).
 
-- [ ] **c.8** In `rail_panels_test.go`, add `TestFetchMemory_EmptyScopeID_NoOp`: call `fetchMemory(someStore, "")`; execute cmd; assert empty msg, `SearchMemory` NOT called (spec scenario TR-11 "Empty scopeID produces empty msg"). Run `make test` → RED.
+- [x] **c.8** In `rail_panels_test.go`, add `TestFetchMemory_EmptyScopeID_NoOp`: call `fetchMemory(someStore, "")`; execute cmd; assert empty msg, `SearchMemory` NOT called (spec scenario TR-11 "Empty scopeID produces empty msg"). Run `make test` → RED.
 
-- [ ] **c.9** In `rail_panels_test.go`, add `TestFetchMemory_ValidInputs_ReturnsEntries`: fake `store.Store` whose `SearchMemory(ctx,"scope-1","",5)` returns 3 entries; execute cmd; assert `memoryRefreshMsg.entries` has length 3 (spec scenario TR-11 "Valid inputs — entries returned"). Run `make test` → RED.
+- [x] **c.9** In `rail_panels_test.go`, add `TestFetchMemory_ValidInputs_ReturnsEntries`: fake `store.Store` whose `SearchMemory(ctx,"scope-1","",5)` returns 3 entries; execute cmd; assert `memoryRefreshMsg.entries` has length 3 (spec scenario TR-11 "Valid inputs — entries returned"). Run `make test` → RED.
 
-- [ ] **c.10** In `rail_panels_test.go`, add `TestHandleBusEvent_MemoryChanged_ReturnsFetchCmd`: drive `EventMemoryChanged{Meta{"scope_id":"scope-abc"}}` through `handleBusEvent`; execute batch; assert `memoryRefreshMsg` appears among messages (spec scenario TR-12 "EventMemoryChanged triggers fetchMemory cmd"). Run `make test` → RED.
+- [x] **c.10** In `rail_panels_test.go`, add `TestHandleBusEvent_MemoryChanged_ReturnsFetchCmd`: drive `EventMemoryChanged{Meta{"scope_id":"scope-abc"}}` through `handleBusEvent`; execute batch; assert `memoryRefreshMsg` appears among messages (spec scenario TR-12 "EventMemoryChanged triggers fetchMemory cmd"). Run `make test` → RED.
 
-- [ ] **c.11** In `rail_panels_test.go`, add `TestMemoryRefreshMsg_Update_SetsEntries`: drive `memoryRefreshMsg{entries: []store.MemoryEntry{{Title:"t1"},{Title:"t2"}}}` through `Update`; assert new model's `memoryPeekPanel.entries` has 2 entries; assert prior model snapshot's panel remains empty (spec scenario TR-13 "memoryRefreshMsg populates panel entries", COW). Run `make test` → RED.
+- [x] **c.11** In `rail_panels_test.go`, add `TestMemoryRefreshMsg_Update_SetsEntries`: drive `memoryRefreshMsg{entries: []store.MemoryEntry{{Title:"t1"},{Title:"t2"}}}` through `Update`; assert new model's `memoryPeekPanel.entries` has 2 entries; assert prior model snapshot's panel remains empty (spec scenario TR-13 "memoryRefreshMsg populates panel entries", COW). Run `make test` → RED.
 
-- [ ] **c.12** In `rail_panels_test.go`, add `TestMemoryRefreshMsg_Update_ClearsPrior`: model with 3 entries in panel; drive `memoryRefreshMsg{entries:nil}`; assert new model's panel entries is empty, Render returns `""` (spec scenario TR-13 "clears prior entries"). Run `make test` → RED.
+- [x] **c.12** In `rail_panels_test.go`, add `TestMemoryRefreshMsg_Update_ClearsPrior`: model with 3 entries in panel; drive `memoryRefreshMsg{entries:nil}`; assert new model's panel entries is empty, Render returns `""` (spec scenario TR-13 "clears prior entries"). Run `make test` → RED.
 
 ### GREEN — minimal implementation
 
-- [ ] **c.13** In `panels.go`: add const `panelMemoryPeek panelID = "memory-peek"`. Update `panelsFor(screenChat)` to return `[]panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek}` (spec TR-9). This fixes c.1 + c.2 RED.
+- [x] **c.13** In `panels.go`: add const `panelMemoryPeek panelID = "memory-peek"`. Update `panelsFor(screenChat)` to return `[]panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek}` (spec TR-9). This fixes c.1 + c.2 RED.
 
-- [ ] **c.14** In `rail_panels.go`, add `memoryPeekPanel` struct (`styles tuiStyles`, `entries []store.MemoryEntry`), `newMemoryPeekPanel(s tuiStyles) *memoryPeekPanel`, `setEntries([]store.MemoryEntry)`, and `Render(width, _ int) string` (empty → `""`; else header badge `"memory"` + up to 5 rows Title-first/Content-fallback, `ansi.Truncate` per row, `wrapPanelBox`). `store` already imported at `:30`. Produce golden with `-update`.
+- [x] **c.14** In `rail_panels.go`, add `memoryPeekPanel` struct (`styles tuiStyles`, `entries []store.MemoryEntry`), `newMemoryPeekPanel(s tuiStyles) *memoryPeekPanel`, `setEntries([]store.MemoryEntry)`, and `Render(width, _ int) string` (empty → `""`; else header badge `"memory"` + up to 5 rows Title-first/Content-fallback, `ansi.Truncate` per row, `wrapPanelBox`). `store` already imported at `:30`. Produce golden with `-update`.
 
-- [ ] **c.15** In `rail_panels_cmd.go`, add `memoryRefreshMsg{entries []store.MemoryEntry}` and `fetchMemory(st store.Store, scopeID string) tea.Cmd`. Mirror `fetchTodolist` exactly: nil/empty → return `memoryRefreshMsg{}` without calling `SearchMemory`; otherwise call `st.SearchMemory(context.Background(), scopeID, "", 5)`, silently ignore error. Add imports: `"context"` and `"daimon/internal/store"`.
+- [x] **c.15** In `rail_panels_cmd.go`, add `memoryRefreshMsg{entries []store.MemoryEntry}` and `fetchMemory(st store.Store, scopeID string) tea.Cmd`. Mirror `fetchTodolist` exactly: nil/empty → return `memoryRefreshMsg{}` without calling `SearchMemory`; otherwise call `st.SearchMemory(context.Background(), scopeID, "", 5)`, silently ignore error. Add imports: `"context"` and `"daimon/internal/store"`.
 
-- [ ] **c.16** In `screen_chat.go`, add `handleBusEvent` case `notify.EventMemoryChanged`: `cmds = append(cmds, fetchMemory(m.store, ev.Meta["scope_id"]))`. Place after the `EventTodolistChanged` case (~:304–308).
+- [x] **c.16** In `screen_chat.go`, add `handleBusEvent` case `notify.EventMemoryChanged`: `cmds = append(cmds, fetchMemory(m.store, ev.Meta["scope_id"]))`. Place after the `EventTodolistChanged` case (~:304–308).
 
-- [ ] **c.17** In `model.go`, add `Update` case `case memoryRefreshMsg:`: `copyRailWith` → value-copy `mp := *mp` → `cp.setEntries(msg.entries)` → `panels[panelMemoryPeek] = &cp` → `return m, nil`. Mirror `todolistRefreshMsg` case (~:288–296).
+- [x] **c.17** In `model.go`, add `Update` case `case memoryRefreshMsg:`: `copyRailWith` → value-copy `mp := *mp` → `cp.setEntries(msg.entries)` → `panels[panelMemoryPeek] = &cp` → `return m, nil`. Mirror `todolistRefreshMsg` case (~:288–296).
 
-- [ ] **c.18** In `rail.go` (`newRail` function ~:26–38), add `panelMemoryPeek: newMemoryPeekPanel(s)` to the panel map.
+- [x] **c.18** In `rail.go` (`newRail` function ~:26–38), add `panelMemoryPeek: newMemoryPeekPanel(s)` to the panel map.
 
 ### REFACTOR
 
-- [ ] **c.19** Run `make test` → all PR-c tests GREEN including the two previously-RED contract tests (c.1, c.2). Confirm `memory_peek_populated.golden` generated. Run `make test` without `-update` to assert golden stability. Check `TestModel_View_ChatScreen_Golden`: if diff shows only the empty memory-peek addition, regenerate it with `-update` (design Risk 7). Verify no file outside `internal/tui/` was modified (`git diff --name-only`).
+- [x] **c.19** Run `make test` → all PR-c tests GREEN including the two previously-RED contract tests (c.1, c.2). Confirm `memory_peek_populated.golden` generated. Run `make test` without `-update` to assert golden stability. Check `TestModel_View_ChatScreen_Golden`: if diff shows only the empty memory-peek addition, regenerate it with `-update` (design Risk 7). Verify no file outside `internal/tui/` was modified (`git diff --name-only`).
 
 ---
 

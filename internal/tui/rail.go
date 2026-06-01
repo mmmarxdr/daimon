@@ -29,6 +29,7 @@ func newRail(s tuiStyles) rail {
 			panelTodolist:      newTodolistPanel(s),
 			panelContextMeter:  newContextMeterPanel(s),
 			panelTelemetry:     newTelemetryPanel(s),
+			panelMemoryPeek:    newMemoryPeekPanel(s),          // PR-c: memory entries; empty until first EventMemoryChanged
 			panelModelPicker:   newModelPickerPanel(s, "", ""), // empty sentinel; RunTUI replaces this via copyRailWith
 			panelToolDetail:    newToolDetailPanel(s),          // PR4a: tools screen
 			panelActivePolicy:  newActivePolicyPanel(s, ""),    // PR5: error screen; RunTUI replaces with ag.CurrentMode()

@@ -295,6 +295,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		return m, nil
 
+	// PR-c: memoryRefreshMsg arrives from fetchMemory Cmd after EventMemoryChanged.
+	// Update the memory-peek panel via copy-on-write (mirrors todolistRefreshMsg).
+	case memoryRefreshMsg:
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if mp, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+				cp := *mp
+				cp.setEntries(msg.entries)
+				panels[panelMemoryPeek] = &cp
+			}
+		})
+		return m, nil
+
 	// PR4b: sessionsLoadedMsg is handled GLOBALLY so both the welcome screen
 	// (resume-list panel) and the sessions screen (renderSessions reads m.sessions)
 	// receive the update regardless of which screen is active.

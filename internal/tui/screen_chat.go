@@ -318,6 +318,12 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 		// no IO in Update). The result arrives as a todolistRefreshMsg which is
 		// handled in Model.Update to update the todolist panel.
 		cmds = append(cmds, fetchTodolist(m.ag, m.activeConvID))
+
+	case notify.EventMemoryChanged:
+		// PR-c: Schedule a SearchMemory re-read via a tea.Cmd (Cmd discipline —
+		// no IO in Update). The scopeID comes from the event meta (option a design).
+		// The result arrives as a memoryRefreshMsg handled in Model.Update.
+		cmds = append(cmds, fetchMemory(m.store, ev.Meta["scope_id"]))
 	}
 
 	// Re-issue pump so the drain loop continues.

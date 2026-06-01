@@ -922,3 +922,64 @@ func (p *resumeListPanel) Render(width, _ int) string {
 
 	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
+
+// ---------------------------------------------------------------------------
+// memoryPeekPanel — recent memory entries (PR-c)
+// ---------------------------------------------------------------------------
+
+// memoryPeekPanel renders the most-recent memory entries for the active scope.
+// Data is refreshed via a tea.Cmd when EventMemoryChanged is received.
+// Mirrors the todolistPanel cmd-refresh precedent exactly.
+//
+// The panel starts empty (entries == nil). Before the first EventMemoryChanged
+// the panel renders "" (zero height, per TR-0-C / TR-14).
+type memoryPeekPanel struct {
+	styles  tuiStyles
+	entries []store.MemoryEntry
+}
+
+// newMemoryPeekPanel constructs a memoryPeekPanel with empty state.
+func newMemoryPeekPanel(s tuiStyles) *memoryPeekPanel {
+	return &memoryPeekPanel{styles: s}
+}
+
+// setEntries replaces the current memory entries. Called from the
+// memoryRefreshMsg Update case via copyRailWith.
+func (p *memoryPeekPanel) setEntries(entries []store.MemoryEntry) {
+	p.entries = entries
+}
+
+// Render implements Panel. Returns "" when there are no entries (TR-0-C, TR-14).
+// When entries are present, renders a "memory" header badge followed by up to 5
+// entry rows. Each row shows Title; falls back to Content when Title is empty.
+// All lines are ANSI-truncated to inner width (width-4 per wrapPanelBox convention).
+func (p *memoryPeekPanel) Render(width, _ int) string {
+	if len(p.entries) == 0 {
+		return ""
+	}
+
+	inner := width - 4
+	if inner < 4 {
+		inner = 4
+	}
+
+	rows := []string{
+		ansi.Truncate(p.styles.panelHeader("memory"), inner, "…"),
+	}
+
+	const maxRows = 5
+	entries := p.entries
+	if len(entries) > maxRows {
+		entries = entries[:maxRows]
+	}
+
+	for _, e := range entries {
+		text := e.Title
+		if text == "" {
+			text = e.Content // fallback to Content when Title is empty
+		}
+		rows = append(rows, ansi.Truncate(p.styles.dimLabel.Render("• "+text), inner, "…"))
+	}
+
+	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
+}

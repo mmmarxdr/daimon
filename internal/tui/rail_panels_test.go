@@ -12,6 +12,7 @@ package tui
 // All tests use newTestModel() — hermetic, no real agent/bus/store.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -330,7 +331,7 @@ func TestRail_ChatScreen_PanelsRegistered(t *testing.T) {
 	m.height = 24
 	m.screen = screenChat
 
-	for _, id := range []panelID{panelTodolist, panelContextMeter, panelTelemetry} {
+	for _, id := range []panelID{panelTodolist, panelContextMeter, panelTelemetry, panelMemoryPeek} {
 		if _, ok := m.rail.panels[id]; !ok {
 			t.Errorf("rail.panels[%q] not registered — must be wired in newTestModel/RunTUI", id)
 		}
@@ -1192,6 +1193,305 @@ func TestTelemetry_Render_SubagentRows_Cap3(t *testing.T) {
 	// regression that adds one.
 	if strings.Contains(got, "more") {
 		t.Errorf("Render: subagent rows must NOT show a '+N more' overflow line:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// PR-c tasks c.3–c.12 — memory-peek panel RED tests
+// ---------------------------------------------------------------------------
+
+// c.3: Empty entries — Render returns "" (spec scenario TR-10 "Empty entries").
+func TestMemoryPeek_Render_Empty(t *testing.T) {
+	p := newMemoryPeekPanel(newTuiStyles())
+	got := p.Render(32, 0)
+	if got != "" {
+		t.Errorf("memoryPeekPanel.Render with no entries: got %q, want empty string", got)
+	}
+}
+
+// c.4: Populated entries — rows rendered with titles and "memory" badge
+// (spec scenario TR-10 "Populated entries — rows rendered").
+// Golden: testdata/TestMemoryPeek_Render_PopulatedTitles_Golden.golden
+func TestMemoryPeek_Render_PopulatedTitles_Golden(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newMemoryPeekPanel(newTuiStyles())
+	p.setEntries([]store.MemoryEntry{
+		{Title: "Memory entry one"},
+		{Title: "Memory entry two"},
+		{Title: "Memory entry three"},
+	})
+
+	got := p.Render(32, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+
+	// All three titles must appear.
+	for _, title := range []string{"Memory entry one", "Memory entry two", "Memory entry three"} {
+		if !strings.Contains(got, title) {
+			t.Errorf("Render: expected %q in output:\n%s", title, got)
+		}
+	}
+	// The "MEMORY" badge must appear in the header (panelHeader uppercases the label).
+	if !strings.Contains(got, "MEMORY") {
+		t.Errorf("Render: expected 'MEMORY' header badge in output:\n%s", got)
+	}
+
+	golden.RequireEqual(t, []byte(got))
+}
+
+// c.5: Entries cap at 5 (spec scenario TR-10 "Entries cap at 5").
+func TestMemoryPeek_Render_Cap5(t *testing.T) {
+	p := newMemoryPeekPanel(newTuiStyles())
+	entries := make([]store.MemoryEntry, 8)
+	for i := range entries {
+		entries[i] = store.MemoryEntry{Title: fmt.Sprintf("entry-%d", i)}
+	}
+	p.setEntries(entries)
+
+	got := p.Render(32, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string")
+	}
+
+	// Count rendered entry rows (lines containing "entry-").
+	entryRowCount := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "entry-") {
+			entryRowCount++
+		}
+	}
+	if entryRowCount > 5 {
+		t.Errorf("Render: got %d entry rows, want at most 5 (cap enforced)", entryRowCount)
+	}
+}
+
+// c.6: Empty Title falls back to Content (spec scenario TR-10 "Empty Title falls back to Content").
+func TestMemoryPeek_Render_TitleFallback_Content(t *testing.T) {
+	p := newMemoryPeekPanel(newTuiStyles())
+	p.setEntries([]store.MemoryEntry{
+		{Title: "", Content: "some content text"},
+	})
+
+	got := p.Render(32, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+	if !strings.Contains(got, "some content") {
+		t.Errorf("Render: expected 'some content' (fallback Content) in output:\n%s", got)
+	}
+}
+
+// c.7: fetchMemory with nil store returns empty msg without panic (spec scenario TR-11).
+func TestFetchMemory_NilStore_NoOp(t *testing.T) {
+	cmd := fetchMemory(nil, "scope-123")
+	if cmd == nil {
+		t.Fatal("fetchMemory returned nil cmd, want non-nil")
+	}
+	msg := cmd()
+	rm, ok := msg.(memoryRefreshMsg)
+	if !ok {
+		t.Fatalf("fetchMemory(nil, ...) returned %T, want memoryRefreshMsg", msg)
+	}
+	if len(rm.entries) != 0 {
+		t.Errorf("entries = %d, want 0 (nil store no-op)", len(rm.entries))
+	}
+}
+
+// c.8: fetchMemory with empty scopeID returns empty msg, SearchMemory NOT called
+// (spec scenario TR-11 "Empty scopeID produces empty msg without panic").
+func TestFetchMemory_EmptyScopeID_NoOp(t *testing.T) {
+	// Use a fake store that panics if SearchMemory is called.
+	fakeStore := &panicOnSearchStore{}
+	cmd := fetchMemory(fakeStore, "")
+	if cmd == nil {
+		t.Fatal("fetchMemory returned nil cmd")
+	}
+	msg := cmd()
+	rm, ok := msg.(memoryRefreshMsg)
+	if !ok {
+		t.Fatalf("fetchMemory(store, \"\") returned %T, want memoryRefreshMsg", msg)
+	}
+	if len(rm.entries) != 0 {
+		t.Errorf("entries = %d, want 0 (empty scopeID no-op)", len(rm.entries))
+	}
+}
+
+// panicOnSearchStore is a fake store.Store that panics if SearchMemory is called.
+// Used to verify fetchMemory does NOT call SearchMemory for empty scopeID / nil store.
+// Embeds noopStore to satisfy the full store.Store interface.
+type panicOnSearchStore struct{ noopStore }
+
+func (s *panicOnSearchStore) SearchMemory(_ context.Context, _, _ string, _ int) ([]store.MemoryEntry, error) {
+	panic("SearchMemory was called when it should not have been")
+}
+
+// c.9: fetchMemory with valid inputs returns entries from store (spec scenario TR-11).
+func TestFetchMemory_ValidInputs_ReturnsEntries(t *testing.T) {
+	fakeStore := &fakeMemoryStore{
+		entries: []store.MemoryEntry{
+			{Title: "entry-1"},
+			{Title: "entry-2"},
+			{Title: "entry-3"},
+		},
+	}
+	cmd := fetchMemory(fakeStore, "scope-1")
+	if cmd == nil {
+		t.Fatal("fetchMemory returned nil cmd")
+	}
+	msg := cmd()
+	rm, ok := msg.(memoryRefreshMsg)
+	if !ok {
+		t.Fatalf("fetchMemory(fakeStore, \"scope-1\") returned %T, want memoryRefreshMsg", msg)
+	}
+	if len(rm.entries) != 3 {
+		t.Errorf("entries len = %d, want 3", len(rm.entries))
+	}
+}
+
+// fakeMemoryStore implements store.Store: SearchMemory returns canned entries;
+// all other methods delegate to noopStore.
+type fakeMemoryStore struct {
+	noopStore
+	entries []store.MemoryEntry
+}
+
+func (s *fakeMemoryStore) SearchMemory(_ context.Context, _, _ string, _ int) ([]store.MemoryEntry, error) {
+	return s.entries, nil
+}
+
+// noopStore is a no-op implementation of store.Store used as an embed base for
+// fake stores in tests. All methods return zero values.
+type noopStore struct{}
+
+func (noopStore) SaveConversation(_ context.Context, _ store.Conversation) error { return nil }
+func (noopStore) LoadConversation(_ context.Context, _ string) (*store.Conversation, error) {
+	return nil, nil
+}
+func (noopStore) ListConversations(_ context.Context, _ string, _ int) ([]store.Conversation, error) {
+	return nil, nil
+}
+func (noopStore) AppendMemory(_ context.Context, _ string, _ store.MemoryEntry) error { return nil }
+func (noopStore) SearchMemory(_ context.Context, _, _ string, _ int) ([]store.MemoryEntry, error) {
+	return nil, nil
+}
+func (noopStore) UpdateMemory(_ context.Context, _ string, _ store.MemoryEntry) error { return nil }
+func (noopStore) ListChildConversations(_ context.Context, _ string) ([]store.Conversation, error) {
+	return nil, nil
+}
+func (noopStore) SetConversationStatus(_ context.Context, _, _ string) error  { return nil }
+func (noopStore) ListUserSkills(_ context.Context) ([]store.UserSkill, error) { return nil, nil }
+func (noopStore) GetUserSkill(_ context.Context, _ string) (store.UserSkill, error) {
+	return store.UserSkill{}, nil
+}
+func (noopStore) CreateUserSkill(_ context.Context, _ store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, nil
+}
+func (noopStore) UpdateUserSkill(_ context.Context, _ store.UserSkill) (store.UserSkill, error) {
+	return store.UserSkill{}, nil
+}
+func (noopStore) DeleteUserSkill(_ context.Context, _ string) error { return nil }
+func (noopStore) Close() error                                      { return nil }
+
+// c.10: EventMemoryChanged via handleBusEvent returns a fetchMemory cmd that
+// produces a memoryRefreshMsg (spec scenario TR-12).
+func TestHandleBusEvent_MemoryChanged_ReturnsFetchCmd(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.events = closedEventsChan()
+
+	ev := notify.Event{
+		Type: notify.EventMemoryChanged,
+		Meta: map[string]string{"scope_id": "scope-abc"},
+	}
+	_, cmd := m.handleBusEvent(ev)
+
+	// Execute the batch and collect all messages.
+	msgs := collectMsgs(cmd)
+
+	// A memoryRefreshMsg must appear among the batch messages.
+	found := false
+	for _, msg := range msgs {
+		if _, ok := msg.(memoryRefreshMsg); ok {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("handleBusEvent(EventMemoryChanged): no memoryRefreshMsg in batch messages %T %v; "+
+			"the EventMemoryChanged case may be missing from handleBusEvent", msgs, msgs)
+	}
+}
+
+// c.11: memoryRefreshMsg through Update sets entries and prior model snapshot unchanged
+// (spec scenario TR-13 "memoryRefreshMsg populates panel entries", COW).
+func TestMemoryRefreshMsg_Update_SetsEntries(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+
+	// Capture original panel pointer before Update.
+	origPanel, ok := m.rail.panels[panelMemoryPeek].(*memoryPeekPanel)
+	if !ok {
+		t.Fatal("panelMemoryPeek not *memoryPeekPanel in initial model")
+	}
+	origEntriesLen := len(origPanel.entries)
+
+	msg := memoryRefreshMsg{entries: []store.MemoryEntry{
+		{Title: "t1"},
+		{Title: "t2"},
+	}}
+
+	result, _ := m.Update(msg)
+	rm := result.(Model)
+
+	// New model must have 2 entries.
+	newPanel, ok := rm.rail.panels[panelMemoryPeek].(*memoryPeekPanel)
+	if !ok {
+		t.Fatal("panelMemoryPeek not *memoryPeekPanel after Update")
+	}
+	if len(newPanel.entries) != 2 {
+		t.Errorf("new model memoryPeekPanel.entries len = %d, want 2", len(newPanel.entries))
+	}
+
+	// Prior model snapshot must remain unchanged (COW invariant).
+	if len(origPanel.entries) != origEntriesLen {
+		t.Errorf("ORIGINAL panel entries changed from %d to %d (COW violation)",
+			origEntriesLen, len(origPanel.entries))
+	}
+}
+
+// c.12: memoryRefreshMsg with nil entries clears prior entries (spec scenario TR-13).
+func TestMemoryRefreshMsg_Update_ClearsPrior(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+
+	// Seed 3 entries into the panel via Update.
+	seed := memoryRefreshMsg{entries: []store.MemoryEntry{
+		{Title: "a"},
+		{Title: "b"},
+		{Title: "c"},
+	}}
+	m2, _ := m.Update(seed)
+	m = m2.(Model)
+
+	// Now send empty msg — must clear.
+	clear := memoryRefreshMsg{entries: nil}
+	result, _ := m.Update(clear)
+	rm := result.(Model)
+
+	newPanel, ok := rm.rail.panels[panelMemoryPeek].(*memoryPeekPanel)
+	if !ok {
+		t.Fatal("panelMemoryPeek not *memoryPeekPanel after clear Update")
+	}
+	if len(newPanel.entries) != 0 {
+		t.Errorf("entries len = %d after nil msg, want 0", len(newPanel.entries))
+	}
+	got := newPanel.Render(32, 0)
+	if got != "" {
+		t.Errorf("Render after clear: got %q, want empty string", got)
 	}
 }
 
