@@ -732,6 +732,75 @@ func TestContextMeter_BootWiring_RealLimit(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Judgment-day fix: context-meter must ignore subagent EventTokensUsage events.
+// ---------------------------------------------------------------------------
+
+// TestContextMeter_IgnoresSubagentEvents verifies that accumulate silently
+// drops any EventTokensUsage whose Meta["subagent_id"] is non-empty.
+//
+// Rationale: every subagent emits EventTokensUsage on the SHARED bus carrying
+// its own SysToks/MsgToks/ToolToks. Without this guard, the REPLACE branch
+// would overwrite the main conversation's window fill with a subagent's values
+// during multi-agent runs. The telemetry panel handles per-subagent tokens;
+// the context meter tracks ONLY the top-level conversation's window.
+func TestContextMeter_IgnoresSubagentEvents(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+
+	// Seed a top-level snapshot (no subagent_id — main conversation).
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  1000,
+		MsgToks:  2000,
+		ToolToks: 500,
+	})
+	// tokenUsed must reflect the top-level event.
+	if p.tokenUsed != 3500 {
+		t.Fatalf("pre-guard: tokenUsed = %d, want 3500", p.tokenUsed)
+	}
+
+	// Subagent smart-strategy event: should be ignored entirely.
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  9000,
+		MsgToks:  9000,
+		ToolToks: 9000,
+		Meta:     map[string]string{"subagent_id": "sa-x"},
+	})
+
+	if p.tokenUsed != 3500 {
+		t.Errorf("tokenUsed = %d after subagent event, want 3500 (subagent event must be ignored)", p.tokenUsed)
+	}
+	if p.sysToks != 1000 {
+		t.Errorf("sysToks = %d, want 1000 (subagent event must not clobber top-level snapshot)", p.sysToks)
+	}
+	if p.msgToks != 2000 {
+		t.Errorf("msgToks = %d, want 2000", p.msgToks)
+	}
+	if p.toolToks != 500 {
+		t.Errorf("toolToks = %d, want 500", p.toolToks)
+	}
+
+	// Also verify the legacy/aggregate path: a subagent event with only
+	// TokenCount set (and subagent_id present) must NOT inflate tokenUsed.
+	pLegacy := newContextMeterPanel(newTuiStyles())
+	// Seed with a top-level legacy event.
+	pLegacy.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 5000,
+	})
+	// Subagent legacy event — must be ignored.
+	pLegacy.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 9000,
+		Meta:       map[string]string{"subagent_id": "sa-y"},
+	})
+	if pLegacy.tokenUsed != 5000 {
+		t.Errorf("legacy path: tokenUsed = %d after subagent event, want 5000 (subagent event must be ignored)",
+			pLegacy.tokenUsed)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // PR-b tasks b.1–b.16 — telemetry RED tests
 // ---------------------------------------------------------------------------
 

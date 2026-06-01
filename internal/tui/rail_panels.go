@@ -580,8 +580,18 @@ func (p *contextMeterPanel) setLimit(n int) { p.limit = n }
 //
 // Branch A (smart strategy): SysToks+MsgToks+ToolToks > 0 → REPLACE snapshot.
 // Branch B (legacy/none):    all-zero categories → tokenUsed += TokenCount (delta).
+//
+// Subagent guard: events carrying a non-empty Meta["subagent_id"] are dropped
+// without mutation. Every subagent emits EventTokensUsage on the shared bus
+// with its own category snapshot; letting those through would clobber the
+// main conversation's window fill via the REPLACE branch. Per-subagent tokens
+// are the telemetry panel's responsibility (see telemetryPanel.accumulate).
 func (p *contextMeterPanel) accumulate(ev notify.Event) {
 	if ev.Type != notify.EventTokensUsage {
+		return
+	}
+	// Drop subagent snapshots — they would overwrite the top-level window fill.
+	if ev.Meta["subagent_id"] != "" {
 		return
 	}
 	if ev.SysToks+ev.MsgToks+ev.ToolToks > 0 {

@@ -125,6 +125,13 @@ func (p *contextMeterPanel) accumulate(ev notify.Event) {
 	if ev.Type != notify.EventTokensUsage {
 		return
 	}
+	// Subagent guard (judgment-day fix): drop events tagged with a subagent_id.
+	// Every subagent emits EventTokensUsage on the shared bus with its own
+	// category snapshot; the REPLACE branch would otherwise clobber the main
+	// conversation's window fill. Per-subagent tokens are the telemetry panel's job.
+	if ev.Meta["subagent_id"] != "" {
+		return
+	}
 	if ev.SysToks+ev.MsgToks+ev.ToolToks > 0 {
 		// REPLACE — snapshot of current window fill.
 		p.sysToks = ev.SysToks
@@ -139,6 +146,15 @@ func (p *contextMeterPanel) accumulate(ev notify.Event) {
 	p.hasData = true
 }
 ```
+
+> **Subagent contamination gap (judgment-day fix, added post-PR-a).** The
+> original pseudocode did not filter `subagent_id`. In multi-agent runs every
+> subagent emits `EventTokensUsage` on the shared bus; the REPLACE branch would
+> overwrite the main conversation's window fill on each subagent turn. The guard
+> `if ev.Meta["subagent_id"] != "" { return }` is placed immediately after the
+> type check, before either branch, closing this gap. The telemetry panel already
+> filtered on `subagent_id` (`rail_panels.go` EventTokensUsage case); the context
+> meter now does the same.
 
 > **REPLACE trap (Risk 2).** Category fields use `=`, not `+=`. The aggregate
 > fallback branch keeps `+=` because `TokenCount` is a per-turn delta (seams spec

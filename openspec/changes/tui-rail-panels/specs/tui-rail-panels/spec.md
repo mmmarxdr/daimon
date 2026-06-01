@@ -146,6 +146,13 @@ When `ev.SysToks + ev.MsgToks + ev.ToolToks == 0`:
 - Leave `p.sysToks`, `p.msgToks`, `p.toolToks` unchanged (remain `0`).
 - Set `p.hasData = true`.
 
+**Subagent guard (judgment-day fix):**
+`accumulate` MUST ignore any `EventTokensUsage` whose `Meta["subagent_id"]` is
+non-empty. The context-meter reflects ONLY the top-level conversation's window;
+per-subagent tokens are surfaced by the telemetry panel. Without this guard the
+REPLACE branch would clobber the main conversation's window fill with a
+subagent's snapshot during multi-agent runs.
+
 No new `handleBusEvent` case is required; the existing
 `EventTokensUsage` case in `screen_chat.go` already calls
 `cm.accumulate(ev)` via `copyRailWith`.
@@ -161,6 +168,17 @@ No new `handleBusEvent` case is required; the existing
 - AND `p.toolToks == 400`
 - AND `p.tokenUsed == 3400` (sum of second event only)
 - AND the first event's values are NOT present anywhere in the panel state
+
+#### Scenario: Subagent token event ignored
+
+- GIVEN a `contextMeterPanel` that has processed one top-level `EventTokensUsage`
+  with `SysToks=1000, MsgToks=2000, ToolToks=500` (no `subagent_id`)
+  so that `tokenUsed=3500`, `sysToks=1000`, `msgToks=2000`, `toolToks=500`
+- WHEN a subagent `EventTokensUsage` arrives with
+  `SysToks=9000, MsgToks=9000, ToolToks=9000, Meta["subagent_id"]="sa-x"`
+- THEN `p.tokenUsed == 3500` (unchanged)
+- AND `p.sysToks == 1000`, `p.msgToks == 2000`, `p.toolToks == 500` (unchanged)
+- AND the subagent event does not set `p.hasData` if it was previously false
 
 #### Scenario: Legacy fallback — tokenUsed accumulates
 
