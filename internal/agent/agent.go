@@ -494,10 +494,26 @@ func (a *Agent) WithBus(bus notify.Bus) *Agent {
 }
 
 // WithCurator sets the Curator on the agent. Call after New(), before Run().
-func (a *Agent) WithCurator(c *Curator) { a.curator = c }
+// If a bus has already been set via WithBus, it is propagated immediately to
+// the curator so that EventMemoryChanged fires regardless of call ordering.
+// This is the production fix for the case where WithBus runs before
+// WithCurator (cmd/daimon/main.go wires them in that order).
+func (a *Agent) WithCurator(c *Curator) {
+	a.curator = c
+	if c != nil && a.bus != nil {
+		c.SetBus(a.bus)
+	}
+}
 
 // WithConsolidator sets the Consolidator on the agent. Call after New(), before Run().
-func (a *Agent) WithConsolidator(c *Consolidator) { a.consolidator = c }
+// If a bus has already been set via WithBus, it is propagated immediately to
+// the consolidator so that EventMemoryChanged fires regardless of call ordering.
+func (a *Agent) WithConsolidator(c *Consolidator) {
+	a.consolidator = c
+	if c != nil && a.bus != nil {
+		c.SetBus(a.bus)
+	}
+}
 
 // WithRAGStore wires a DocumentStore into the agent for automatic retrieval-augmented
 // generation. On every turn the agent will search for relevant chunks from st and

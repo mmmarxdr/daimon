@@ -55,7 +55,9 @@ func wireSmartMemory(
 	}
 
 	// Register memory tools.
-	deps := tool.MemoryToolDeps{Store: st}
+	// ADR-5 fix: propagate the notify bus so saveMemoryTool emits
+	// EventMemoryChanged in production. SubagentBus() is nil-safe.
+	deps := tool.MemoryToolDeps{Store: st, Bus: ag.SubagentBus()}
 	if ag.Enricher() != nil {
 		enricher := ag.Enricher()
 		deps.EnqueueEnrich = func(entry store.MemoryEntry) { enricher.Enqueue(entry) }
