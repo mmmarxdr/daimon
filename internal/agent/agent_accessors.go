@@ -43,3 +43,19 @@ func (a *Agent) TodoListForConv(convID string) (tool.TodoList, error) {
 func (a *Agent) CurrentMode() string {
 	return a.modeSnapshot().Name
 }
+
+// ContextWindowSize returns the resolved context window size in tokens as
+// determined by the agent's ContextManager at construction time.
+//
+// Returns 0 when contextMgr is nil (provider unknown or legacy path).
+// The returned 0 is the sentinel for "unknown" — callers MUST fall back to
+// their own heuristic (e.g. 200 000 tokens) when this returns 0.
+//
+// This is a static value read once at TUI boot — it does NOT change during
+// the agent's lifetime (ADR-6, tui-backend-seams).
+func (a *Agent) ContextWindowSize() int {
+	if a.contextMgr == nil {
+		return 0
+	}
+	return a.contextMgr.MaxTokens()
+}

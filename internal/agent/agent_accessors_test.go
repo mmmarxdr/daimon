@@ -93,3 +93,41 @@ func minimalTestAgent(t *testing.T) *Agent {
 		store: st,
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Seam 5 — ADR-6: Agent.ContextWindowSize() accessor (RED → GREEN → REFACTOR)
+// ---------------------------------------------------------------------------
+
+// TestAgent_ContextWindowSize: table test covering nil contextMgr → 0 and
+// real ContextManager → MaxTokens() passthrough.
+func TestAgent_ContextWindowSize(t *testing.T) {
+	tests := []struct {
+		name   string
+		ctxMgr *ContextManager
+		want   int
+	}{
+		{
+			name:   "nil contextMgr returns 0",
+			ctxMgr: nil,
+			want:   0,
+		},
+		{
+			name: "real ContextManager with resolvedMaxToks=200000",
+			ctxMgr: func() *ContextManager {
+				cfg := config.ContextConfig{MaxTokens: 200000}
+				prov := &cmMockProvider{name: "test", model: "test-model"}
+				return NewContextManager(cfg, staticFn(prov), nil)
+			}(),
+			want: 200000,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &Agent{contextMgr: tc.ctxMgr}
+			got := a.ContextWindowSize()
+			if got != tc.want {
+				t.Errorf("ContextWindowSize() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
