@@ -272,9 +272,12 @@ alongside `panelMinHeight = 4`.
 
 Height-boundary golden tests MUST be written for `h ∈ {8, 12, 24}` with
 `termenv.TrueColor` forced. Both context-meter strategies (legacy and
-smart) MUST have separate goldens at each boundary height, because the
-context-meter's natural height differs by strategy (smart=8 rows,
-legacy=5 rows), causing neighbors to receive different budgets.
+smart) MUST have separate goldens at each boundary height so both are
+pinned. The strategies' natural heights differ (smart=8 rows, legacy=5
+rows), but the rendered output differs by strategy ONLY where the
+context-meter receives enough budget to render: at `h=24` the two goldens
+differ; at the tight heights `h=8` and `h=12` the context-meter is floored
+to `""` (budget ≤ 2), so both strategies produce IDENTICAL output.
 
 The `h=12` golden MUST match the §5 worked example exactly: budgets
 `[3, 2, 2, 2]`, only todolist renders (header + `+6 more`), the other
@@ -302,13 +305,25 @@ covering `h ∈ {8, 12, 24}` for both `screenChat` and `screenDiff`.
 - AND only todolist renders (header + `"  +6 more"`), three panels return `""`
 - AND `lipgloss.Height(output) <= 12`
 
-#### Scenario: Smart-strategy golden differs from legacy at h=12
+#### Scenario: Smart and legacy are identical at h=12 (both floored)
 
 - GIVEN `contextMeterPanel` in smart-strategy state (natural=8) vs. legacy
   state (natural=5), all other panels identical, `h=12`
 - WHEN `rail.Render(screenChat, 32, 12)` is called for each strategy
-- THEN the two outputs differ (different budget assignments for neighbors)
+- THEN the two outputs are IDENTICAL — at `h=12` the context-meter receives
+  budget=2 (≤ floor) in both strategies and renders `""`, so only todolist
+  shows; the strategy's natural-height difference cannot affect the result
 - AND BOTH satisfy `lipgloss.Height(result) <= 12`
+
+#### Scenario: Smart-strategy golden differs from legacy at h=24
+
+- GIVEN `contextMeterPanel` in smart-strategy state (natural=8) vs. legacy
+  state (natural=5), all other panels identical, `h=24`
+- WHEN `rail.Render(screenChat, 32, 24)` is called for each strategy
+- THEN the two outputs differ — at `h=24` the context-meter has enough
+  budget to render, and its smart (per-category rows, `2.7% of 128k`) vs.
+  legacy (`21.0% of 200k est.`) content diverges
+- AND BOTH satisfy `lipgloss.Height(result) <= 24`
 
 #### Scenario: h=8 — most aggressive clamp
 

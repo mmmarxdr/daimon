@@ -1785,6 +1785,517 @@ func TestRenderMoreRow_ExactFormat(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// tui-rail-height-clamp PR-b RED tests — per-panel truncation + todolist cap
+// ---------------------------------------------------------------------------
+
+// makeItems constructs n TodoItems with sequential IDs/content for test fixtures.
+func makeItems(n int) []tool.TodoItem {
+	items := make([]tool.TodoItem, n)
+	for i := range items {
+		items[i] = tool.TodoItem{ID: fmt.Sprintf("%d", i+1), Content: fmt.Sprintf("item %d", i+1), Status: "pending"}
+	}
+	return items
+}
+
+// countLines returns the number of lines containing substr in s.
+func countLinesContaining(s, substr string) int {
+	count := 0
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, substr) {
+			count++
+		}
+	}
+	return count
+}
+
+// b.1: todolistPanel with 8 items, Render(32, 6): header present, exactly 2
+// data rows shown, output contains "  +6 more".
+// (spec TR-HC-2 "Budget >= 4 — partial data rows + +N more")
+func TestTodolist_HeightTruncation_BudgetGe4(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(8)})
+
+	got := p.Render(32, 6) // budget=6, contentRowBudget=6-2-1=3, show 2 data rows
+
+	if got == "" {
+		t.Fatal("Render(32, 6): got empty string, want non-empty")
+	}
+	// Header must be present.
+	if !strings.Contains(got, "TODO") {
+		t.Errorf("Render(32, 6): expected header 'TODO' in output:\n%s", got)
+	}
+	// Exactly 2 data rows (lines containing "item ").
+	itemRows := countLinesContaining(got, "item ")
+	if itemRows != 2 {
+		t.Errorf("Render(32, 6): got %d item rows, want exactly 2 (contentRowBudget-1=2)\n%s", itemRows, got)
+	}
+	// "+6 more" since 8-2=6 hidden.
+	if !strings.Contains(got, "  +6 more") {
+		t.Errorf("Render(32, 6): expected '  +6 more' in output:\n%s", got)
+	}
+}
+
+// b.2: todolistPanel with 6 items, Render(32, 3): header present, 0 data rows,
+// output contains "+N more" for all 6 items.
+// (spec TR-HC-2 "Budget == 3 — header + +N more only")
+func TestTodolist_HeightTruncation_Budget3(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(6)})
+
+	got := p.Render(32, 3) // budget=3, contentRowBudget=0, 0 data rows
+
+	if got == "" {
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+	}
+	// Header must be present.
+	if !strings.Contains(got, "TODO") {
+		t.Errorf("Render(32, 3): expected header 'TODO' in output:\n%s", got)
+	}
+	// 0 data rows.
+	itemRows := countLinesContaining(got, "item ")
+	if itemRows != 0 {
+		t.Errorf("Render(32, 3): got %d item rows, want 0 (budget==3 shows no data rows)\n%s", itemRows, got)
+	}
+	// "+N more" must appear.
+	if !strings.Contains(got, "more") {
+		t.Errorf("Render(32, 3): expected '+N more' in output:\n%s", got)
+	}
+}
+
+// b.3: populated todolistPanel, Render(32, 2): returns "" (budget <= 2).
+// (spec TR-HC-2 "Budget <= 2 — returns """)
+func TestTodolist_HeightTruncation_BudgetLe2(t *testing.T) {
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(3)})
+
+	got := p.Render(32, 2)
+
+	if got != "" {
+		t.Errorf("Render(32, 2): got %q, want empty string (budget<=2 forces \"\")", got)
+	}
+}
+
+// b.4: todolistPanel with 15 items, Render(32, 14): exactly 10 item rows shown,
+// output contains "  +5 more", no second +N more line.
+// (spec TR-HC-3 "Cap alone")
+func TestTodolist_Cap_15Items_Budget14(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(15)})
+
+	got := p.Render(32, 14) // budget=14, fits all 10 capped items: contentRowBudget=14-2-1=11 >= 10
+
+	if got == "" {
+		t.Fatal("Render(32, 14): got empty string, want non-empty")
+	}
+	// Exactly 10 item rows shown.
+	itemRows := countLinesContaining(got, "item ")
+	if itemRows != 10 {
+		t.Errorf("Render(32, 14): got %d item rows, want 10 (cap enforced)\n%s", itemRows, got)
+	}
+	// "+5 more" since 15-10=5 hidden by cap.
+	if !strings.Contains(got, "  +5 more") {
+		t.Errorf("Render(32, 14): expected '  +5 more' in output:\n%s", got)
+	}
+	// Exactly ONE +N more line.
+	moreCount := countLinesContaining(got, "more")
+	if moreCount != 1 {
+		t.Errorf("Render(32, 14): got %d '+N more' lines, want exactly 1\n%s", moreCount, got)
+	}
+}
+
+// b.5: todolistPanel with 12 items, Render(32, 6): cap→10, clamp shows 2;
+// exactly 2 item rows, output contains "  +10 more", exactly ONE +N more line.
+// (spec TR-HC-3 "Both cap and clamp fire — single reconciled +N more")
+func TestTodolist_Cap_12Items_Budget6(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(12)})
+
+	got := p.Render(32, 6) // budget=6, contentRowBudget=3, cap→10, clamp shows 2
+
+	if got == "" {
+		t.Fatal("Render(32, 6): got empty string, want non-empty")
+	}
+	// Exactly 2 item rows.
+	itemRows := countLinesContaining(got, "item ")
+	if itemRows != 2 {
+		t.Errorf("Render(32, 6): got %d item rows, want 2 (cap-then-clamp)\n%s", itemRows, got)
+	}
+	// "+10 more" since total=12, shown=2, hidden=10.
+	if !strings.Contains(got, "  +10 more") {
+		t.Errorf("Render(32, 6): expected '  +10 more' (12-2=10) in output:\n%s", got)
+	}
+	// Exactly ONE +N more line.
+	moreCount := countLinesContaining(got, "more")
+	if moreCount != 1 {
+		t.Errorf("Render(32, 6): got %d '+N more' lines, want exactly 1 (no stacked notices)\n%s", moreCount, got)
+	}
+}
+
+// b.6: todolistPanel with 12 items, Render(32, 3): header + 0 item rows,
+// output contains "  +12 more".
+// (spec TR-HC-3 "Budget == 3 with cap")
+func TestTodolist_Cap_Budget3_With12Items(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTodolistPanel(newTuiStyles())
+	p.setList(tool.TodoList{Items: makeItems(12)})
+
+	got := p.Render(32, 3) // budget=3, contentRowBudget=0, 0 data rows
+
+	if got == "" {
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+	}
+	// Header must be present.
+	if !strings.Contains(got, "TODO") {
+		t.Errorf("Render(32, 3): expected header 'TODO' in output:\n%s", got)
+	}
+	// 0 data rows.
+	itemRows := countLinesContaining(got, "item ")
+	if itemRows != 0 {
+		t.Errorf("Render(32, 3): got %d item rows, want 0\n%s", itemRows, got)
+	}
+	// "+12 more" since totalItems=12, shown=0.
+	if !strings.Contains(got, "  +12 more") {
+		t.Errorf("Render(32, 3): expected '  +12 more' in output:\n%s", got)
+	}
+}
+
+// b.7: contextMeterPanel (smart strategy, 6 natural rows), Render(32, 3):
+// header present, 0 data rows, output contains "+N more".
+// (spec TR-HC-2 "Budget == 3 — header + +N more only")
+func TestContextMeter_HeightTruncation_Budget3_SmartStrategy(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newContextMeterPanel(newTuiStyles())
+	p.setLimit(128000)
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  1000,
+		MsgToks:  2000,
+		ToolToks: 500,
+	})
+
+	got := p.Render(32, 3) // budget=3, contentRowBudget=0
+
+	if got == "" {
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+	}
+	// Header must be present.
+	if !strings.Contains(got, "CONTEXT") {
+		t.Errorf("Render(32, 3): expected header 'CONTEXT' in output:\n%s", got)
+	}
+	// 0 data rows (no bar/pct/category).
+	// Use bar fill chars (not "[") to avoid matching ANSI escape sequences.
+	for _, row := range []string{"░", "█", "sys", "msg", "tool"} {
+		if strings.Contains(got, row) {
+			t.Errorf("Render(32, 3): must NOT contain %q (budget==3, no data rows):\n%s", row, got)
+		}
+	}
+	// "+N more" must appear.
+	if !strings.Contains(got, "more") {
+		t.Errorf("Render(32, 3): expected '+N more' in output:\n%s", got)
+	}
+}
+
+// b.8: contextMeterPanel (populated), Render(32, 2): returns "" (budget <= 2).
+// (spec TR-HC-2 "Budget <= 2 — returns """)
+func TestContextMeter_HeightTruncation_BudgetLe2(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 1000,
+	})
+
+	got := p.Render(32, 2)
+
+	if got != "" {
+		t.Errorf("Render(32, 2): got %q, want empty string (budget<=2 forces \"\")", got)
+	}
+}
+
+// b.9: telemetryPanel with 10 assembled rows, Render(32, 4): rows[0] (header)
+// present, 0 data rows, output contains "+N more".
+// (spec TR-HC-2 "Header mandatory — never dropped")
+func TestTelemetry_HeightTruncation_HeaderMandatory(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTelemetryPanel(newTuiStyles())
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 1000, CostUSD: 0.001})
+	// Add 7 tool starts to get 10+ assembled rows (aggregate 3 + errors 0 + 7 tool rows).
+	for i := 0; i < 7; i++ {
+		p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: fmt.Sprintf("tool_%d", i)})
+	}
+
+	got := p.Render(32, 4) // budget=4, contentRowBudget=4-2-1=1
+
+	if got == "" {
+		t.Fatal("Render(32, 4): got empty string, want non-empty")
+	}
+	// Header must be present ("TELEMETRY" or "LIVE" badge).
+	if !strings.Contains(got, "TELEMETRY") {
+		t.Errorf("Render(32, 4): expected header 'TELEMETRY' in output:\n%s", got)
+	}
+	// "+N more" must appear.
+	if !strings.Contains(got, "more") {
+		t.Errorf("Render(32, 4): expected '+N more' in output:\n%s", got)
+	}
+}
+
+// b.10: telemetryPanel (populated), Render(32, 2): returns "" (budget <= 2).
+// (spec TR-HC-2 "Budget <= 2 — returns """)
+func TestTelemetry_HeightTruncation_BudgetLe2(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 1000, CostUSD: 0.001})
+
+	got := p.Render(32, 2)
+
+	if got != "" {
+		t.Errorf("Render(32, 2): got %q, want empty string (budget<=2 forces \"\")", got)
+	}
+}
+
+// b.11: memoryPeekPanel with 5 entries, Render(32, 6): header present,
+// truncated tail, output contains "+N more".
+// (spec TR-HC-2 "Budget >= 4 — partial data rows + +N more")
+func TestMemoryPeek_HeightTruncation_BudgetGe4(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newMemoryPeekPanel(newTuiStyles())
+	p.setEntries([]store.MemoryEntry{
+		{Title: "entry-1"},
+		{Title: "entry-2"},
+		{Title: "entry-3"},
+		{Title: "entry-4"},
+		{Title: "entry-5"},
+	})
+
+	got := p.Render(32, 6) // budget=6, contentRowBudget=6-2-1=3, show 2 entries
+
+	if got == "" {
+		t.Fatal("Render(32, 6): got empty string, want non-empty")
+	}
+	// Header must be present.
+	if !strings.Contains(got, "MEMORY") {
+		t.Errorf("Render(32, 6): expected header 'MEMORY' in output:\n%s", got)
+	}
+	// "+N more" must appear (5 entries, show 2, +3 more OR with maxRows cap → adjust).
+	if !strings.Contains(got, "more") {
+		t.Errorf("Render(32, 6): expected '+N more' in output (truncation):\n%s", got)
+	}
+}
+
+// b.12: memoryPeekPanel (populated), Render(32, 2): returns "" (budget <= 2).
+// (spec TR-HC-2 "Budget <= 2 — returns """)
+func TestMemoryPeek_HeightTruncation_BudgetLe2(t *testing.T) {
+	p := newMemoryPeekPanel(newTuiStyles())
+	p.setEntries([]store.MemoryEntry{{Title: "entry-1"}})
+
+	got := p.Render(32, 2)
+
+	if got != "" {
+		t.Errorf("Render(32, 2): got %q, want empty string (budget<=2 forces \"\")", got)
+	}
+}
+
+// b.13: Golden — all four screenChat panels populated, h=12, legacy strategy.
+// (spec TR-HC-4 "h=12 golden matches worked example")
+// GOLDEN-CHURN: regenerate after b.18–b.22
+func TestRailRender_h12_WorkedExample_Golden_Legacy(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Legacy(t)
+	result := r.Render(screenChat, 32, 12)
+
+	// Core assertion: must not overflow h.
+	if lipgloss.Height(result) > 12 {
+		t.Errorf("h=12: lipgloss.Height(result)=%d > 12\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+// b.14: Golden — all four screenChat panels populated, h=12, smart strategy.
+// (spec TR-HC-4 "Smart-strategy golden differs from legacy at h=12")
+// GOLDEN-CHURN: regenerate after b.18–b.22
+func TestRailRender_h12_WorkedExample_Golden_Smart(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Smart(t)
+	result := r.Render(screenChat, 32, 12)
+
+	// Core assertion: must not overflow h.
+	if lipgloss.Height(result) > 12 {
+		t.Errorf("h=12: lipgloss.Height(result)=%d > 12\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+// b.15: Golden — h=8, both strategies.
+// (spec TR-HC-4 "h=8 — most aggressive clamp")
+// GOLDEN-CHURN: regenerate after b.18–b.22
+func TestRailRender_h8_Golden_Legacy(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Legacy(t)
+	result := r.Render(screenChat, 32, 8)
+
+	if lipgloss.Height(result) > 8 {
+		t.Errorf("h=8: lipgloss.Height(result)=%d > 8\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+func TestRailRender_h8_Golden_Smart(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Smart(t)
+	result := r.Render(screenChat, 32, 8)
+
+	if lipgloss.Height(result) > 8 {
+		t.Errorf("h=8: lipgloss.Height(result)=%d > 8\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+// b.16: Golden — h=24, both strategies.
+// (spec TR-HC-4 "h=24 — comfortable height")
+// GOLDEN-CHURN: regenerate after b.18–b.22
+func TestRailRender_h24_Golden_Legacy(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Legacy(t)
+	result := r.Render(screenChat, 32, 24)
+
+	if lipgloss.Height(result) > 24 {
+		t.Errorf("h=24: lipgloss.Height(result)=%d > 24\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+func TestRailRender_h24_Golden_Smart(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	r := buildWorkedExampleRail_Smart(t)
+	result := r.Render(screenChat, 32, 24)
+
+	if lipgloss.Height(result) > 24 {
+		t.Errorf("h=24: lipgloss.Height(result)=%d > 24\n%s", lipgloss.Height(result), result)
+	}
+	golden.RequireEqual(t, []byte(result))
+}
+
+// buildWorkedExampleRail_Legacy builds a rail with legacy context-meter
+// (6 items in todolist matching the §5 worked example, legacy strategy = no SysToks).
+// Natural heights: todolist=9 (2+1+6), context-meter≈5 (2+1+bar+pct), telemetry≈7, memory-peek≈5.
+func buildWorkedExampleRail_Legacy(t *testing.T) rail {
+	t.Helper()
+	s := newTuiStyles()
+	r := newRail(s)
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		// todolist: 6 items → natural height 9 (2 border + 1 header + 6 items)
+		if p, ok := panels[panelTodolist].(*todolistPanel); ok {
+			cp := *p
+			cp.setList(tool.TodoList{Items: makeItems(6)})
+			panels[panelTodolist] = &cp
+		}
+		// context-meter: legacy (no sysToks) → natural height ~5 (2 border + 1 header + bar + pct)
+		if p, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 42000})
+			panels[panelContextMeter] = &cp
+		}
+		// telemetry: tokens + 2 tool rows → natural height ~7 (2+1+3 aggregate+2 tool rows)
+		if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 5000, CostUSD: 0.01})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "read_file"})
+			panels[panelTelemetry] = &cp
+		}
+		// memory-peek: 2 entries → natural height ~5 (2+1+2)
+		if p, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+			cp := *p
+			cp.setEntries([]store.MemoryEntry{{Title: "entry-1"}, {Title: "entry-2"}})
+			panels[panelMemoryPeek] = &cp
+		}
+	})
+	return r
+}
+
+// buildWorkedExampleRail_Smart builds a rail with smart context-meter
+// (SysToks set → 3 extra category rows, natural height 8).
+func buildWorkedExampleRail_Smart(t *testing.T) rail {
+	t.Helper()
+	s := newTuiStyles()
+	r := newRail(s)
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		// todolist: 6 items
+		if p, ok := panels[panelTodolist].(*todolistPanel); ok {
+			cp := *p
+			cp.setList(tool.TodoList{Items: makeItems(6)})
+			panels[panelTodolist] = &cp
+		}
+		// context-meter: smart strategy → natural height ~8 (2+1+bar+pct+sys+msg+tool)
+		if p, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *p
+			cp.setLimit(128000)
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, SysToks: 1000, MsgToks: 2000, ToolToks: 500})
+			panels[panelContextMeter] = &cp
+		}
+		// telemetry: tokens + 2 tool rows
+		if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 5000, CostUSD: 0.01})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "read_file"})
+			panels[panelTelemetry] = &cp
+		}
+		// memory-peek: 2 entries
+		if p, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+			cp := *p
+			cp.setEntries([]store.MemoryEntry{{Title: "entry-1"}, {Title: "entry-2"}})
+			panels[panelMemoryPeek] = &cp
+		}
+	})
+	return r
+}
+
+// ---------------------------------------------------------------------------
 
 // TestResumeListPanel_PrecomputedAgo verifies that after setSessions, the panel's
 // ago slice is populated and that Render reads from it rather than calling

@@ -79,57 +79,57 @@ Covers: TR-HC-2, TR-HC-3, TR-HC-4, TR-0-C (extended), TR-0-D.
 
 ### RED — failing tests first
 
-- [ ] **b.1** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_BudgetGe4`: `todolistPanel` with 8 items, `Render(32, 6)` (`contentRowBudget=3`, show 2 data rows); assert header present, exactly 2 data rows shown, output contains `"  +6 more"` (spec scenario TR-HC-2 "Budget >= 4 — partial data rows + +N more"). Run `make test` → RED.
+- [x] **b.1** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_BudgetGe4`: `todolistPanel` with 8 items, `Render(32, 6)` (`contentRowBudget=3`, show 2 data rows); assert header present, exactly 2 data rows shown, output contains `"  +6 more"` (spec scenario TR-HC-2 "Budget >= 4 — partial data rows + +N more"). Run `make test` → RED.
 
-- [ ] **b.2** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_Budget3`: `todolistPanel` with 6 items, `Render(32, 3)`; assert header present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget == 3 — header + +N more only"). Run `make test` → RED.
+- [x] **b.2** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_Budget3`: `todolistPanel` with 6 items, `Render(32, 3)`; assert header present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget == 3 — header + +N more only"). Run `make test` → RED.
 
-- [ ] **b.3** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_BudgetLe2`: populated `todolistPanel`, `Render(32, 2)`; assert return is `""`, no panic (spec scenario TR-HC-2 "Budget <= 2 — returns \"\""). Run `make test` → RED.
+- [x] **b.3** In `rail_panels_test.go`, add `TestTodolist_HeightTruncation_BudgetLe2`: populated `todolistPanel`, `Render(32, 2)`; assert return is `""`, no panic (spec scenario TR-HC-2 "Budget <= 2 — returns \"\""). Run `make test` → RED.
 
-- [ ] **b.4** In `rail_panels_test.go`, add `TestTodolist_Cap_15Items_Budget14`: 15 items, `Render(32, 14)`; assert exactly 10 item rows shown, output contains `"  +5 more"`, no second `+N more` line (spec scenario TR-HC-3 "Cap alone"). Run `make test` → RED.
+- [x] **b.4** In `rail_panels_test.go`, add `TestTodolist_Cap_15Items_Budget14`: 15 items, `Render(32, 14)`; assert exactly 10 item rows shown, output contains `"  +5 more"`, no second `+N more` line (spec scenario TR-HC-3 "Cap alone"). Run `make test` → RED.
 
-- [ ] **b.5** In `rail_panels_test.go`, add `TestTodolist_Cap_12Items_Budget6`: 12 items, `Render(32, 6)` (`contentRowBudget=3`, cap→10, clamp shows 2); assert exactly 2 item rows, output contains `"  +10 more"`, exactly ONE `+N more` line (spec scenario TR-HC-3 "Both cap and clamp fire — single reconciled +N more"). Run `make test` → RED.
+- [x] **b.5** In `rail_panels_test.go`, add `TestTodolist_Cap_12Items_Budget6`: 12 items, `Render(32, 6)` (`contentRowBudget=3`, cap→10, clamp shows 2); assert exactly 2 item rows, output contains `"  +10 more"`, exactly ONE `+N more` line (spec scenario TR-HC-3 "Both cap and clamp fire — single reconciled +N more"). Run `make test` → RED.
 
-- [ ] **b.6** In `rail_panels_test.go`, add `TestTodolist_Cap_Budget3_With12Items`: 12 items, `Render(32, 3)`; assert header present, 0 item rows, output contains `"  +12 more"` (spec scenario TR-HC-3 "Budget == 3 with cap"). Run `make test` → RED.
+- [x] **b.6** In `rail_panels_test.go`, add `TestTodolist_Cap_Budget3_With12Items`: 12 items, `Render(32, 3)`; assert header present, 0 item rows, output contains `"  +12 more"` (spec scenario TR-HC-3 "Budget == 3 with cap"). Run `make test` → RED.
 
-- [ ] **b.7** In `rail_panels_test.go`, add `TestContextMeter_HeightTruncation_Budget3_SmartStrategy`: smart-strategy panel (6 natural rows), `Render(32, 3)`; assert header present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget == 3 — header + +N more only"). Run `make test` → RED.
+- [x] **b.7** In `rail_panels_test.go`, add `TestContextMeter_HeightTruncation_Budget3_SmartStrategy`: smart-strategy panel (6 natural rows), `Render(32, 3)`; assert header present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget == 3 — header + +N more only"). Run `make test` → RED.
 
-- [ ] **b.8** In `rail_panels_test.go`, add `TestContextMeter_HeightTruncation_BudgetLe2`: populated context-meter, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
+- [x] **b.8** In `rail_panels_test.go`, add `TestContextMeter_HeightTruncation_BudgetLe2`: populated context-meter, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
 
-- [ ] **b.9** In `rail_panels_test.go`, add `TestTelemetry_HeightTruncation_HeaderMandatory`: `telemetryPanel` with 10 assembled rows, `Render(32, 4)` (`contentRowBudget=1`); assert `rows[0]` (header) present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Header mandatory — never dropped"). Run `make test` → RED.
+- [x] **b.9** In `rail_panels_test.go`, add `TestTelemetry_HeightTruncation_HeaderMandatory`: `telemetryPanel` with 10 assembled rows, `Render(32, 4)` (`contentRowBudget=1`); assert `rows[0]` (header) present, 0 data rows, output contains `"  +N more"` (spec scenario TR-HC-2 "Header mandatory — never dropped"). Run `make test` → RED.
 
-- [ ] **b.10** In `rail_panels_test.go`, add `TestTelemetry_HeightTruncation_BudgetLe2`: populated telemetry panel, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
+- [x] **b.10** In `rail_panels_test.go`, add `TestTelemetry_HeightTruncation_BudgetLe2`: populated telemetry panel, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
 
-- [ ] **b.11** In `rail_panels_test.go`, add `TestMemoryPeek_HeightTruncation_BudgetGe4`: memory-peek with 5 entries, `Render(32, 6)`; assert header present, truncated tail, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget >= 4 — partial data rows + +N more"). Run `make test` → RED.
+- [x] **b.11** In `rail_panels_test.go`, add `TestMemoryPeek_HeightTruncation_BudgetGe4`: memory-peek with 5 entries, `Render(32, 6)`; assert header present, truncated tail, output contains `"  +N more"` (spec scenario TR-HC-2 "Budget >= 4 — partial data rows + +N more"). Run `make test` → RED.
 
-- [ ] **b.12** In `rail_panels_test.go`, add `TestMemoryPeek_HeightTruncation_BudgetLe2`: populated memory-peek, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
+- [x] **b.12** In `rail_panels_test.go`, add `TestMemoryPeek_HeightTruncation_BudgetLe2`: populated memory-peek, `Render(32, 2)`; assert return is `""` (spec scenario TR-HC-2 "Budget <= 2"). Run `make test` → RED.
 
-- [ ] **b.13** In `rail_panels_test.go`, add `TestRailRender_h12_WorkedExample_Golden_Legacy`: all four `screenChat` panels populated (natural heights matching §5 of design), `termenv.TrueColor` forced + `t.Cleanup`; call `rail.Render(screenChat, 32, 12)` with legacy context-meter; assert `lipgloss.Height(result) <= 12`; assert only todolist renders (header + `"  +6 more"`); use `golden.RequireEqual` against `TestRailRender_h12_WorkedExample_Legacy.golden` (spec scenario TR-HC-4 "h=12 golden matches worked example"). Run `make test` → RED.
+- [x] **b.13** In `rail_panels_test.go`, add `TestRailRender_h12_WorkedExample_Golden_Legacy`: all four `screenChat` panels populated (natural heights matching §5 of design), `termenv.TrueColor` forced + `t.Cleanup`; call `rail.Render(screenChat, 32, 12)` with legacy context-meter; assert `lipgloss.Height(result) <= 12`; assert only todolist renders (header + `"  +6 more"`); use `golden.RequireEqual` against `TestRailRender_h12_WorkedExample_Legacy.golden` (spec scenario TR-HC-4 "h=12 golden matches worked example"). Run `make test` → RED.
 
-- [ ] **b.14** In `rail_panels_test.go`, add `TestRailRender_h12_WorkedExample_Golden_Smart`: same as b.13 with smart context-meter; assert golden differs from legacy, `lipgloss.Height <= 12` (spec scenario TR-HC-4 "Smart-strategy golden differs from legacy at h=12"). Run `make test` → RED.
+- [x] **b.14** In `rail_panels_test.go`, add `TestRailRender_h12_WorkedExample_Golden_Smart`: same as b.13 with smart context-meter; assert golden differs from legacy, `lipgloss.Height <= 12` (spec scenario TR-HC-4 "Smart-strategy golden differs from legacy at h=12"). Run `make test` → RED.
 
-- [ ] **b.15** In `rail_panels_test.go`, add `TestRailRender_h8_Golden_Legacy` and `TestRailRender_h8_Golden_Smart`: `h=8`, both strategies; assert `lipgloss.Height(result) <= 8`, `golden.RequireEqual` against `TestRailRender_h8_*_Legacy/Smart.golden` (spec scenario TR-HC-4 "h=8 — most aggressive clamp"). Run `make test` → RED.
+- [x] **b.15** In `rail_panels_test.go`, add `TestRailRender_h8_Golden_Legacy` and `TestRailRender_h8_Golden_Smart`: `h=8`, both strategies; assert `lipgloss.Height(result) <= 8`, `golden.RequireEqual` against `TestRailRender_h8_*_Legacy/Smart.golden` (spec scenario TR-HC-4 "h=8 — most aggressive clamp"). Run `make test` → RED.
 
-- [ ] **b.16** In `rail_panels_test.go`, add `TestRailRender_h24_Golden_Legacy` and `TestRailRender_h24_Golden_Smart`: `h=24`, both strategies; assert `lipgloss.Height(result) <= 24`, `golden.RequireEqual` against `TestRailRender_h24_*_Legacy/Smart.golden` (spec scenario TR-HC-4 "h=24 — comfortable height"). Run `make test` → RED.
+- [x] **b.16** In `rail_panels_test.go`, add `TestRailRender_h24_Golden_Legacy` and `TestRailRender_h24_Golden_Smart`: `h=24`, both strategies; assert `lipgloss.Height(result) <= 24`, `golden.RequireEqual` against `TestRailRender_h24_*_Legacy/Smart.golden` (spec scenario TR-HC-4 "h=24 — comfortable height"). Run `make test` → RED.
 
-- [ ] **b.17** In `rail_panels_test.go`, flag any existing goldens that will change due to height-awareness (most likely `TestContextMeter_Render_LegacyStrategy_Golden` and `TestContextMeter_Render_SmartStrategy_Golden` if `Render(w, 0)` now processes `height=0`). Add explicit `// GOLDEN-CHURN: regenerate after b.18–b.22` comment so reviewers know which files change intentionally.
+- [x] **b.17** In `rail_panels_test.go`, flag any existing goldens that will change due to height-awareness (most likely `TestContextMeter_Render_LegacyStrategy_Golden` and `TestContextMeter_Render_SmartStrategy_Golden` if `Render(w, 0)` now processes `height=0`). Add explicit `// GOLDEN-CHURN: regenerate after b.18–b.22` comment so reviewers know which files change intentionally.
 
 ### GREEN — minimal implementation
 
-- [ ] **b.18** In `rail_panels.go`, update `todolistPanel.Render` (`rail_panels.go:387`): rename `_ int` to `height int`; apply `todolistMaxItems` cap (`items[:min(len(items), todolistMaxItems)]`); implement `contentRowBudget = height - 2 - 1` gating (`<= 2 → ""`, `== 3 → header + renderMoreRow`, `>= 4 → head + min(contentRowBudget-1, len) data rows + renderMoreRow if cut`); compute single reconciled `N = totalItems - shownItems` for `+N more` (spec TR-HC-2 + TR-HC-3 + design ADR-4).
+- [x] **b.18** In `rail_panels.go`, update `todolistPanel.Render` (`rail_panels.go:387`): rename `_ int` to `height int`; apply `todolistMaxItems` cap (`items[:min(len(items), todolistMaxItems)]`); implement `contentRowBudget = height - 2 - 1` gating (`<= 2 → ""`, `== 3 → header + renderMoreRow`, `>= 4 → head + min(contentRowBudget-1, len) data rows + renderMoreRow if cut`); compute single reconciled `N = totalItems - shownItems` for `+N more` (spec TR-HC-2 + TR-HC-3 + design ADR-4).
 
-- [ ] **b.19** In `rail_panels.go`, update `contextMeterPanel.Render` (`rail_panels.go:612`): rename `_ int` to `height int`; implement budget contract — `<= 2 → ""`, `== 3 → header + renderMoreRow(allDataRows, ...)`, `>= 4 → bar+pct always + category rows tail-first to budget + renderMoreRow if cut` (spec TR-HC-2, design ADR-2 contextMeterPanel rules).
+- [x] **b.19** In `rail_panels.go`, update `contextMeterPanel.Render` (`rail_panels.go:612`): rename `_ int` to `height int`; implement budget contract — `<= 2 → ""`, `== 3 → header + renderMoreRow(allDataRows, ...)`, `>= 4 → bar+pct always + category rows tail-first to budget + renderMoreRow if cut` (spec TR-HC-2, design ADR-2 contextMeterPanel rules).
 
-- [ ] **b.20** In `rail_panels.go`, update `telemetryPanel.Render` (`rail_panels.go:233`): rename `_ int` to `height int`; after assembling the `rows` slice (existing logic unchanged), truncate tail to `contentRowBudget - 1` and append `renderMoreRow` if cut; gate `<= 2 → ""`, `== 3 → header + renderMoreRow` (spec TR-HC-2, design ADR-2 telemetryPanel rules; existing cap-5 + cap-3 notices remain independent).
+- [x] **b.20** In `rail_panels.go`, update `telemetryPanel.Render` (`rail_panels.go:233`): rename `_ int` to `height int`; after assembling the `rows` slice (existing logic unchanged), truncate tail to `contentRowBudget - 1` and append `renderMoreRow` if cut; gate `<= 2 → ""`, `== 3 → header + renderMoreRow` (spec TR-HC-2, design ADR-2 telemetryPanel rules; existing cap-5 + cap-3 notices remain independent).
 
-- [ ] **b.21** In `rail_panels.go`, update `memoryPeekPanel.Render` (`rail_panels.go:966`): rename `_ int` to `height int`; truncate entry rows tail-first to `contentRowBudget - 1` + `renderMoreRow` if cut; gate `<= 2 → ""`, `== 3 → header + renderMoreRow` (spec TR-HC-2, design ADR-2 memoryPeekPanel rules; reconciles with existing `maxRows=5` cap).
+- [x] **b.21** In `rail_panels.go`, update `memoryPeekPanel.Render` (`rail_panels.go:966`): rename `_ int` to `height int`; truncate entry rows tail-first to `contentRowBudget - 1` + `renderMoreRow` if cut; gate `<= 2 → ""`, `== 3 → header + renderMoreRow` (spec TR-HC-2, design ADR-2 memoryPeekPanel rules; reconciles with existing `maxRows=5` cap).
 
-- [ ] **b.22** Regenerate changed golden files: run `go test ./internal/tui/... -update` to regenerate `TestContextMeter_Render_LegacyStrategy_Golden.golden`, `TestContextMeter_Render_SmartStrategy_Golden.golden`, and any other goldens that shift due to height-awareness. Record the exact list of regenerated files in the PR description (no silent golden churn — each file must be explicitly acknowledged).
+- [x] **b.22** Regenerate changed golden files: run `go test ./internal/tui/... -update` to regenerate `TestContextMeter_Render_LegacyStrategy_Golden.golden`, `TestContextMeter_Render_SmartStrategy_Golden.golden`, and any other goldens that shift due to height-awareness. Record the exact list of regenerated files in the PR description (no silent golden churn — each file must be explicitly acknowledged).
 
-- [ ] **b.23** Generate new boundary goldens by running `go test ./internal/tui/... -update` for the six new golden tests (b.13–b.16): `TestRailRender_h12_WorkedExample_Legacy/Smart.golden`, `TestRailRender_h8_Legacy/Smart.golden`, `TestRailRender_h24_Legacy/Smart.golden`. Force `termenv.TrueColor` is already in each test.
+- [x] **b.23** Generate new boundary goldens by running `go test ./internal/tui/... -update` for the six new golden tests (b.13–b.16): `TestRailRender_h12_WorkedExample_Legacy/Smart.golden`, `TestRailRender_h8_Legacy/Smart.golden`, `TestRailRender_h24_Legacy/Smart.golden`. Force `termenv.TrueColor` is already in each test.
 
 ### REFACTOR
 
-- [ ] **b.24** Run `make test` without `-update`; assert ALL tests GREEN including the six new boundary goldens and the height-guarantee table tests (a.4, a.5). Assert `lipgloss.Height(rail.Render(screenChat, 32, h)) <= h` holds for `h ∈ {8, 12, 24}`. Verify the h=12 result matches the §5 worked example (only todolist renders, header + `"  +6 more"`). Confirm no file outside `internal/tui/` was modified (`git diff --name-only`). Run `golangci-lint` on changed files.
+- [x] **b.24** Run `make test` without `-update`; assert ALL tests GREEN including the six new boundary goldens and the height-guarantee table tests (a.4, a.5). Assert `lipgloss.Height(rail.Render(screenChat, 32, h)) <= h` holds for `h ∈ {8, 12, 24}`. Verify the h=12 result matches the §5 worked example (only todolist renders, header + `"  +6 more"`). Confirm no file outside `internal/tui/` was modified (`git diff --name-only`). Run `golangci-lint` on changed files.
 
 ---
 

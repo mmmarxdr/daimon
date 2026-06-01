@@ -66,6 +66,9 @@ func (r *rail) Render(screen screenState, width, height int) string {
 	}
 
 	// Pass 1: measure natural heights; collect only populated panels.
+	// Panels return their natural (unconstrained) height when called with height=0.
+	// Since PR-b, todolistPanel caps itself at todolistMaxItems internally, so
+	// natural heights are bounded without a rail-level cap.
 	type entry struct {
 		panel   Panel
 		natural int
@@ -81,10 +84,6 @@ func (r *rail) Render(screen screenState, width, height int) string {
 			continue
 		}
 		nat := lipgloss.Height(s)
-		if nat > maxNaturalHeight {
-			// Guard against unbounded naturals before PR-b caps panels internally.
-			nat = maxNaturalHeight
-		}
 		populated = append(populated, entry{panel: p, natural: nat})
 	}
 	if len(populated) == 0 {
@@ -121,28 +120,8 @@ func (r *rail) Render(screen screenState, width, height int) string {
 			parts = append(parts, s)
 		}
 	}
-	result := strings.Join(parts, "\n")
-
-	// Rail-level safety clamp: guarantee lipgloss.Height(result) <= height.
-	// Panels do not yet respect the height budget (PR-b implements per-panel
-	// truncation). Until then, clip the joined output to the budget.
-	if height > 0 && lipgloss.Height(result) > height {
-		lines := strings.SplitN(result, "\n", height+1)
-		if len(lines) > height {
-			lines = lines[:height]
-		}
-		result = strings.Join(lines, "\n")
-	}
-	return result
+	return strings.Join(parts, "\n")
 }
-
-// maxNaturalHeight is a guard on pass-1 natural-height measurements.
-// todolistMaxItems (ADR-4) caps the todolist at 10 items before pass-1
-// measurement; until PR-b wires that cap inside todolistPanel.Render, the rail
-// uses this bound to prevent a pathologically large natural height from
-// distorting the surplus-reflow pool. Formula: 2 border + 1 header +
-// todolistMaxItems data rows + 1 more-row = todolistMaxItems + 4.
-const maxNaturalHeight = todolistMaxItems + 4
 
 // assignBudgets distributes avail rows across n panels using a deterministic
 // forward-pass algorithm (design ADR-1 + ADR-3):
