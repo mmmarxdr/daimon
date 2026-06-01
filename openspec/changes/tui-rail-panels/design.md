@@ -87,7 +87,7 @@ the border + per-line ANSI truncation; inner content width is `width-4`.
 
 ## 2. Architecture Decisions (per slice)
 
-### ADR-1 (PR-a): context-meter — REPLACE category snapshot + real limit + sub-bars
+### ADR-1 (PR-a): context-meter — REPLACE category snapshot + real limit + count rows
 
 **Decision.** Rewrite `contextMeterPanel` to hold the real window `limit`
 (threaded once at boot) and the per-category snapshot (`sysToks/msgToks/toolToks`),

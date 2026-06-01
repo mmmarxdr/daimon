@@ -75,6 +75,9 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		modelStr = cfg.Models.Default.Provider + "/" + cfg.Models.Default.Model
 	}
 
+	// PR-a: read context-window size once at boot (static; 0 when nil contextMgr).
+	ctxLimit := ag.ContextWindowSize()
+
 	r = copyRailWith(r, func(panels map[panelID]Panel) {
 		panels[panelModelPicker] = newModelPickerPanel(s, cfg.Models.Default.Provider, cfg.Models.Default.Model)
 		// PR4b: environment panel (welcome screen).
@@ -95,6 +98,13 @@ func runTUIWithStdin(cfg *config.Config, ag *agent.Agent, bus notify.Bus, st sto
 		// setMode(ag.CurrentMode()) at denial time so it always shows the mode
 		// that actually triggered the denial, not a stale startup snapshot.
 		panels[panelActivePolicy] = newActivePolicyPanel(s, ag.CurrentMode())
+		// PR-a: thread the real context-window limit into contextMeterPanel once.
+		// Zero ctxLimit → panel uses 200k heuristic with " est." suffix in Render.
+		if cm, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *cm
+			cp.setLimit(ctxLimit)
+			panels[panelContextMeter] = &cp
+		}
 	})
 	m := Model{
 		styles:     s,

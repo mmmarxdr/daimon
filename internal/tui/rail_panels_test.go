@@ -17,6 +17,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/exp/golden"
+	"github.com/muesli/termenv"
 
 	"daimon/internal/notify"
 	"daimon/internal/store"
@@ -463,6 +466,262 @@ func TestModel_TodolistRefreshMsg_UpdatesPanel(t *testing.T) {
 	}
 	if !strings.Contains(got, "Refactor rail panels") {
 		t.Errorf("todolistPanel.Render: expected 'Refactor rail panels' in output:\n%s", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 1.7 — WU-b: resumeListPanel pre-computed ago (RED → GREEN with WU-b)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// PR-a tasks a.1–a.9 — context-meter RED tests
+// ---------------------------------------------------------------------------
+
+// a.1: REPLACE semantics — second event wins (spec scenario TR-2).
+func TestContextMeter_REPLACE_SecondEventWins(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+
+	// First event: non-zero category fields.
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  100,
+		MsgToks:  200,
+		ToolToks: 50,
+	})
+
+	// Second event: different values — must replace, not accumulate.
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  10,
+		MsgToks:  20,
+		ToolToks: 5,
+	})
+
+	if p.sysToks != 10 {
+		t.Errorf("sysToks = %d, want 10 (second event wins)", p.sysToks)
+	}
+	if p.msgToks != 20 {
+		t.Errorf("msgToks = %d, want 20 (second event wins)", p.msgToks)
+	}
+	if p.toolToks != 5 {
+		t.Errorf("toolToks = %d, want 5 (second event wins)", p.toolToks)
+	}
+	wantUsed := 10 + 20 + 5
+	if p.tokenUsed != wantUsed {
+		t.Errorf("tokenUsed = %d, want %d (sum of second event only)", p.tokenUsed, wantUsed)
+	}
+}
+
+// a.2: Legacy fallback — tokenUsed accumulates (spec scenario TR-2).
+func TestContextMeter_Legacy_Accumulates(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+
+	// Two events with all-zero category fields and non-zero TokenCount.
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 1000,
+	})
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 500,
+	})
+
+	// tokenUsed must be cumulative.
+	if p.tokenUsed != 1500 {
+		t.Errorf("tokenUsed = %d, want 1500 (accumulated both TokenCounts)", p.tokenUsed)
+	}
+	// Category fields must stay zero.
+	if p.sysToks != 0 || p.msgToks != 0 || p.toolToks != 0 {
+		t.Errorf("category fields = (%d, %d, %d), want all 0 in legacy mode",
+			p.sysToks, p.msgToks, p.toolToks)
+	}
+}
+
+// a.3: Non-zero limit stored and used (spec scenario TR-1).
+func TestContextMeter_SetLimit_NonZero(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+	p.setLimit(128000)
+
+	if p.limit != 128000 {
+		t.Errorf("limit = %d, want 128000", p.limit)
+	}
+
+	// Feed a smart-strategy event so Render has data.
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  1000,
+		MsgToks:  2000,
+		ToolToks: 500,
+	})
+
+	got := p.Render(32, 0)
+	if strings.Contains(got, " est.") {
+		t.Errorf("Render with non-zero limit should NOT contain ' est.', got:\n%s", got)
+	}
+}
+
+// a.4: Zero limit falls back to heuristic — " est." suffix present (spec scenario TR-1).
+func TestContextMeter_SetLimit_ZeroFallback(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+	// No setLimit call — limit stays 0.
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 1000,
+	})
+
+	got := p.Render(32, 0)
+	if !strings.Contains(got, " est.") {
+		t.Errorf("Render with zero limit should contain ' est.', got:\n%s", got)
+	}
+}
+
+// a.5: Smart strategy render — category rows present (spec scenario TR-3).
+// State: sysToks=1000, msgToks=2000, toolToks=500, limit=128000.
+// Golden: testdata/TestContextMeter_Render_SmartStrategy_Golden.golden
+func TestContextMeter_Render_SmartStrategy_Golden(t *testing.T) {
+	// Force a deterministic TrueColor profile so ANSI output is stable
+	// regardless of the terminal environment (no-TTY vs CLICOLOR_FORCE=1).
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newContextMeterPanel(newTuiStyles())
+	p.setLimit(128000)
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  1000,
+		MsgToks:  2000,
+		ToolToks: 500,
+	})
+	got := p.Render(32, 0)
+
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+	// Must contain category rows.
+	for _, want := range []string{"sys", "msg", "tool"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Render: expected %q in output (smart strategy category rows):\n%s", want, got)
+		}
+	}
+	// Must NOT contain " est." (limit is non-zero).
+	if strings.Contains(got, " est.") {
+		t.Errorf("Render: must NOT contain ' est.' when limit is set:\n%s", got)
+	}
+	// Bar must have a closing bracket (FIX A: ensures ] is not truncated away).
+	if !strings.Contains(got, "]") {
+		t.Error("Render: bar must render a closing ]")
+	}
+
+	// humanK boundary assertions (design Risk 4 — determinism).
+	// 999 → "999", 1000 → "1.0k", 1500 → "1.5k", 200000 → "200k"
+	humanKTests := []struct {
+		n    int
+		want string
+	}{
+		{999, "999"},
+		{1000, "1.0k"},
+		{1500, "1.5k"},
+		{200000, "200k"},
+	}
+	for _, tt := range humanKTests {
+		gotK := humanK(tt.n)
+		if gotK != tt.want {
+			t.Errorf("humanK(%d) = %q, want %q", tt.n, gotK, tt.want)
+		}
+	}
+
+	// Golden pin: regenerate with -update, then rerun without to confirm stability.
+	golden.RequireEqual(t, []byte(got))
+}
+
+// a.6: Legacy strategy render — only aggregate bar, " est." present (spec scenario TR-3).
+// State: tokenUsed=42000, limit=0 (heuristic), sysToks=0.
+// Golden: testdata/TestContextMeter_Render_LegacyStrategy_Golden.golden
+func TestContextMeter_Render_LegacyStrategy_Golden(t *testing.T) {
+	// Force a deterministic TrueColor profile so ANSI output is stable
+	// regardless of the terminal environment (no-TTY vs CLICOLOR_FORCE=1).
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newContextMeterPanel(newTuiStyles())
+	// No setLimit — limit stays 0 → heuristic, " est." suffix.
+	p.accumulate(notify.Event{
+		Type:       notify.EventTokensUsage,
+		TokenCount: 42000,
+	})
+	got := p.Render(32, 0)
+
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+	// Must NOT contain category rows (sysToks == 0).
+	for _, absent := range []string{"sys", "msg", "tool"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("Render (legacy): must NOT contain %q row:\n%s", absent, got)
+		}
+	}
+	// Must contain " est." (limit is 0 → heuristic).
+	if !strings.Contains(got, " est.") {
+		t.Errorf("Render (legacy): must contain ' est.':\n%s", got)
+	}
+	// Bar must have a closing bracket (FIX A: ensures ] is not truncated away).
+	if !strings.Contains(got, "]") {
+		t.Error("Render (legacy): bar must render a closing ]")
+	}
+
+	// Golden pin.
+	golden.RequireEqual(t, []byte(got))
+}
+
+// a.7: No data — empty render (spec scenario TR-3 "No data", TR-0-C).
+func TestContextMeter_Render_NoData_Empty(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+	got := p.Render(32, 0)
+	if got != "" {
+		t.Errorf("Render with no data: got %q, want empty string", got)
+	}
+}
+
+// a.8: Render is deterministic (spec scenario TR-0-A).
+func TestContextMeter_Render_Deterministic(t *testing.T) {
+	p := newContextMeterPanel(newTuiStyles())
+	p.setLimit(128000)
+	p.accumulate(notify.Event{
+		Type:     notify.EventTokensUsage,
+		SysToks:  1000,
+		MsgToks:  2000,
+		ToolToks: 500,
+	})
+
+	got1 := p.Render(32, 0)
+	got2 := p.Render(32, 0)
+	if got1 != got2 {
+		t.Errorf("Render is not deterministic:\nfirst:  %q\nsecond: %q", got1, got2)
+	}
+}
+
+// a.9: Boot-wiring — setLimit via copyRailWith sets the correct limit (spec scenario TR-1).
+func TestContextMeter_BootWiring_RealLimit(t *testing.T) {
+	s := newTuiStyles()
+	r := newRail(s)
+
+	const wantLimit = 128000
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		if cm, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *cm
+			cp.setLimit(wantLimit)
+			panels[panelContextMeter] = &cp
+		}
+	})
+
+	cm, ok := r.panels[panelContextMeter].(*contextMeterPanel)
+	if !ok {
+		t.Fatal("rail.panels[panelContextMeter] is not *contextMeterPanel")
+	}
+	if cm.limit != wantLimit {
+		t.Errorf("contextMeterPanel.limit = %d, want %d", cm.limit, wantLimit)
 	}
 }
 

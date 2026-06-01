@@ -41,39 +41,39 @@ Files touched: `rail_panels.go` (contextMeterPanel section ~:321–377), `run.go
 
 ### RED — failing tests first
 
-- [ ] **a.1** In `rail_panels_test.go`, add `TestContextMeter_REPLACE_SecondEventWins`: feed two `EventTokensUsage` events with non-zero `SysToks/MsgToks/ToolToks`; assert the second event's values win (spec scenario TR-2 "REPLACE semantics — second event wins"). Also assert `tokenUsed == sum of second event only`. Run `make test` → RED.
+- [x] **a.1** In `rail_panels_test.go`, add `TestContextMeter_REPLACE_SecondEventWins`: feed two `EventTokensUsage` events with non-zero `SysToks/MsgToks/ToolToks`; assert the second event's values win (spec scenario TR-2 "REPLACE semantics — second event wins"). Also assert `tokenUsed == sum of second event only`. Run `make test` → RED.
 
-- [ ] **a.2** In `rail_panels_test.go`, add `TestContextMeter_Legacy_Accumulates`: feed two `EventTokensUsage` events with all-zero category fields and non-zero `TokenCount`; assert `tokenUsed` accumulates both `TokenCount`s and `sysToks/msgToks/toolToks` stay 0 (spec scenario TR-2 "Legacy fallback — tokenUsed accumulates"). Run `make test` → RED.
+- [x] **a.2** In `rail_panels_test.go`, add `TestContextMeter_Legacy_Accumulates`: feed two `EventTokensUsage` events with all-zero category fields and non-zero `TokenCount`; assert `tokenUsed` accumulates both `TokenCount`s and `sysToks/msgToks/toolToks` stay 0 (spec scenario TR-2 "Legacy fallback — tokenUsed accumulates"). Run `make test` → RED.
 
-- [ ] **a.3** In `rail_panels_test.go`, add `TestContextMeter_SetLimit_NonZero`: construct panel, call `setLimit(128000)`; assert `limit == 128000`; call `Render` after feeding one smart-strategy event; assert output does NOT contain ` est.` (spec scenario TR-1 "Non-zero limit stored and used"). Run `make test` → RED.
+- [x] **a.3** In `rail_panels_test.go`, add `TestContextMeter_SetLimit_NonZero`: construct panel, call `setLimit(128000)`; assert `limit == 128000`; call `Render` after feeding one smart-strategy event; assert output does NOT contain ` est.` (spec scenario TR-1 "Non-zero limit stored and used"). Run `make test` → RED.
 
-- [ ] **a.4** In `rail_panels_test.go`, add `TestContextMeter_SetLimit_ZeroFallback`: construct panel, call `setLimit(0)` (or skip call); assert `Render` output contains ` est.` (spec scenario TR-1 "Zero limit falls back to heuristic"). Run `make test` → RED.
+- [x] **a.4** In `rail_panels_test.go`, add `TestContextMeter_SetLimit_ZeroFallback`: construct panel, call `setLimit(0)` (or skip call); assert `Render` output contains ` est.` (spec scenario TR-1 "Zero limit falls back to heuristic"). Run `make test` → RED.
 
-- [ ] **a.5** In `rail_panels_test.go`, add `TestContextMeter_Render_SmartStrategy_Golden`: fix panel state to `sysToks=1000, msgToks=2000, toolToks=500, limit=128000, hasData=true`; call `Render(32, 0)`; assert output contains `sys`, `msg`, `tool` rows AND a total bar AND NO ` est.` (spec scenario TR-3 "Smart strategy — sub-bars present"). Use `golden.RequireEqual` against `testdata/context_meter_with_categories.golden` — generate on first `-update` run. Run `make test` → RED.
+- [x] **a.5** In `rail_panels_test.go`, add `TestContextMeter_Render_SmartStrategy_Golden`: fix panel state to `sysToks=1000, msgToks=2000, toolToks=500, limit=128000, hasData=true`; call `Render(32, 0)`; assert output contains `sys`, `msg`, `tool` rows AND a total bar AND NO ` est.` (spec scenario TR-3 "Smart strategy — sub-bars present"). Use `golden.RequireEqual` against `testdata/context_meter_with_categories.golden` — generate on first `-update` run. Run `make test` → RED.
 
-- [ ] **a.6** In `rail_panels_test.go`, add `TestContextMeter_Render_LegacyStrategy_Golden`: fix panel state to `sysToks=0, tokenUsed=42000, limit=200000, hasData=true`; call `Render(32, 0)`; assert output does NOT contain `sys`/`msg`/`tool` rows AND contains ` est.` (spec scenario TR-3 "Legacy strategy — only aggregate bar"). Use `golden.RequireEqual` against `testdata/context_meter_fallback_aggregate.golden`. Run `make test` → RED.
+- [x] **a.6** In `rail_panels_test.go`, add `TestContextMeter_Render_LegacyStrategy_Golden`: fix panel state to `sysToks=0, tokenUsed=42000, limit=200000, hasData=true`; call `Render(32, 0)`; assert output does NOT contain `sys`/`msg`/`tool` rows AND contains ` est.` (spec scenario TR-3 "Legacy strategy — only aggregate bar"). Use `golden.RequireEqual` against `testdata/context_meter_fallback_aggregate.golden`. Run `make test` → RED.
 
-- [ ] **a.7** In `rail_panels_test.go`, add `TestContextMeter_Render_NoData_Empty`: zero-value panel, `Render(32, 0)`, assert `""` (spec scenario TR-3 "No data — empty render" + TR-0-C). Run `make test` → RED.
+- [x] **a.7** In `rail_panels_test.go`, add `TestContextMeter_Render_NoData_Empty`: zero-value panel, `Render(32, 0)`, assert `""` (spec scenario TR-3 "No data — empty render" + TR-0-C). Run `make test` → RED.
 
-- [ ] **a.8** In `rail_panels_test.go`, add `TestContextMeter_Render_Deterministic`: same fixed state called twice; assert both returns are equal (spec scenario TR-0-A "Render is deterministic"). Run `make test` → RED.
+- [x] **a.8** In `rail_panels_test.go`, add `TestContextMeter_Render_Deterministic`: same fixed state called twice; assert both returns are equal (spec scenario TR-0-A "Render is deterministic"). Run `make test` → RED.
 
-- [ ] **a.9** In `run_test.go` (or `rail_panels_test.go`), add `TestContextMeter_BootWiring_RealLimit`: construct a model-like struct using `newRail`+`copyRailWith` with a known limit (e.g. `128000`); assert the `contextMeterPanel.limit == 128000` (spec scenario TR-1, boot-wiring path). Run `make test` → RED.
+- [x] **a.9** In `run_test.go` (or `rail_panels_test.go`), add `TestContextMeter_BootWiring_RealLimit`: construct a model-like struct using `newRail`+`copyRailWith` with a known limit (e.g. `128000`); assert the `contextMeterPanel.limit == 128000` (spec scenario TR-1, boot-wiring path). Run `make test` → RED.
 
 ### GREEN — minimal implementation
 
-- [ ] **a.10** In `rail_panels.go` (~:321–338), extend `contextMeterPanel` struct: add fields `limit int`, `sysToks int`, `msgToks int`, `toolToks int`. Add `setLimit(n int)` method. Update `newContextMeterPanel` (no signature change needed — limit starts 0, heuristic applied in Render).
+- [x] **a.10** In `rail_panels.go` (~:321–338), extend `contextMeterPanel` struct: add fields `limit int`, `sysToks int`, `msgToks int`, `toolToks int`. Add `setLimit(n int)` method. Update `newContextMeterPanel` (no signature change needed — limit starts 0, heuristic applied in Render).
 
-- [ ] **a.11** In `rail_panels.go`, rewrite `contextMeterPanel.accumulate`: implement Branch A (REPLACE: `sysToks/msgToks/toolToks = ev.*`, `tokenUsed = sum`) and Branch B (legacy: `tokenUsed += ev.TokenCount`, categories unchanged). `hasData = true` in both.
+- [x] **a.11** In `rail_panels.go`, rewrite `contextMeterPanel.accumulate`: implement Branch A (REPLACE: `sysToks/msgToks/toolToks = ev.*`, `tokenUsed = sum`) and Branch B (legacy: `tokenUsed += ev.TokenCount`, categories unchanged). `hasData = true` in both.
 
-- [ ] **a.12** In `rail_panels.go`, add pure helper `humanK(n int) string` (e.g. `200000→"200k"`, `1500→"1.5k"`, `999→"999"`). No IO, no clock. Place near top of contextMeterPanel section.
+- [x] **a.12** In `rail_panels.go`, add pure helper `humanK(n int) string` (e.g. `200000→"200k"`, `1500→"1.5k"`, `999→"999"`). No IO, no clock. Place near top of contextMeterPanel section.
 
-- [ ] **a.13** In `rail_panels.go`, rewrite `contextMeterPanel.Render`: resolve `limit` + `label` (`est.` suffix when `limit==0`), use heuristic `200_000` fallback; render aggregate bar + pct line always; when `sysToks > 0`, append three labeled count rows (`sys / msg / tool` + `humanK` counts, `dimLabel`-styled, ANSI-truncated to `inner`). ANSI width via `ansi.Truncate`, not `len`. Produce golden files with `-update` flag.
+- [x] **a.13** In `rail_panels.go`, rewrite `contextMeterPanel.Render`: resolve `limit` + `label` (`est.` suffix when `limit==0`), use heuristic `200_000` fallback; render aggregate bar + pct line always; when `sysToks > 0`, append three labeled count rows (`sys / msg / tool` + `humanK` counts, `dimLabel`-styled, ANSI-truncated to `inner`). ANSI width via `ansi.Truncate`, not `len`. Produce golden files with `-update` flag.
 
-- [ ] **a.14** In `run.go` (~:78–98), inside the existing `copyRailWith` block, read `ctxLimit := ag.ContextWindowSize()` once before the block; add a `copyRailWith` entry that value-copies the `contextMeterPanel` (`cp := *cm`) and calls `cp.setLimit(ctxLimit)`.
+- [x] **a.14** In `run.go` (~:78–98), inside the existing `copyRailWith` block, read `ctxLimit := ag.ContextWindowSize()` once before the block; add a `copyRailWith` entry that value-copies the `contextMeterPanel` (`cp := *cm`) and calls `cp.setLimit(ctxLimit)`.
 
 ### REFACTOR
 
-- [ ] **a.15** Run `make test` → all PR-a tests GREEN. Confirm golden files are generated (`context_meter_with_categories.golden`, `context_meter_fallback_aggregate.golden`). Remove any temporary `t.Skip` lines. Verify `humanK` boundary values (999, 1000, 1500, 200000) are covered by at least one assertion inline in `TestContextMeter_Render_*` tests.
+- [x] **a.15** Run `make test` → all PR-a tests GREEN. Confirm golden files are generated (`context_meter_with_categories.golden`, `context_meter_fallback_aggregate.golden`). Remove any temporary `t.Skip` lines. Verify `humanK` boundary values (999, 1000, 1500, 200000) are covered by at least one assertion inline in `TestContextMeter_Render_*` tests.
 
 ---
 

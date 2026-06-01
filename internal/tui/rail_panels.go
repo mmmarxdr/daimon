@@ -310,17 +310,37 @@ func (p *toolDetailPanel) Render(width, _ int) string {
 // contextMeterPanel — context window usage
 // ---------------------------------------------------------------------------
 
-// contextMeterPanel renders a visual indicator of how much of the context
-// window is consumed. In V1 the data source is EventTokensUsage.TokenCount —
-// cumulative output tokens accumulated across ALL turns in this session (NOT
-// the live context-window fill, which is not exposed by the backend in V1).
-// A 200k heuristic (Claude 3/4 flagship) is used to compute the percentage bar.
+// humanK formats an integer as a compact human-readable string.
+// Rules (deterministic — no locale, no rounding surprises):
 //
-// If there is no live source for context-window limits, the panel still shows
-// the raw token count so it is always useful without a backend change.
+//	n < 1000  → "%d"        (e.g. 999  → "999")
+//	n < 10000 → "%.1fk"    (e.g. 1000 → "1.0k", 1500 → "1.5k")
+//	else      → "%dk"      (e.g. 200000 → "200k")
+func humanK(n int) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 10000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%dk", n/1000)
+	}
+}
+
+// contextMeterPanel renders a visual indicator of how much of the context
+// window is consumed. Data source: EventTokensUsage per-category fields
+// (REPLACE semantics — each event is a snapshot of current window fill).
+// Falls back to aggregate TokenCount accumulation when category fields are 0.
+//
+// The real context-window limit is threaded once at boot via setLimit.
+// Zero limit triggers a 200k heuristic estimate (suffix " est.").
 type contextMeterPanel struct {
 	styles    tuiStyles
-	tokenUsed int // cumulative output tokens from all EventTokensUsage events this session
+	limit     int // real window from ContextWindowSize(); 0 ⇒ heuristic fallback
+	tokenUsed int // current fill: sum of categories (REPLACE) or TokenCount (accumulate)
+	sysToks   int // REPLACE per EventTokensUsage snapshot (0 in legacy/none mode)
+	msgToks   int // REPLACE
+	toolToks  int // REPLACE
 	hasData   bool
 }
 
@@ -329,12 +349,29 @@ func newContextMeterPanel(s tuiStyles) *contextMeterPanel {
 	return &contextMeterPanel{styles: s}
 }
 
+// setLimit threads the real context-window size once at boot (via copyRailWith in run.go).
+func (p *contextMeterPanel) setLimit(n int) { p.limit = n }
+
 // accumulate processes EventTokensUsage events.
+//
+// Branch A (smart strategy): SysToks+MsgToks+ToolToks > 0 → REPLACE snapshot.
+// Branch B (legacy/none):    all-zero categories → tokenUsed += TokenCount (delta).
 func (p *contextMeterPanel) accumulate(ev notify.Event) {
-	if ev.Type == notify.EventTokensUsage {
-		p.tokenUsed += ev.TokenCount
-		p.hasData = true
+	if ev.Type != notify.EventTokensUsage {
+		return
 	}
+	if ev.SysToks+ev.MsgToks+ev.ToolToks > 0 {
+		// REPLACE — each EventTokensUsage is a snapshot of current window fill.
+		p.sysToks = ev.SysToks
+		p.msgToks = ev.MsgToks
+		p.toolToks = ev.ToolToks
+		p.tokenUsed = ev.SysToks + ev.MsgToks + ev.ToolToks
+	} else {
+		// Legacy / none strategy: no breakdown. Accumulate aggregate delta.
+		// Category fields stay 0 so Render hides sub-bars.
+		p.tokenUsed += ev.TokenCount
+	}
+	p.hasData = true
 }
 
 // Render implements Panel. Returns "" until at least one token event is received.
@@ -349,15 +386,25 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 		inner = 8
 	}
 
-	// Heuristic context limit (Claude 3/4 flagship: 200k tokens).
-	const contextLimit = 200_000
-	pct := float64(p.tokenUsed) / float64(contextLimit)
+	// Resolve limit and label. Zero limit → heuristic 200k with " est." sentinel.
+	limit := p.limit
+	label := "of " + humanK(limit)
+	if limit == 0 {
+		limit = 200_000
+		label = "of 200k est."
+	}
+
+	pct := float64(p.tokenUsed) / float64(limit)
 	if pct > 1.0 {
 		pct = 1.0
 	}
 
 	// Render a simple bar using fill characters.
-	barWidth := inner - 2 // leave room for brackets
+	// barLine = "[" + bar + "]" has length barWidth+2.
+	// wrapPanelBox truncates content lines to truncW = width-5.
+	// So barWidth+2 must be ≤ width-5 → barWidth ≤ width-7.
+	// (At width=32: width-7 = 25 = inner-3, so wide goldens are unaffected.)
+	barWidth := width - 7 // budget = width-5 (wrapPanelBox truncW), minus 2 for brackets
 	if barWidth < 2 {
 		barWidth = 2
 	}
@@ -366,13 +413,26 @@ func (p *contextMeterPanel) Render(width, _ int) string {
 
 	header := p.styles.panelHeader("context")
 	barLine := "[" + bar + "]"
-	pctLine := fmt.Sprintf("%.1f%% of 200k", pct*100)
+	pctLine := fmt.Sprintf("%.1f%% %s", pct*100, label)
 
 	rows := []string{
 		ansi.Truncate(header, inner, "…"),
 		ansi.Truncate(barLine, inner, "…"),
 		ansi.Truncate(p.styles.dimLabel.Render(pctLine), inner, "…"),
 	}
+
+	// When smart strategy ran (sysToks > 0): append three labeled category rows.
+	if p.sysToks > 0 {
+		sysLine := fmt.Sprintf("sys   %s", humanK(p.sysToks))
+		msgLine := fmt.Sprintf("msg   %s", humanK(p.msgToks))
+		toolLine := fmt.Sprintf("tool  %s", humanK(p.toolToks))
+		rows = append(rows,
+			ansi.Truncate(p.styles.dimLabel.Render(sysLine), inner, "…"),
+			ansi.Truncate(p.styles.dimLabel.Render(msgLine), inner, "…"),
+			ansi.Truncate(p.styles.dimLabel.Render(toolLine), inner, "…"),
+		)
+	}
+
 	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 

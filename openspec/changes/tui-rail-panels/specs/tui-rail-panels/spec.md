@@ -175,7 +175,7 @@ No new `handleBusEvent` case is required; the existing
 
 ---
 
-### Requirement TR-3: Context-meter Render — category sub-bars conditional
+### Requirement TR-3: Context-meter Render — category rows conditional
 
 `contextMeterPanel.Render(width, _ int)` MUST produce different output
 depending on whether per-category data is present:
@@ -183,25 +183,25 @@ depending on whether per-category data is present:
 **When `p.sysToks > 0`** (smart strategy active):
 
 - MUST render a total fill bar scaled to `p.limit`.
-- MUST render three category sub-bars (sys / msg / tool), each scaled to
-  `p.limit`.
-- Sub-bar labels MUST identify the category (e.g. `sys`, `msg`, `tool`).
+- MUST render three labeled count rows (sys / msg / tool), each showing
+  the token count for that category using the `humanK` short form.
+- Row labels MUST identify the category (e.g. `sys`, `msg`, `tool`).
 
 **When `p.sysToks == 0`** (legacy / none strategy):
 
 - MUST render ONLY the aggregate bar from `p.tokenUsed` against `p.limit`.
-- MUST NOT render any category sub-bar rows.
+- MUST NOT render any category rows.
 
 **When `p.hasData == false`** (no event yet):
 
 - MUST return `""` (per TR-0-C).
 
-#### Scenario: Smart strategy — sub-bars present
+#### Scenario: Smart strategy — count rows present
 
 - GIVEN `p.sysToks=1000, p.msgToks=2000, p.toolToks=500, p.limit=128000,
 p.hasData=true`
 - WHEN `Render(32, 0)` is called
-- THEN the output contains sys, msg, and tool sub-bar lines
+- THEN the output contains sys, msg, and tool count rows
 - AND the output contains a total-fill bar
 - AND the output does NOT contain ` est.`
 - AND the render does not panic
@@ -209,13 +209,13 @@ p.hasData=true`
 #### Scenario: Legacy strategy — only aggregate bar
 
 - GIVEN `p.sysToks=0, p.msgToks=0, p.toolToks=0, p.tokenUsed=42000,
-p.limit=200000, p.hasData=true`
+p.limit=0, p.hasData=true`
 - WHEN `Render(32, 0)` is called
 - THEN the output contains a single aggregate bar
-- AND the output does NOT contain sub-bar labels (no `sys`, `msg`, `tool`
-  category lines)
+- AND the output does NOT contain category row labels (no `sys`, `msg`,
+  `tool` category lines)
 - AND the output contains ` est.` in the percentage label
-  (because limit==200000 heuristic)
+  (because `limit==0` triggers the heuristic fallback to 200k)
 - AND the render does not panic
 
 #### Scenario: No data — empty render
