@@ -301,6 +301,18 @@ func (m Model) handleBusEvent(ev notify.Event) (tea.Model, tea.Cmd) {
 			}
 		})
 
+	case notify.EventSubagentCompleted, notify.EventSubagentFailed:
+		// PR-b: Update telemetry panel with subagent lifecycle events (copy-on-write).
+		// EventSubagentCompleted: REPLACE tokens with authoritative total, set done=true.
+		// EventSubagentFailed: set done=true, failed=true — do NOT read Meta["tokens"].
+		m.rail = copyRailWith(m.rail, func(panels map[panelID]Panel) {
+			if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+				cp := *tp
+				cp.accumulate(ev)
+				panels[panelTelemetry] = &cp
+			}
+		})
+
 	case notify.EventTodolistChanged:
 		// PR2b: Schedule a TodoListForConv re-read via a tea.Cmd (Cmd discipline —
 		// no IO in Update). The result arrives as a todolistRefreshMsg which is

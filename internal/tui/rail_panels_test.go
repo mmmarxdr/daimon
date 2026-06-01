@@ -12,6 +12,7 @@ package tui
 // All tests use newTestModel() — hermetic, no real agent/bus/store.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -728,6 +729,471 @@ func TestContextMeter_BootWiring_RealLimit(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Task 1.7 — WU-b: resumeListPanel pre-computed ago (RED → GREEN with WU-b)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// PR-b tasks b.1–b.16 — telemetry RED tests
+// ---------------------------------------------------------------------------
+
+// b.1: Tool call counted on EventToolStart (spec scenario TR-4).
+func TestTelemetry_ToolStats_CallsCountedOnStart(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+
+	if p.toolStats == nil {
+		t.Fatal("toolStats is nil after EventToolStart")
+	}
+	stat, ok := p.toolStats["bash"]
+	if !ok {
+		t.Fatal("toolStats[\"bash\"] not found after two EventToolStart events")
+	}
+	if stat.calls != 2 {
+		t.Errorf("toolStats[\"bash\"].calls = %d, want 2", stat.calls)
+	}
+	if stat.errors != 0 {
+		t.Errorf("toolStats[\"bash\"].errors = %d, want 0", stat.errors)
+	}
+}
+
+// b.2: Tool error and duration recorded on EventToolEnd (spec scenario TR-4).
+func TestTelemetry_ToolStats_ErrorAndDurationOnEnd(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "read_file"})
+	p.accumulate(notify.Event{Type: notify.EventToolEnd, ToolName: "read_file", DurationMs: 150, IsError: true})
+
+	if p.toolStats == nil {
+		t.Fatal("toolStats is nil after events")
+	}
+	stat, ok := p.toolStats["read_file"]
+	if !ok {
+		t.Fatal("toolStats[\"read_file\"] not found")
+	}
+	if stat.errors != 1 {
+		t.Errorf("toolStats[\"read_file\"].errors = %d, want 1", stat.errors)
+	}
+	if stat.durationMs != 150 {
+		t.Errorf("toolStats[\"read_file\"].durationMs = %d, want 150", stat.durationMs)
+	}
+}
+
+// b.3: Accumulation across multiple distinct tool names (spec scenario TR-4).
+func TestTelemetry_ToolStats_MultipleTools(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "read_file"})
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "write_file"})
+
+	if len(p.toolStats) != 3 {
+		t.Errorf("len(toolStats) = %d, want 3", len(p.toolStats))
+	}
+	for _, name := range []string{"bash", "read_file", "write_file"} {
+		stat, ok := p.toolStats[name]
+		if !ok {
+			t.Errorf("toolStats[%q] not found", name)
+			continue
+		}
+		if stat.calls != 1 {
+			t.Errorf("toolStats[%q].calls = %d, want 1", name, stat.calls)
+		}
+	}
+}
+
+// b.4: Live accumulation from multiple EventTokensUsage events with subagent_id
+// (spec scenario TR-6).
+func TestTelemetry_SubagentLive_Accumulates(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{
+		Type: notify.EventTokensUsage,
+		Meta: map[string]string{"subagent_id": "sa-abc", "input_tokens": "100", "output_tokens": "50"},
+	})
+	p.accumulate(notify.Event{
+		Type: notify.EventTokensUsage,
+		Meta: map[string]string{"subagent_id": "sa-abc", "input_tokens": "100", "output_tokens": "50"},
+	})
+
+	if p.subagentStats == nil {
+		t.Fatal("subagentStats is nil after EventTokensUsage with subagent_id")
+	}
+	st, ok := p.subagentStats["sa-abc"]
+	if !ok {
+		t.Fatal("subagentStats[\"sa-abc\"] not found")
+	}
+	if st.tokens != 300 {
+		t.Errorf("subagentStats[\"sa-abc\"].tokens = %d, want 300", st.tokens)
+	}
+	if st.done {
+		t.Error("subagentStats[\"sa-abc\"].done = true, want false")
+	}
+}
+
+// b.5: atoiSafe handles missing or non-numeric Meta values (spec scenario TR-6).
+func TestTelemetry_AtoiSafe_BadMeta(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{
+		Type: notify.EventTokensUsage,
+		Meta: map[string]string{"subagent_id": "sa-x", "input_tokens": "", "output_tokens": "abc"},
+	})
+
+	if p.subagentStats == nil {
+		t.Fatal("subagentStats is nil after EventTokensUsage")
+	}
+	st, ok := p.subagentStats["sa-x"]
+	if !ok {
+		t.Fatal("subagentStats[\"sa-x\"] not found")
+	}
+	if st.tokens != 0 {
+		t.Errorf("subagentStats[\"sa-x\"].tokens = %d, want 0 (bad meta should not panic)", st.tokens)
+	}
+}
+
+// b.6: Authoritative total from EventSubagentCompleted overwrites live
+// accumulation (spec scenario TR-7).
+func TestTelemetry_SubagentCompleted_AuthoritativeWins(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	// Live accumulate 250 tokens first.
+	p.accumulate(notify.Event{
+		Type: notify.EventTokensUsage,
+		Meta: map[string]string{"subagent_id": "sa-1", "input_tokens": "150", "output_tokens": "100"},
+	})
+
+	// Authoritative Completed event: must replace, not add.
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-1", "tokens": "405"},
+	})
+
+	if p.subagentStats == nil {
+		t.Fatal("subagentStats is nil")
+	}
+	st, ok := p.subagentStats["sa-1"]
+	if !ok {
+		t.Fatal("subagentStats[\"sa-1\"] not found")
+	}
+	if st.tokens != 405 {
+		t.Errorf("subagentStats[\"sa-1\"].tokens = %d, want 405 (authoritative wins)", st.tokens)
+	}
+	if !st.done {
+		t.Error("subagentStats[\"sa-1\"].done = false, want true after Completed")
+	}
+}
+
+// b.7: Empty subagent_id in EventSubagentCompleted is a no-op (spec scenario TR-7).
+func TestTelemetry_SubagentCompleted_EmptyID_NoOp(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": ""},
+	})
+
+	if len(p.subagentStats) != 0 {
+		t.Errorf("subagentStats should be empty after empty subagent_id, got %d entries", len(p.subagentStats))
+	}
+}
+
+// b.8: EventSubagentCompleted creates a bucket for previously unseen subagent
+// (spec scenario TR-7 "creates bucket").
+func TestTelemetry_SubagentCompleted_UnseenCreates(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-new", "tokens": "120"},
+	})
+
+	if p.subagentStats == nil {
+		t.Fatal("subagentStats is nil")
+	}
+	st, ok := p.subagentStats["sa-new"]
+	if !ok {
+		t.Fatal("subagentStats[\"sa-new\"] not found after Completed on unseen id")
+	}
+	if st.tokens != 120 {
+		t.Errorf("subagentStats[\"sa-new\"].tokens = %d, want 120", st.tokens)
+	}
+	if !st.done {
+		t.Error("subagentStats[\"sa-new\"].done = false, want true")
+	}
+}
+
+// b.9: EventSubagentFailed sets done+failed markers, does NOT read tokens from
+// Meta (spec scope boundary + design ADR-2).
+func TestTelemetry_SubagentFailed_MarkerSet(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	// Ensure no tokens are read from Meta (design: Failed has no guaranteed tokens key).
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentFailed,
+		Meta: map[string]string{"subagent_id": "sa-f", "tokens": "9999"},
+	})
+
+	if p.subagentStats == nil {
+		t.Fatal("subagentStats is nil")
+	}
+	st, ok := p.subagentStats["sa-f"]
+	if !ok {
+		t.Fatal("subagentStats[\"sa-f\"] not found after EventSubagentFailed")
+	}
+	if !st.done {
+		t.Error("subagentStats[\"sa-f\"].done = false, want true")
+	}
+	if !st.failed {
+		t.Error("subagentStats[\"sa-f\"].failed = false, want true")
+	}
+	// tokens MUST NOT be read from Meta["tokens"] for Failed events.
+	if st.tokens != 0 {
+		t.Errorf("subagentStats[\"sa-f\"].tokens = %d, want 0 (Failed must not read Meta[\"tokens\"])", st.tokens)
+	}
+}
+
+// b.10: Late EventTokensUsage after EventSubagentCompleted must not re-inflate
+// tokens (design Risk 5 `if !st.done` guard).
+func TestTelemetry_SubagentLive_LateEventIgnoredAfterDone(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	// Mark done via Completed.
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-done", "tokens": "405"},
+	})
+
+	// Late live event — must be ignored.
+	p.accumulate(notify.Event{
+		Type: notify.EventTokensUsage,
+		Meta: map[string]string{"subagent_id": "sa-done", "input_tokens": "500", "output_tokens": "500"},
+	})
+
+	st := p.subagentStats["sa-done"]
+	if st.tokens != 405 {
+		t.Errorf("tokens = %d after late live event, want 405 (done guard failed)", st.tokens)
+	}
+}
+
+// b.11: COW discipline — prior snapshot must be unchanged after accumulate on copy
+// (spec scenario TR-0-B + design Risk 5 — the mandatory COW map-clone test).
+// This test MUST fail until cloneToolStats/cloneSubagentStats/cloneSAOrder exist.
+func TestTelemetry_COW_PriorSnapshotUnchangedAfterAccumulate(t *testing.T) {
+	s := newTuiStyles()
+	r := newRail(s)
+
+	// Seed the panel with one tool event so toolStats is non-nil.
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *tp
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			panels[panelTelemetry] = &cp
+		}
+	})
+
+	// Capture the "before" snapshot.
+	original, ok := r.panels[panelTelemetry].(*telemetryPanel)
+	if !ok {
+		t.Fatal("panelTelemetry not *telemetryPanel")
+	}
+	beforeCalls := original.toolStats["bash"].calls
+
+	// Apply a second accumulate via copyRailWith (this is the COW path).
+	r2 := copyRailWith(r, func(panels map[panelID]Panel) {
+		if tp, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *tp
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			panels[panelTelemetry] = &cp
+		}
+	})
+
+	// Verify the new panel shows the increment.
+	newTp, ok := r2.panels[panelTelemetry].(*telemetryPanel)
+	if !ok {
+		t.Fatal("r2 panelTelemetry not *telemetryPanel")
+	}
+	if newTp.toolStats["bash"].calls != beforeCalls+1 {
+		t.Errorf("new panel toolStats[\"bash\"].calls = %d, want %d", newTp.toolStats["bash"].calls, beforeCalls+1)
+	}
+
+	// The ORIGINAL panel must not have been mutated (COW invariant).
+	if original.toolStats["bash"].calls != beforeCalls {
+		t.Errorf("ORIGINAL panel toolStats[\"bash\"].calls = %d, want %d (COW violation — map was shared)",
+			original.toolStats["bash"].calls, beforeCalls)
+	}
+}
+
+// b.12: EventSubagentCompleted through handleBusEvent updates telemetryPanel
+// (spec scenario TR-7, non-vacuous via handleBusEvent path).
+func TestTelemetry_HandleBusEvent_SubagentCompleted_UpdatesPanel(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenChat
+	m.events = closedEventsChan()
+
+	ev := notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-hbe", "tokens": "777"},
+	}
+	result, _ := m.handleBusEvent(ev)
+	rm := result.(Model)
+
+	tp, ok := rm.rail.panels[panelTelemetry].(*telemetryPanel)
+	if !ok {
+		t.Fatal("panelTelemetry not *telemetryPanel after handleBusEvent")
+	}
+	if tp.subagentStats == nil {
+		t.Fatal("subagentStats is nil after EventSubagentCompleted via handleBusEvent")
+	}
+	st, found := tp.subagentStats["sa-hbe"]
+	if !found {
+		t.Fatal("subagentStats[\"sa-hbe\"] not found")
+	}
+	if st.tokens != 777 {
+		t.Errorf("subagentStats[\"sa-hbe\"].tokens = %d, want 777", st.tokens)
+	}
+	if !st.done {
+		t.Error("subagentStats[\"sa-hbe\"].done = false, want true")
+	}
+}
+
+// b.13: Golden test — tool rows rendered in count-desc order (spec scenario TR-5).
+// Golden: testdata/TestTelemetry_Render_ToolRows_Golden.golden
+func TestTelemetry_Render_ToolRows_Golden(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTelemetryPanel(newTuiStyles())
+	// Force known state: toolStats with 3 tools, counts A=5, B=3, C=1.
+	// Use EventToolStart to build stats so accumulate handles cloning.
+	for i := 0; i < 5; i++ {
+		p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "tool_a"})
+	}
+	for i := 0; i < 3; i++ {
+		p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "tool_b"})
+	}
+	p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "tool_c"})
+	// Need hasData = true (toolStats alone does not set it; token event does).
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100})
+
+	got := p.Render(40, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+	for _, name := range []string{"tool_a", "tool_b", "tool_c"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("Render: expected %q in output (≤5 tools → all shown):\n%s", name, got)
+		}
+	}
+	// Must NOT have "+N more" — only 3 tools.
+	if strings.Contains(got, "more") {
+		t.Errorf("Render: must NOT contain 'more' for 3 tools:\n%s", got)
+	}
+
+	golden.RequireEqual(t, []byte(got))
+}
+
+// b.14: Cap at 5 tools — "+N more" line appears (spec scenario TR-5).
+func TestTelemetry_Render_ToolRows_Cap5_Overflow(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	for i := 0; i < 8; i++ {
+		name := fmt.Sprintf("tool_%d", i)
+		p.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: name})
+	}
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100})
+
+	got := p.Render(40, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string")
+	}
+
+	// Count rendered tool rows (lines containing "tool_").
+	toolRowCount := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "tool_") {
+			toolRowCount++
+		}
+	}
+	if toolRowCount != 5 {
+		t.Errorf("Render: got %d tool rows, want exactly 5 (cap enforced)", toolRowCount)
+	}
+	if !strings.Contains(got, "+3 more") {
+		t.Errorf("Render: expected '+3 more' for 8-5=3 overflow tools:\n%s", got)
+	}
+}
+
+// b.15: Golden test — subagent rows rendered (spec scenario TR-8).
+// Golden: testdata/TestTelemetry_Render_SubagentRows_Golden.golden
+func TestTelemetry_Render_SubagentRows_Golden(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	p := newTelemetryPanel(newTuiStyles())
+	// Seed two subagents via Completed (authoritative) so saOrder is populated.
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-alpha-1", "tokens": "200"},
+	})
+	p.accumulate(notify.Event{
+		Type: notify.EventSubagentCompleted,
+		Meta: map[string]string{"subagent_id": "sa-beta-2", "tokens": "150"},
+	})
+	// hasData needed for Render.
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100})
+
+	got := p.Render(40, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string, want non-empty")
+	}
+	// Both IDs must appear (truncated to 8 runes → "sa-alpha-" → "sa-alpha" or similar).
+	// Use first 8 rune chars of each ID.
+	for _, id := range []string{"sa-alpha", "sa-beta-"} {
+		if !strings.Contains(got, id[:8]) {
+			t.Errorf("Render: expected subagent ID prefix %q in output:\n%s", id[:8], got)
+		}
+	}
+
+	golden.RequireEqual(t, []byte(got))
+}
+
+// b.16: Cap at 3 subagent rows (spec scenario TR-8).
+func TestTelemetry_Render_SubagentRows_Cap3(t *testing.T) {
+	p := newTelemetryPanel(newTuiStyles())
+
+	// Seed 5 subagents.
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("sa-sub-%d", i)
+		p.accumulate(notify.Event{
+			Type: notify.EventSubagentCompleted,
+			Meta: map[string]string{"subagent_id": id, "tokens": "100"},
+		})
+	}
+	p.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 100})
+
+	got := p.Render(40, 0)
+	if got == "" {
+		t.Fatal("Render: got empty string")
+	}
+
+	// Count subagent rows (lines containing "sa-sub-").
+	saRowCount := 0
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "sa-sub") {
+			saRowCount++
+		}
+	}
+	if saRowCount != 3 {
+		t.Errorf("Render: got %d subagent rows, want exactly 3 (cap enforced)", saRowCount)
+	}
+	// Subagent rows use silent truncation (no "+N more" overflow line, per
+	// spec TR-8 / design ADR-2) — unlike tool rows. Guard against a
+	// regression that adds one.
+	if strings.Contains(got, "more") {
+		t.Errorf("Render: subagent rows must NOT show a '+N more' overflow line:\n%s", got)
+	}
+}
 
 // TestResumeListPanel_PrecomputedAgo verifies that after setSessions, the panel's
 // ago slice is populated and that Render reads from it rather than calling

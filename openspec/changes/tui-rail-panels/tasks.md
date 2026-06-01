@@ -83,53 +83,53 @@ Files touched: `rail_panels.go` (telemetryPanel section ~:76–139), `screen_cha
 
 ### RED — failing tests first
 
-- [ ] **b.1** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_CallsCountedOnStart`: send two `EventToolStart` events for `ToolName="bash"`; assert `toolStats["bash"].calls == 2` and `toolStats["bash"].errors == 0` (spec scenario TR-4 "Tool call counted on Start"). Run `make test` → RED.
+- [x] **b.1** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_CallsCountedOnStart`: send two `EventToolStart` events for `ToolName="bash"`; assert `toolStats["bash"].calls == 2` and `toolStats["bash"].errors == 0` (spec scenario TR-4 "Tool call counted on Start"). Run `make test` → RED.
 
-- [ ] **b.2** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_ErrorAndDurationOnEnd`: send one `EventToolStart` + one `EventToolEnd{ToolName:"read_file", DurationMs:150, IsError:true}`; assert `toolStats["read_file"].errors == 1` and `toolStats["read_file"].durationMs == 150` (spec scenario TR-4 "Tool error and duration recorded on End"). Run `make test` → RED.
+- [x] **b.2** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_ErrorAndDurationOnEnd`: send one `EventToolStart` + one `EventToolEnd{ToolName:"read_file", DurationMs:150, IsError:true}`; assert `toolStats["read_file"].errors == 1` and `toolStats["read_file"].durationMs == 150` (spec scenario TR-4 "Tool error and duration recorded on End"). Run `make test` → RED.
 
-- [ ] **b.3** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_MultipleTools`: send three `EventToolStart` for three distinct names; assert `len(toolStats) == 3` and each has `calls == 1` (spec scenario TR-4 "Accumulation across multiple tools"). Run `make test` → RED.
+- [x] **b.3** In `rail_panels_test.go`, add `TestTelemetry_ToolStats_MultipleTools`: send three `EventToolStart` for three distinct names; assert `len(toolStats) == 3` and each has `calls == 1` (spec scenario TR-4 "Accumulation across multiple tools"). Run `make test` → RED.
 
-- [ ] **b.4** In `rail_panels_test.go`, add `TestTelemetry_SubagentLive_Accumulates`: send two `EventTokensUsage` events with `Meta["subagent_id"]="sa-abc"`, `input_tokens="100"`, `output_tokens="50"`; assert `subagentStats["sa-abc"].tokens == 300` and `done == false` (spec scenario TR-6 "Live accumulation from multiple EventTokensUsage events"). Run `make test` → RED.
+- [x] **b.4** In `rail_panels_test.go`, add `TestTelemetry_SubagentLive_Accumulates`: send two `EventTokensUsage` events with `Meta["subagent_id"]="sa-abc"`, `input_tokens="100"`, `output_tokens="50"`; assert `subagentStats["sa-abc"].tokens == 300` and `done == false` (spec scenario TR-6 "Live accumulation from multiple EventTokensUsage events"). Run `make test` → RED.
 
-- [ ] **b.5** In `rail_panels_test.go`, add `TestTelemetry_AtoiSafe_BadMeta`: send `EventTokensUsage` with `subagent_id="sa-x"`, `input_tokens=""`, `output_tokens="abc"`; assert `subagentStats["sa-x"].tokens == 0` and no panic (spec scenario TR-6 "atoiSafe handles missing or non-numeric Meta values"). Run `make test` → RED.
+- [x] **b.5** In `rail_panels_test.go`, add `TestTelemetry_AtoiSafe_BadMeta`: send `EventTokensUsage` with `subagent_id="sa-x"`, `input_tokens=""`, `output_tokens="abc"`; assert `subagentStats["sa-x"].tokens == 0` and no panic (spec scenario TR-6 "atoiSafe handles missing or non-numeric Meta values"). Run `make test` → RED.
 
-- [ ] **b.6** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_AuthoritativeWins`: set `subagentStats["sa-1"].tokens = 250` via live events; send `EventSubagentCompleted{Meta{"subagent_id":"sa-1","tokens":"405"}}`; assert `tokens == 405` and `done == true` (spec scenario TR-7 "Authoritative total overwrites live accumulation"). Run `make test` → RED.
+- [x] **b.6** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_AuthoritativeWins`: set `subagentStats["sa-1"].tokens = 250` via live events; send `EventSubagentCompleted{Meta{"subagent_id":"sa-1","tokens":"405"}}`; assert `tokens == 405` and `done == true` (spec scenario TR-7 "Authoritative total overwrites live accumulation"). Run `make test` → RED.
 
-- [ ] **b.7** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_EmptyID_NoOp`: send `EventSubagentCompleted{Meta{"subagent_id":""}}` on empty panel; assert `subagentStats` remains empty, no panic (spec scenario TR-7 "empty subagent_id is no-op"). Run `make test` → RED.
+- [x] **b.7** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_EmptyID_NoOp`: send `EventSubagentCompleted{Meta{"subagent_id":""}}` on empty panel; assert `subagentStats` remains empty, no panic (spec scenario TR-7 "empty subagent_id is no-op"). Run `make test` → RED.
 
-- [ ] **b.8** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_UnseenCreates`: empty panel, send `EventSubagentCompleted{Meta{"subagent_id":"sa-new","tokens":"120"}}`; assert `subagentStats["sa-new"].tokens == 120` and `done == true` (spec scenario TR-7 "creates bucket"). Run `make test` → RED.
+- [x] **b.8** In `rail_panels_test.go`, add `TestTelemetry_SubagentCompleted_UnseenCreates`: empty panel, send `EventSubagentCompleted{Meta{"subagent_id":"sa-new","tokens":"120"}}`; assert `subagentStats["sa-new"].tokens == 120` and `done == true` (spec scenario TR-7 "creates bucket"). Run `make test` → RED.
 
-- [ ] **b.9** In `rail_panels_test.go`, add `TestTelemetry_SubagentFailed_MarkerSet`: send `EventSubagentFailed{Meta{"subagent_id":"sa-f"}}`; assert `subagentStats["sa-f"].done == true`, `failed == true`, and `tokens` is NOT read from Meta (spec scope boundary + design ADR-2 failed marker). Run `make test` → RED.
+- [x] **b.9** In `rail_panels_test.go`, add `TestTelemetry_SubagentFailed_MarkerSet`: send `EventSubagentFailed{Meta{"subagent_id":"sa-f"}}`; assert `subagentStats["sa-f"].done == true`, `failed == true`, and `tokens` is NOT read from Meta (spec scope boundary + design ADR-2 failed marker). Run `make test` → RED.
 
-- [ ] **b.10** In `rail_panels_test.go`, add `TestTelemetry_SubagentLive_LateEventIgnoredAfterDone`: send `EventSubagentCompleted` setting `done=true, tokens=405`; then send another `EventTokensUsage` with same `subagent_id`; assert `tokens` still `405`, not re-inflated (design Risk 5 `if !st.done` guard). Run `make test` → RED.
+- [x] **b.10** In `rail_panels_test.go`, add `TestTelemetry_SubagentLive_LateEventIgnoredAfterDone`: send `EventSubagentCompleted` setting `done=true, tokens=405`; then send another `EventTokensUsage` with same `subagent_id`; assert `tokens` still `405`, not re-inflated (design Risk 5 `if !st.done` guard). Run `make test` → RED.
 
-- [ ] **b.11** In `rail_panels_test.go`, add **`TestTelemetry_COW_PriorSnapshotUnchangedAfterAccumulate`** (the mandatory COW map-clone test): obtain a `*telemetryPanel` from a `copyRailWith` call; fire a second event on the copy; assert the ORIGINAL panel's `toolStats` map is UNCHANGED (spec scenario TR-0-B + design Risk 5). This test MUST fail until the clone helpers are implemented. Run `make test` → RED.
+- [x] **b.11** In `rail_panels_test.go`, add **`TestTelemetry_COW_PriorSnapshotUnchangedAfterAccumulate`** (the mandatory COW map-clone test): obtain a `*telemetryPanel` from a `copyRailWith` call; fire a second event on the copy; assert the ORIGINAL panel's `toolStats` map is UNCHANGED (spec scenario TR-0-B + design Risk 5). This test MUST fail until the clone helpers are implemented. Run `make test` → RED.
 
-- [ ] **b.12** In `rail_panels_test.go`, add `TestTelemetry_HandleBusEvent_SubagentCompleted_UpdatesPanel`: drive `EventSubagentCompleted` through `handleBusEvent` on a test `Model`; assert `telemetryPanel.subagentStats` updated in the resulting model (spec scenario TR-7, non-vacuous via `handleBusEvent` path, mirrors `TestHandleBusEvent_TodolistChanged_*`). Run `make test` → RED.
+- [x] **b.12** In `rail_panels_test.go`, add `TestTelemetry_HandleBusEvent_SubagentCompleted_UpdatesPanel`: drive `EventSubagentCompleted` through `handleBusEvent` on a test `Model`; assert `telemetryPanel.subagentStats` updated in the resulting model (spec scenario TR-7, non-vacuous via `handleBusEvent` path, mirrors `TestHandleBusEvent_TodolistChanged_*`). Run `make test` → RED.
 
-- [ ] **b.13** In `rail_panels_test.go`, add `TestTelemetry_Render_ToolRows_Golden`: set `toolStats` with 3 tools (counts: A=5, B=3, C=1) and `hasData=true`; call `Render(40, 0)`; assert output contains all 3 tool names in count-desc order and NO `+N more` (spec scenario TR-5 "Five or fewer tools — all shown"). Use `golden.RequireEqual` against `testdata/telemetry_with_tool_rows.golden`. Run `make test` → RED.
+- [x] **b.13** In `rail_panels_test.go`, add `TestTelemetry_Render_ToolRows_Golden`: set `toolStats` with 3 tools (counts: A=5, B=3, C=1) and `hasData=true`; call `Render(40, 0)`; assert output contains all 3 tool names in count-desc order and NO `+N more` (spec scenario TR-5 "Five or fewer tools — all shown"). Use `golden.RequireEqual` against `testdata/telemetry_with_tool_rows.golden`. Run `make test` → RED.
 
-- [ ] **b.14** In `rail_panels_test.go`, add `TestTelemetry_Render_ToolRows_Cap5_Overflow`: set 8 tools; `Render(40, 0)`; assert exactly 5 tool rows and `+3 more` line (spec scenario TR-5 "More than five tools — cap enforced"). Run `make test` → RED.
+- [x] **b.14** In `rail_panels_test.go`, add `TestTelemetry_Render_ToolRows_Cap5_Overflow`: set 8 tools; `Render(40, 0)`; assert exactly 5 tool rows and `+3 more` line (spec scenario TR-5 "More than five tools — cap enforced"). Run `make test` → RED.
 
-- [ ] **b.15** In `rail_panels_test.go`, add `TestTelemetry_Render_SubagentRows_Golden`: set `subagentStats` with 2 entries and `saOrder`; call `Render(40, 0)`; assert both rows present (spec scenario TR-8 "Three or fewer subagents"). Use `golden.RequireEqual` against `testdata/telemetry_with_subagent_rows.golden`. Run `make test` → RED.
+- [x] **b.15** In `rail_panels_test.go`, add `TestTelemetry_Render_SubagentRows_Golden`: set `subagentStats` with 2 entries and `saOrder`; call `Render(40, 0)`; assert both rows present (spec scenario TR-8 "Three or fewer subagents"). Use `golden.RequireEqual` against `testdata/telemetry_with_subagent_rows.golden`. Run `make test` → RED.
 
-- [ ] **b.16** In `rail_panels_test.go`, add `TestTelemetry_Render_SubagentRows_Cap3`: set 5 subagents; `Render(40, 0)`; assert exactly 3 subagent rows (spec scenario TR-8 "More than three subagents — cap enforced"). Run `make test` → RED.
+- [x] **b.16** In `rail_panels_test.go`, add `TestTelemetry_Render_SubagentRows_Cap3`: set 5 subagents; `Render(40, 0)`; assert exactly 3 subagent rows (spec scenario TR-8 "More than three subagents — cap enforced"). Run `make test` → RED.
 
 ### GREEN — minimal implementation
 
-- [ ] **b.17** In `rail_panels.go` (~:76–106), extend `telemetryPanel` struct: add `toolStats map[string]toolStat`, `subagentStats map[string]subagentStat`, `saOrder []string`. Add `toolStat` struct (`calls int`, `errors int`, `durationMs int64`). Add `subagentStat` struct (`tokens int`, `done bool`, `failed bool`).
+- [x] **b.17** In `rail_panels.go` (~:76–106), extend `telemetryPanel` struct: add `toolStats map[string]toolStat`, `subagentStats map[string]subagentStat`, `saOrder []string`. Add `toolStat` struct (`calls int`, `errors int`, `durationMs int64`). Add `subagentStat` struct (`tokens int`, `done bool`, `failed bool`).
 
-- [ ] **b.18** In `rail_panels.go`, add clone helpers `cloneToolStats(map[string]toolStat) map[string]toolStat` and `cloneSubagentStats(map[string]subagentStat) map[string]subagentStat` (return fresh map copies). Add `cloneSAOrder([]string) []string` (return fresh slice copy). These ensure COW correctness when `accumulate` runs on the shallow-copied `cp := *tp`.
+- [x] **b.18** In `rail_panels.go`, add clone helpers `cloneToolStats(map[string]toolStat) map[string]toolStat` and `cloneSubagentStats(map[string]subagentStat) map[string]subagentStat` (return fresh map copies). Add `cloneSAOrder([]string) []string` (return fresh slice copy). These ensure COW correctness when `accumulate` runs on the shallow-copied `cp := *tp`.
 
-- [ ] **b.19** In `rail_panels.go`, rewrite `telemetryPanel.accumulate`: add `EventToolStart` (clone `toolStats`, increment `calls`), `EventToolEnd` (clone `toolStats`, accumulate `durationMs`/`errors`), `EventTokensUsage` live subagent branch (clone `subagentStats`+`saOrder`, accumulate `tokens` when `!st.done`), `EventSubagentCompleted` (clone maps, REPLACE `tokens`, set `done=true`), `EventSubagentFailed` (clone maps, set `done=true, failed=true`, do NOT read `Meta["tokens"]`). All clones happen BEFORE mutating.
+- [x] **b.19** In `rail_panels.go`, rewrite `telemetryPanel.accumulate`: add `EventToolStart` (clone `toolStats`, increment `calls`), `EventToolEnd` (clone `toolStats`, accumulate `durationMs`/`errors`), `EventTokensUsage` live subagent branch (clone `subagentStats`+`saOrder`, accumulate `tokens` when `!st.done`), `EventSubagentCompleted` (clone maps, REPLACE `tokens`, set `done=true`), `EventSubagentFailed` (clone maps, set `done=true, failed=true`, do NOT read `Meta["tokens"]`). All clones happen BEFORE mutating.
 
-- [ ] **b.20** In `rail_panels.go`, rewrite `telemetryPanel.Render`: keep four aggregate lines; add per-tool rows (sort count-desc, name-asc, cap 5, `+N more` in `dimLabel`; error suffix in `errStyle`); add per-subagent rows (first-seen via `saOrder`, cap 3, `+N more`; status marker `✓`/`✗`/`●`; truncate IDs to 8 runes via `ansi.Truncate`). Produce golden files with `-update`.
+- [x] **b.20** In `rail_panels.go`, rewrite `telemetryPanel.Render`: keep four aggregate lines; add per-tool rows (sort count-desc, name-asc, cap 5, `+N more` in `dimLabel`; error suffix in `errStyle`); add per-subagent rows (first-seen via `saOrder`, cap 3, `+N more`; status marker `✓`/`✗`/`●`; truncate IDs to 8 runes via `ansi.Truncate`). Produce golden files with `-update`.
 
-- [ ] **b.21** In `screen_chat.go` (~after `:302`), add new `handleBusEvent` case `notify.EventSubagentCompleted, notify.EventSubagentFailed`: `copyRailWith` → `cp := *tp` → `cp.accumulate(ev)` → `panels[panelTelemetry] = &cp`. Pattern mirrors existing `EventToolStart` block.
+- [x] **b.21** In `screen_chat.go` (~after `:302`), add new `handleBusEvent` case `notify.EventSubagentCompleted, notify.EventSubagentFailed`: `copyRailWith` → `cp := *tp` → `cp.accumulate(ev)` → `panels[panelTelemetry] = &cp`. Pattern mirrors existing `EventToolStart` block.
 
 ### REFACTOR
 
-- [ ] **b.22** Run `make test` → all PR-b tests GREEN. Confirm golden files generated (`telemetry_with_tool_rows.golden`, `telemetry_with_subagent_rows.golden`). Verify `TestTelemetry_COW_PriorSnapshotUnchangedAfterAccumulate` passes (the map is cloned, prior snapshot untouched). Remove any `t.Skip`.
+- [x] **b.22** Run `make test` → all PR-b tests GREEN. Confirm golden files generated (`telemetry_with_tool_rows.golden`, `telemetry_with_subagent_rows.golden`). Verify `TestTelemetry_COW_PriorSnapshotUnchangedAfterAccumulate` passes (the map is cloned, prior snapshot untouched). Remove any `t.Skip`.
 
 ---
 

@@ -68,18 +68,71 @@ func wrapPanelBox(content string, width int, s tuiStyles) string {
 }
 
 // ---------------------------------------------------------------------------
-// telemetryPanel — tokens / cost / tool-call counts
+// telemetryPanel — tokens / cost / tool-call counts + per-tool + per-subagent
 // ---------------------------------------------------------------------------
+
+// toolStat accumulates call/error/duration statistics for a single named tool.
+type toolStat struct {
+	calls      int
+	errors     int
+	durationMs int64
+}
+
+// subagentStat tracks token usage and lifecycle state for a single subagent.
+// done is set true on EventSubagentCompleted or EventSubagentFailed.
+// failed is set true on EventSubagentFailed only.
+type subagentStat struct {
+	tokens int
+	done   bool
+	failed bool
+}
 
 // telemetryPanel accumulates EventTokensUsage and tool lifecycle events
 // and renders a compact token/cost summary in the right rail.
 type telemetryPanel struct {
-	styles     tuiStyles
-	totalIn    int     // cumulative token count from EventTokensUsage
-	totalCost  float64 // cumulative cost in USD
-	toolCalls  int     // total tool calls started (EventToolStart)
-	toolErrors int     // tool calls that ended with IsError (EventToolEnd)
-	hasData    bool    // true once at least one EventTokensUsage has been received
+	styles        tuiStyles
+	totalIn       int                     // cumulative token count from EventTokensUsage
+	totalCost     float64                 // cumulative cost in USD
+	toolCalls     int                     // total tool calls started (EventToolStart)
+	toolErrors    int                     // tool calls that ended with IsError (EventToolEnd)
+	hasData       bool                    // true once at least one EventTokensUsage has been received
+	toolStats     map[string]toolStat     // per-tool-name statistics
+	subagentStats map[string]subagentStat // per-subagent_id statistics
+	saOrder       []string                // first-seen insertion order for subagent IDs
+}
+
+// cloneToolStats returns a fresh deep copy of the toolStats map.
+// Called inside accumulate before mutating the map to preserve COW invariant.
+func cloneToolStats(src map[string]toolStat) map[string]toolStat {
+	if src == nil {
+		return make(map[string]toolStat)
+	}
+	dst := make(map[string]toolStat, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// cloneSubagentStats returns a fresh deep copy of the subagentStats map.
+// Called inside accumulate before mutating the map to preserve COW invariant.
+func cloneSubagentStats(src map[string]subagentStat) map[string]subagentStat {
+	if src == nil {
+		return make(map[string]subagentStat)
+	}
+	dst := make(map[string]subagentStat, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
+// cloneSAOrder returns a fresh deep copy of the saOrder slice.
+// Called inside accumulate before appending to preserve COW invariant.
+func cloneSAOrder(src []string) []string {
+	dst := make([]string, len(src))
+	copy(dst, src)
+	return dst
 }
 
 // newTelemetryPanel constructs a telemetryPanel with zero state.
@@ -90,18 +143,89 @@ func newTelemetryPanel(s tuiStyles) *telemetryPanel {
 // accumulate processes a single notify.Event and updates the panel state.
 // Called from handleBusEvent in screen_chat.go — runs on the model's Update path
 // (via copy-on-write rail replacement).
+//
+// COW discipline: all map and slice mutations clone the container FIRST using
+// clone helpers above. This ensures a shallow-copied telemetryPanel (cp := *tp)
+// never aliases the original panel's maps/slices.
 func (p *telemetryPanel) accumulate(ev notify.Event) {
 	switch ev.Type {
 	case notify.EventTokensUsage:
 		p.totalIn += ev.TokenCount
 		p.totalCost += ev.CostUSD
 		p.hasData = true
+
+		// Live subagent accumulation: only when subagent_id is present.
+		id := ev.Meta["subagent_id"]
+		if id != "" {
+			// Check first-sight BEFORE cloning (clone creates same key set).
+			_, alreadyKnown := p.subagentStats[id]
+			p.subagentStats = cloneSubagentStats(p.subagentStats)
+			st := p.subagentStats[id]
+			// Guard: ignore late events after Completed/Failed (done flag).
+			if !st.done {
+				tokens := atoiSafe(ev.Meta["input_tokens"]) + atoiSafe(ev.Meta["output_tokens"])
+				st.tokens += tokens
+				p.subagentStats[id] = st
+				// Register insertion order on first sight.
+				if !alreadyKnown {
+					p.saOrder = cloneSAOrder(p.saOrder)
+					p.saOrder = append(p.saOrder, id)
+				}
+			}
+			// If done: no mutation needed — leave st as-is (clone already copied it).
+		}
+
 	case notify.EventToolStart:
 		p.toolCalls++
+		p.toolStats = cloneToolStats(p.toolStats)
+		st := p.toolStats[ev.ToolName]
+		st.calls++
+		p.toolStats[ev.ToolName] = st
+
 	case notify.EventToolEnd:
 		if ev.IsError {
 			p.toolErrors++
 		}
+		p.toolStats = cloneToolStats(p.toolStats)
+		st := p.toolStats[ev.ToolName]
+		st.durationMs += ev.DurationMs
+		if ev.IsError {
+			st.errors++
+		}
+		p.toolStats[ev.ToolName] = st
+
+	case notify.EventSubagentCompleted:
+		id := ev.Meta["subagent_id"]
+		if id == "" {
+			return
+		}
+		p.subagentStats = cloneSubagentStats(p.subagentStats)
+		// Register in saOrder on first sight.
+		if _, exists := p.subagentStats[id]; !exists {
+			p.saOrder = cloneSAOrder(p.saOrder)
+			p.saOrder = append(p.saOrder, id)
+		}
+		st := p.subagentStats[id]
+		st.tokens = atoiSafe(ev.Meta["tokens"]) // REPLACE (authoritative)
+		st.done = true
+		p.subagentStats[id] = st
+
+	case notify.EventSubagentFailed:
+		id := ev.Meta["subagent_id"]
+		if id == "" {
+			return
+		}
+		p.subagentStats = cloneSubagentStats(p.subagentStats)
+		// Register in saOrder on first sight.
+		if _, exists := p.subagentStats[id]; !exists {
+			p.saOrder = cloneSAOrder(p.saOrder)
+			p.saOrder = append(p.saOrder, id)
+		}
+		st := p.subagentStats[id]
+		// Failed: set markers only — do NOT read Meta["tokens"].
+		st.done = true
+		st.failed = true
+		p.subagentStats[id] = st
 	}
 }
 
@@ -135,7 +259,107 @@ func (p *telemetryPanel) Render(width, _ int) string {
 		rows = append(rows, ansi.Truncate(p.styles.errStyle.Render(errLine), inner, "…"))
 	}
 
+	// Per-tool rows: sort by count desc, name asc, cap 5, "+N more" overflow.
+	rows = append(rows, p.renderToolRows(inner)...)
+
+	// Per-subagent rows: first-seen order, cap 3.
+	rows = append(rows, p.renderSubagentRows(inner)...)
+
 	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
+}
+
+// renderToolRows returns rendered per-tool stat lines for inclusion in Render.
+// Sort: count desc, name asc. Cap: 5. Overflow: "+N more" in dimLabel.
+func (p *telemetryPanel) renderToolRows(inner int) []string {
+	if len(p.toolStats) == 0 {
+		return nil
+	}
+
+	// Collect and sort tool names.
+	type entry struct {
+		name  string
+		calls int
+	}
+	entries := make([]entry, 0, len(p.toolStats))
+	for name, st := range p.toolStats {
+		entries = append(entries, entry{name: name, calls: st.calls})
+	}
+	// Sort: count desc, name asc (stable: avoid golden flakiness).
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0; j-- {
+			a, b := entries[j-1], entries[j]
+			if a.calls < b.calls || (a.calls == b.calls && a.name > b.name) {
+				entries[j-1], entries[j] = entries[j], entries[j-1]
+			} else {
+				break
+			}
+		}
+	}
+
+	const cap5 = 5
+	visible := entries
+	overflow := 0
+	if len(entries) > cap5 {
+		visible = entries[:cap5]
+		overflow = len(entries) - cap5
+	}
+
+	var rows []string
+	for _, e := range visible {
+		st := p.toolStats[e.name]
+		// Truncate name to 8 runes.
+		displayName := ansi.Truncate(e.name, 8, "")
+		line := fmt.Sprintf("  %-8s %3d", displayName, e.calls)
+		if st.errors > 0 {
+			errMark := p.styles.errStyle.Render(fmt.Sprintf(" ✗%d", st.errors))
+			rows = append(rows, ansi.Truncate(p.styles.dimLabel.Render(line)+errMark, inner, "…"))
+		} else {
+			rows = append(rows, ansi.Truncate(p.styles.dimLabel.Render(line), inner, "…"))
+		}
+	}
+	if overflow > 0 {
+		overflowLine := fmt.Sprintf("  +%d more", overflow)
+		rows = append(rows, ansi.Truncate(p.styles.dimLabel.Render(overflowLine), inner, "…"))
+	}
+	return rows
+}
+
+// renderSubagentRows returns rendered per-subagent stat lines for Render.
+// Order: first-seen (saOrder). Cap: 3. Status markers: ✓/✗/●.
+func (p *telemetryPanel) renderSubagentRows(inner int) []string {
+	if len(p.subagentStats) == 0 {
+		return nil
+	}
+
+	const cap3 = 3
+	order := p.saOrder
+	if len(order) > cap3 {
+		order = order[:cap3]
+	}
+
+	var rows []string
+	for _, id := range order {
+		st, ok := p.subagentStats[id]
+		if !ok {
+			continue
+		}
+		// Marker: ✓ done+ok, ✗ failed, ● live.
+		var marker string
+		switch {
+		case st.done && st.failed:
+			marker = p.styles.errStyle.Render("✗")
+		case st.done:
+			marker = p.styles.accent.Render("✓")
+		default:
+			marker = p.styles.amber.Render("●")
+		}
+		// Truncate ID to 8 runes.
+		shortID := ansi.Truncate(id, 8, "")
+		tokStr := humanK(st.tokens)
+		line := fmt.Sprintf(" %-8s %s", shortID, tokStr)
+		rows = append(rows, ansi.Truncate(marker+p.styles.dimLabel.Render(line), inner, "…"))
+	}
+	return rows
 }
 
 // ---------------------------------------------------------------------------

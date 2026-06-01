@@ -273,10 +273,12 @@ session.
 
 ### Requirement TR-5: Per-tool Render cap at 5 with overflow summary
 
-`telemetryPanel.Render` MUST display per-tool rows sorted by insertion
-(first-seen) order. When `len(toolStats) <= 5`, all rows are shown. When
-`len(toolStats) > 5`, exactly 5 rows are shown plus one summary line
-`"+N more"` where N is the number of hidden tools. No scroll is provided.
+`telemetryPanel.Render` MUST display per-tool rows sorted by call count
+descending, with ties broken by tool name ascending (per design ADR-2,
+which finalizes the proposal's open sort-order question). When
+`len(toolStats) <= 5`, all rows are shown. When `len(toolStats) > 5`,
+exactly 5 rows are shown plus one summary line `"+N more"` where N is the
+number of hidden tools. No scroll is provided.
 
 #### Scenario: Five or fewer tools — all shown, no overflow line
 
@@ -289,7 +291,8 @@ session.
 
 - GIVEN `toolStats` with 8 tools (A through H) each having 1 call
 - WHEN `Render(32, 0)` is called
-- THEN the output contains exactly 5 tool-name rows (the first 5 seen)
+- THEN the output contains exactly 5 tool-name rows (the 5 highest by
+  call count; ties broken by tool name ascending)
 - AND the output contains "+3 more"
 
 ---
