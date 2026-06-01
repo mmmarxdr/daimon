@@ -41,33 +41,33 @@ Covers: TR-HC-1 (budget algorithm), TR-0-A, TR-0-B, TR-0-D.
 
 ### RED — failing tests first
 
-- [ ] **a.1** In `rail_panels_test.go`, add `TestAssignBudgets_WorkedExample_h12`: call `assignBudgets` with natural heights `[9,8,7,5]` and `avail=9`; assert `budgets == [3,2,2,2]` (spec scenario TR-HC-1 "Separator reservation — worked example at h=12"). Run `make test` → RED.
+- [x] **a.1** In `rail_panels_test.go`, add `TestAssignBudgets_WorkedExample_h12`: call `assignBudgets` with natural heights `[9,8,7,5]` and `avail=9`; assert `budgets == [3,2,2,2]` (spec scenario TR-HC-1 "Separator reservation — worked example at h=12"). Run `make test` → RED.
 
-- [ ] **a.2** In `rail_panels_test.go`, add `TestAssignBudgets_SurplusReflow`: call `assignBudgets` with natural heights `[3,2,10]` and `avail=10`; assert `budgets[0]==3, budgets[1]==2, budgets[2]==5` (spec scenario TR-HC-1 "Surplus reflow — under-full panel donates rows"). Run `make test` → RED.
+- [x] **a.2** In `rail_panels_test.go`, add `TestAssignBudgets_SurplusReflow`: call `assignBudgets` with natural heights `[3,2,10]` and `avail=10`; assert `budgets[0]==3, budgets[1]==2, budgets[2]==5` (spec scenario TR-HC-1 "Surplus reflow — under-full panel donates rows"). Run `make test` → RED.
 
-- [ ] **a.3** In `rail_panels_test.go`, add `TestAssignBudgets_SumNeverExceedsAvail`: table-driven over several `(naturals, avail)` pairs; assert `sum(budgets) <= avail` for all (spec TR-HC-1 ADR-3 invariant). Run `make test` → RED.
+- [x] **a.3** In `rail_panels_test.go`, add `TestAssignBudgets_SumNeverExceedsAvail`: table-driven over several `(naturals, avail)` pairs; assert `sum(budgets) <= avail` for all (spec TR-HC-1 ADR-3 invariant). Run `make test` → RED.
 
-- [ ] **a.4** In `rail_panels_test.go`, add `TestRailRender_HeightGuarantee_ChatScreen`: construct model with all four `screenChat` panels populated; for each `h` in `{8, 12, 24}` assert `lipgloss.Height(m.rail.Render(screenChat, 32, h)) <= h`; force `lipgloss.SetColorProfile(termenv.TrueColor)` + `t.Cleanup` (spec scenario TR-HC-1 "Core height guarantee"). Run `make test` → RED.
+- [x] **a.4** In `rail_panels_test.go`, add `TestRailRender_HeightGuarantee_ChatScreen`: construct model with all four `screenChat` panels populated; for each `h` in `{8, 12, 24}` assert `lipgloss.Height(m.rail.Render(screenChat, 32, h)) <= h`; force `lipgloss.SetColorProfile(termenv.TrueColor)` + `t.Cleanup` (spec scenario TR-HC-1 "Core height guarantee"). Run `make test` → RED.
 
-- [ ] **a.5** In `rail_panels_test.go`, add `TestRailRender_HeightGuarantee_DiffScreen`: same as a.4 for `screenDiff` at `h` in `{8, 12}` (spec scenario TR-HC-1 "screenDiff clamped by same code path"). Run `make test` → RED.
+- [x] **a.5** In `rail_panels_test.go`, add `TestRailRender_HeightGuarantee_DiffScreen`: same as a.4 for `screenDiff` at `h` in `{8, 12}` (spec scenario TR-HC-1 "screenDiff clamped by same code path"). Run `make test` → RED.
 
-- [ ] **a.6** In `rail_panels_test.go`, add `TestRailRender_EmptyPanel_ExcludedFromBudget`: panels A (populated), B (empty), C (populated); assert `n=2` separator reservation (`avail = h - 1`) and B contributes no rows to output (spec scenario TR-HC-1 "Empty panel excluded from budget distribution"). Run `make test` → RED.
+- [x] **a.6** In `rail_panels_test.go`, add `TestRailRender_EmptyPanel_ExcludedFromBudget`: panels A (populated), B (empty), C (populated); assert `n=2` separator reservation (`avail = h - 1`) and B contributes no rows to output (spec scenario TR-HC-1 "Empty panel excluded from budget distribution"). Run `make test` → RED.
 
-- [ ] **a.7** In `rail_panels_test.go`, add `TestRenderMoreRow_ExactFormat`: call `renderMoreRow(6, 28, styles)` and assert: raw format contains `"  +6 more"`, style is `dimLabel`, result is `ansi.Truncate`-safe (spec scenario TR-HC-2 "+N more uses exact format and style"). Run `make test` → RED.
+- [x] **a.7** In `rail_panels_test.go`, add `TestRenderMoreRow_ExactFormat`: call `renderMoreRow(6, 28, styles)` and assert: raw format contains `"  +6 more"`, style is `dimLabel`, result is `ansi.Truncate`-safe (spec scenario TR-HC-2 "+N more uses exact format and style"). Run `make test` → RED.
 
 ### GREEN — minimal implementation
 
-- [ ] **a.8** In `panels.go`, add package-level constants `panelMinHeight = 4` and `todolistMaxItems = 10` (spec TR-HC-3 + design ADR-2/ADR-4). Place alongside existing panel-ID consts.
+- [x] **a.8** In `panels.go`, add package-level constants `panelMinHeight = 4` and `todolistMaxItems = 10` (spec TR-HC-3 + design ADR-2/ADR-4). Place alongside existing panel-ID consts.
 
-- [ ] **a.9** In `rail_panels.go`, add pure helper `renderMoreRow(n, inner int, s tuiStyles) string` — exact body: `ansi.Truncate(s.dimLabel.Render(fmt.Sprintf("  +%d more", n)), inner, "…")` (design ADR-2, spec TR-HC-2). Export nothing; place before `wrapPanelBox`.
+- [x] **a.9** In `rail_panels.go`, add pure helper `renderMoreRow(n, inner int, s tuiStyles) string` — exact body: `ansi.Truncate(s.dimLabel.Render(fmt.Sprintf("  +%d more", n)), inner, "…")` (design ADR-2, spec TR-HC-2). Export nothing; place before `wrapPanelBox`.
 
-- [ ] **a.10** In `rail.go`, add package-level function `assignBudgets(populated []struct{ natural int }, avail int) []int` implementing the forward-pass algorithm from design ADR-3 (equal split, front-loaded remainder, surplus reflow). No maps; pure integer arithmetic.
+- [x] **a.10** In `rail.go`, add package-level function `assignBudgets(naturals []int, avail int) []int` implementing the forward-pass algorithm from design ADR-3 (equal split via ceiling division, surplus reflow). Signature simplified from struct to []int (test scaffolding fix). No maps; pure integer arithmetic.
 
-- [ ] **a.11** In `rail.go`, rewrite `rail.Render` (`rail.go:43-58`) to implement the two-pass algorithm: pass-1 measure natural heights into a `populated` slice (skip empty panels), compute `avail = height - (n-1)`, call `assignBudgets`, pass-2 re-render each at its budget (spec TR-HC-1). `layout.go` is UNCHANGED.
+- [x] **a.11** In `rail.go`, rewrite `rail.Render` (`rail.go:43-58`) to implement the two-pass algorithm: pass-1 measure natural heights into a `populated` slice (skip empty panels), compute `avail = height - (n-1)`, call `assignBudgets`, pass-2 re-render each at its budget (spec TR-HC-1). Rail-level safety clamp added as PR-a bridge until PR-b implements per-panel truncation. `layout.go` is UNCHANGED.
 
 ### REFACTOR
 
-- [ ] **a.12** Run `make test` → all PR-a tests GREEN. Assert `TestAssignBudgets_SumNeverExceedsAvail` covers `avail=0` and `n=1` edge cases. Confirm no file outside `internal/tui/` was modified (`git diff --name-only`). Verify `golangci-lint` clean on changed files.
+- [x] **a.12** Run `make test` → all PR-a tests GREEN. `TestAssignBudgets_SumNeverExceedsAvail` covers `avail=0` and `n=1` edge cases. No file outside `internal/tui/` was modified. `golangci-lint` clean.
 
 ---
 

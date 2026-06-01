@@ -1564,6 +1564,228 @@ func TestMemoryRefreshMsg_Update_ClearsPrior(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// tui-rail-height-clamp PR-a tests — RED phase (a.1–a.7)
+// ---------------------------------------------------------------------------
+
+// a.1: assignBudgets worked example h=12, naturals [9,8,7,5] → budgets [3,2,2,2]
+// (spec scenario TR-HC-1 "Separator reservation — worked example at h=12").
+// Design §5: n=4, avail=12-3=9; forward pass → [3,2,2,2], sum=9.
+func TestAssignBudgets_WorkedExample_h12(t *testing.T) {
+	avail := 9 // height=12, n=4 → avail=12-(4-1)=9
+
+	budgets := assignBudgets([]int{9, 8, 7, 5}, avail)
+
+	want := []int{3, 2, 2, 2}
+	if len(budgets) != len(want) {
+		t.Fatalf("assignBudgets: got %v (len %d), want %v (len %d)", budgets, len(budgets), want, len(want))
+	}
+	for i, g := range budgets {
+		if g != want[i] {
+			t.Errorf("budgets[%d] = %d, want %d (full budgets: %v)", i, g, want[i], budgets)
+		}
+	}
+}
+
+// a.2: assignBudgets surplus reflow — under-full panels donate to later ones.
+// naturals=[3,2,10], avail=10 → [3,2,5] (panels 0+1 take only their natural).
+func TestAssignBudgets_SurplusReflow(t *testing.T) {
+	avail := 10
+
+	budgets := assignBudgets([]int{3, 2, 10}, avail)
+
+	if len(budgets) != 3 {
+		t.Fatalf("assignBudgets: got len %d, want 3; budgets: %v", len(budgets), budgets)
+	}
+	if budgets[0] != 3 {
+		t.Errorf("budgets[0] = %d, want 3 (panel 0 takes its natural 3)", budgets[0])
+	}
+	if budgets[1] != 2 {
+		t.Errorf("budgets[1] = %d, want 2 (panel 1 takes its natural 2)", budgets[1])
+	}
+	if budgets[2] != 5 {
+		t.Errorf("budgets[2] = %d, want 5 (all remaining rows flow to panel 2)", budgets[2])
+	}
+}
+
+// a.3: assignBudgets invariant — sum(budgets) <= avail for all inputs.
+func TestAssignBudgets_SumNeverExceedsAvail(t *testing.T) {
+	tests := []struct {
+		name     string
+		naturals []int
+		avail    int
+	}{
+		{"single panel", []int{20}, 15},
+		{"single panel avail=0", []int{5}, 0},
+		{"single panel n=1", []int{3}, 8},
+		{"four panels equal", []int{9, 9, 9, 9}, 20},
+		{"four panels surplus", []int{2, 2, 2, 2}, 20},
+		{"four panels h12 worked example", []int{9, 8, 7, 5}, 9},
+		{"two panels avail tight", []int{10, 10}, 3},
+		{"avail zero 4 panels", []int{5, 5, 5, 5}, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			budgets := assignBudgets(tt.naturals, tt.avail)
+			if len(budgets) != len(tt.naturals) {
+				t.Fatalf("len(budgets)=%d, want %d", len(budgets), len(tt.naturals))
+			}
+			sum := 0
+			for _, b := range budgets {
+				sum += b
+			}
+			if sum > tt.avail {
+				t.Errorf("sum(budgets)=%d > avail=%d; budgets=%v", sum, tt.avail, budgets)
+			}
+		})
+	}
+}
+
+// a.4: rail.Render height guarantee for screenChat — lipgloss.Height(result) <= h.
+func TestRailRender_HeightGuarantee_ChatScreen(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+	r := newRail(s)
+
+	// Populate all four screenChat panels with minimal data.
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		// todolist: 6 items
+		if p, ok := panels[panelTodolist].(*todolistPanel); ok {
+			cp := *p
+			items := make([]tool.TodoItem, 6)
+			for i := range items {
+				items[i] = tool.TodoItem{ID: fmt.Sprintf("%d", i), Content: fmt.Sprintf("item %d", i), Status: "pending"}
+			}
+			cp.setList(tool.TodoList{Items: items})
+			panels[panelTodolist] = &cp
+		}
+		// context-meter: smart strategy
+		if p, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *p
+			cp.setLimit(128000)
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, SysToks: 1000, MsgToks: 2000, ToolToks: 500})
+			panels[panelContextMeter] = &cp
+		}
+		// telemetry: some token + tool data
+		if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 5000, CostUSD: 0.01})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "read_file"})
+			panels[panelTelemetry] = &cp
+		}
+		// memory-peek: 2 entries
+		if p, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+			cp := *p
+			cp.setEntries([]store.MemoryEntry{{Title: "entry-1"}, {Title: "entry-2"}})
+			panels[panelMemoryPeek] = &cp
+		}
+	})
+
+	for _, h := range []int{8, 12, 24} {
+		t.Run(fmt.Sprintf("h=%d", h), func(t *testing.T) {
+			result := r.Render(screenChat, 32, h)
+			got := lipgloss.Height(result)
+			if got > h {
+				t.Errorf("h=%d: lipgloss.Height(result)=%d > h; result:\n%s", h, got, result)
+			}
+		})
+	}
+}
+
+// a.5: rail.Render height guarantee for screenDiff.
+func TestRailRender_HeightGuarantee_DiffScreen(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+	r := newRail(s)
+
+	// Populate telemetry (the one panel screenDiff always has data for).
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 3000, CostUSD: 0.005})
+			panels[panelTelemetry] = &cp
+		}
+	})
+
+	for _, h := range []int{8, 12} {
+		t.Run(fmt.Sprintf("h=%d", h), func(t *testing.T) {
+			result := r.Render(screenDiff, 32, h)
+			got := lipgloss.Height(result)
+			if got > h {
+				t.Errorf("h=%d: lipgloss.Height(result)=%d > h; result:\n%s", h, got, result)
+			}
+		})
+	}
+}
+
+// a.6: Empty panel excluded from budget distribution (n=2 when B is empty).
+func TestRailRender_EmptyPanel_ExcludedFromBudget(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+	r := newRail(s)
+
+	// Populate todolist (A) and memory-peek (C); leave context-meter (B) and telemetry empty.
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		if p, ok := panels[panelTodolist].(*todolistPanel); ok {
+			cp := *p
+			cp.setList(tool.TodoList{Items: []tool.TodoItem{
+				{ID: "1", Content: "task 1", Status: "pending"},
+			}})
+			panels[panelTodolist] = &cp
+		}
+		if p, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+			cp := *p
+			cp.setEntries([]store.MemoryEntry{{Title: "mem entry"}})
+			panels[panelMemoryPeek] = &cp
+		}
+	})
+
+	h := 20
+	result := r.Render(screenChat, 32, h)
+	// With n=2 populated panels, avail = h - 1 = 19.
+	// The result must not exceed h.
+	got := lipgloss.Height(result)
+	if got > h {
+		t.Errorf("lipgloss.Height(result)=%d > h=%d; result:\n%s", got, h, result)
+	}
+	// Context-meter (B) must contribute no rows: check result doesn't have "context" header.
+	if strings.Contains(result, "CONTEXT") {
+		t.Errorf("empty context-meter must not appear in output; result:\n%s", result)
+	}
+}
+
+// a.7: renderMoreRow — exact format "  +N more", dimLabel style, ANSI-truncated.
+func TestRenderMoreRow_ExactFormat(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+	got := renderMoreRow(6, 28, s)
+
+	// Must contain the exact "+ more" text.
+	if !strings.Contains(got, "+6 more") {
+		t.Errorf("renderMoreRow(6, 28, s): expected '+6 more' in output, got: %q", got)
+	}
+	// Must contain the two leading spaces (before the "+").
+	if !strings.Contains(got, "  +6 more") {
+		t.Errorf("renderMoreRow(6, 28, s): expected '  +6 more' (two leading spaces), got: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+
 // TestResumeListPanel_PrecomputedAgo verifies that after setSessions, the panel's
 // ago slice is populated and that Render reads from it rather than calling
 // relativeTime live. The test uses a fixed "ago" value injected via the

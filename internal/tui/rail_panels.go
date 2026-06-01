@@ -31,6 +31,18 @@ import (
 	"daimon/internal/tool"
 )
 
+// renderMoreRow returns the standard dim "+N more" overflow row, ANSI-truncated.
+// Reuses the exact idiom from rail_panels.go:320-322 (telemetry overflow):
+//
+//	format: "  +%d more" (two leading spaces)
+//	style:  dimLabel
+//	truncation: ansi.Truncate(..., inner, "…")
+//
+// inner is the usable content width (width - 4 per wrapPanelBox convention).
+func renderMoreRow(n, inner int, s tuiStyles) string {
+	return ansi.Truncate(s.dimLabel.Render(fmt.Sprintf("  +%d more", n)), inner, "…")
+}
+
 // wrapPanelBox wraps the given content string in a bordered box using s.panelBorder.
 //
 // Width math (lipgloss v1.1.0 verified):

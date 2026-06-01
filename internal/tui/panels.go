@@ -8,6 +8,16 @@ package tui
 // themselves. The panelsFor() switch is the single source of truth — never
 // inline panel lists in screen handlers.
 
+// Panel height constants (design ADR-2/ADR-4).
+// panelMinHeight is the minimum budget a panel needs to show a header plus one
+// data row inside a bordered box (2 border + 1 header + 1 data = 4 rendered rows).
+// todolistMaxItems caps the todolist before height truncation so pass-1 natural
+// height stays bounded independent of the actual item count (design ADR-4).
+const (
+	panelMinHeight   = 4
+	todolistMaxItems = 10
+)
+
 // panelID is a string-typed identifier for a right-rail panel.
 // String type (not int) so test output and logs are self-describing.
 type panelID string

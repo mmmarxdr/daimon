@@ -1,8 +1,15 @@
 package tui
 
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
 // rail.go — right-rail panel container (PR2b populates concrete panel types).
 // PR1 declared the Panel interface and the rail type skeleton.
 // PR2b (this PR) adds newRail() which wires the three chat-screen panels.
+// tui-rail-height-clamp PR-a adds assignBudgets + two-pass Render.
 
 // railWidth is the fixed column width of the right rail when panels are active.
 const railWidth = 32
@@ -40,21 +47,131 @@ func newRail(s tuiStyles) rail {
 
 // Render renders all active panels for `screen` stacked vertically.
 // Returns empty string when there are no panels (e.g. screenSlash).
+//
+// Two-pass budget distribution (design ADR-1 + ADR-3):
+//
+// Pass 1: render each panel at full height to measure its natural height.
+//
+//	Empty panels (Render → "") are excluded from the budget.
+//
+// Compute avail = height - (numPopulated - 1) to reserve inter-panel
+// separator newlines, then call assignBudgets.
+//
+// Pass 2: re-render each populated panel at its assigned budget and join
+// with newlines. Guarantees lipgloss.Height(result) <= height.
 func (r *rail) Render(screen screenState, width, height int) string {
 	ids := panelsFor(screen)
 	if len(ids) == 0 {
 		return ""
 	}
-	out := ""
+
+	// Pass 1: measure natural heights; collect only populated panels.
+	type entry struct {
+		panel   Panel
+		natural int
+	}
+	populated := make([]entry, 0, len(ids))
 	for _, id := range ids {
-		if p, ok := r.panels[id]; ok {
-			s := p.Render(width, height)
-			if s != "" {
-				out += s + "\n"
-			}
+		p, ok := r.panels[id]
+		if !ok {
+			continue
+		}
+		s := p.Render(width, 0) // 0 = full/unconstrained height
+		if s == "" {
+			continue
+		}
+		nat := lipgloss.Height(s)
+		if nat > maxNaturalHeight {
+			// Guard against unbounded naturals before PR-b caps panels internally.
+			nat = maxNaturalHeight
+		}
+		populated = append(populated, entry{panel: p, natural: nat})
+	}
+	if len(populated) == 0 {
+		return ""
+	}
+
+	// Compute available rows: reserve one newline separator between each pair.
+	avail := height - (len(populated) - 1)
+	if avail < 0 {
+		avail = 0
+	}
+
+	// Distribute budgets across populated panels.
+	naturals := make([]int, len(populated))
+	for i, e := range populated {
+		naturals[i] = e.natural
+	}
+	budgets := assignBudgets(naturals, avail)
+
+	// Pass 2: re-render each panel at its assigned budget.
+	// Per ADR-2 (design §2): budget <= panelMinHeight-2 cannot hold a
+	// bordered header (2 border rows consume the entire budget), so a
+	// compliant panel returns "". Skip the render call to avoid wasted work.
+	// Budgets of panelMinHeight-1 (== 3) still render: header + "+N more".
+	const boxFloor = panelMinHeight - 2 // == 2; panels with budget <= this return ""
+	parts := make([]string, 0, len(populated))
+	for i, e := range populated {
+		if budgets[i] <= boxFloor {
+			// Budget cannot fit a bordered box — skip (panel would return "").
+			continue
+		}
+		s := e.panel.Render(width, budgets[i])
+		if s != "" {
+			parts = append(parts, s)
 		}
 	}
-	return out
+	result := strings.Join(parts, "\n")
+
+	// Rail-level safety clamp: guarantee lipgloss.Height(result) <= height.
+	// Panels do not yet respect the height budget (PR-b implements per-panel
+	// truncation). Until then, clip the joined output to the budget.
+	if height > 0 && lipgloss.Height(result) > height {
+		lines := strings.SplitN(result, "\n", height+1)
+		if len(lines) > height {
+			lines = lines[:height]
+		}
+		result = strings.Join(lines, "\n")
+	}
+	return result
+}
+
+// maxNaturalHeight is a guard on pass-1 natural-height measurements.
+// todolistMaxItems (ADR-4) caps the todolist at 10 items before pass-1
+// measurement; until PR-b wires that cap inside todolistPanel.Render, the rail
+// uses this bound to prevent a pathologically large natural height from
+// distorting the surplus-reflow pool. Formula: 2 border + 1 header +
+// todolistMaxItems data rows + 1 more-row = todolistMaxItems + 4.
+const maxNaturalHeight = todolistMaxItems + 4
+
+// assignBudgets distributes avail rows across n panels using a deterministic
+// forward-pass algorithm (design ADR-1 + ADR-3):
+//
+//  1. Pool starts at avail (clamped to 0 if negative).
+//  2. For each panel left-to-right: give = min(ceil(pool/remaining), natural).
+//  3. Surplus (natural < share) flows to later panels automatically.
+//
+// Invariants: len(result) == len(naturals), sum(result) <= avail, each >= 0.
+// O(n), no maps — deterministic in slice order.
+func assignBudgets(naturals []int, avail int) []int {
+	n := len(naturals)
+	budgets := make([]int, n)
+	if n == 0 || avail <= 0 {
+		return budgets
+	}
+	pool := avail
+	for i, nat := range naturals {
+		remaining := n - i
+		// Ceiling division: ceil(pool / remaining).
+		share := (pool + remaining - 1) / remaining
+		give := share
+		if nat < give {
+			give = nat
+		}
+		budgets[i] = give
+		pool -= give
+	}
+	return budgets
 }
 
 // HasPanels reports whether the given screen has any rail panels.
