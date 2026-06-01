@@ -472,8 +472,8 @@ func (a *Agent) WithMediaConfig(cfg config.MediaConfig) *Agent {
 }
 
 // WithBus sets the event bus on the agent, enabling agent.turn.started/completed events.
-// Also propagates the bus to contextMgr and subMgr (if already constructed) so
-// that callers who invoke WithBus after WithExecutableSkills still get a wired bus.
+// Also propagates the bus to contextMgr, subMgr, curator, and consolidator (if already
+// constructed) so that callers who invoke WithBus after construction still get a wired bus.
 // Returns a for fluent chaining.
 func (a *Agent) WithBus(bus notify.Bus) *Agent {
 	a.bus = bus
@@ -482,6 +482,13 @@ func (a *Agent) WithBus(bus notify.Bus) *Agent {
 	}
 	if a.subMgr != nil {
 		a.subMgr.bus = bus
+	}
+	// ADR-5: propagate bus to memory writers so EventMemoryChanged is emitted.
+	if a.curator != nil {
+		a.curator.SetBus(bus)
+	}
+	if a.consolidator != nil {
+		a.consolidator.SetBus(bus)
 	}
 	return a
 }

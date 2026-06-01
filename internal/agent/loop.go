@@ -613,7 +613,16 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 							Importance: 5,
 							CreatedAt:  time.Now(),
 						}
-						_ = a.store.AppendMemory(ctx, scope, entry)
+						// ADR-5: best-effort emit on curator-fallback path (~loop.go:616).
+						if appendErr := a.store.AppendMemory(ctx, scope, entry); appendErr == nil {
+							if a.bus != nil {
+								a.bus.Emit(notify.Event{
+									Type:   notify.EventMemoryChanged,
+									Origin: notify.OriginAgent,
+									Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+								})
+							}
+						}
 					}
 				} else {
 					// Legacy path: save every response unconditionally.
@@ -629,6 +638,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						slog.Warn("failed to append memory", "error", err)
 					} else {
 						slog.Debug("memory appended", "scope_id", scope)
+						// ADR-5: emit EventMemoryChanged on successful legacy-path AppendMemory.
+						if a.bus != nil {
+							a.bus.Emit(notify.Event{
+								Type:   notify.EventMemoryChanged,
+								Origin: notify.OriginAgent,
+								Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+							})
+						}
 						if a.enricher != nil {
 							a.enricher.Enqueue(entry)
 						}

@@ -13,6 +13,7 @@ import (
 
 	"daimon/internal/config"
 	"daimon/internal/content"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/store"
 )
@@ -32,7 +33,13 @@ type Consolidator struct {
 	cfg        config.ConsolidationConfig
 	wg         sync.WaitGroup
 	cancel     context.CancelFunc
+	bus        notify.Bus // optional; nil = no EventMemoryChanged emitted (ADR-5)
 }
+
+// SetBus wires a notify.Bus into the Consolidator so it emits EventMemoryChanged
+// after every successful AppendMemory call. Call after NewConsolidator, before Start.
+// Mirrors the SetBus pattern used by Curator.
+func (c *Consolidator) SetBus(b notify.Bus) { c.bus = b }
 
 // NewConsolidator constructs a Consolidator.
 // Returns nil if cfg.Enabled is false.
@@ -261,6 +268,15 @@ func (c *Consolidator) consolidateTopic(ctx context.Context, scope, topic string
 		return 0, 0, fmt.Errorf("appending consolidated entry: %w", err)
 	}
 	created++
+
+	// ADR-5: emit EventMemoryChanged on successful AppendMemory (bare signal).
+	if c.bus != nil {
+		c.bus.Emit(notify.Event{
+			Type:   notify.EventMemoryChanged,
+			Origin: notify.OriginAgent,
+			Meta:   map[string]string{"scope_id": scope, "entry_id": newEntry.ID},
+		})
+	}
 
 	// Enqueue async workers for new entry.
 	if c.enricher != nil {

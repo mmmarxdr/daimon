@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"daimon/internal/config"
+	"daimon/internal/notify"
 	"daimon/internal/store"
 )
 
@@ -342,5 +344,86 @@ func TestScopeFromContext(t *testing.T) {
 	// Original context is unaffected.
 	if got := ScopeFromContext(ctx2); got != "channel:sender" {
 		t.Errorf("ctx2 should still be 'channel:sender', got %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Seam 4 — ADR-5: MemoryToolDeps.Bus injection + EventMemoryChanged emit
+// ---------------------------------------------------------------------------
+
+// testCaptureBus is a minimal notify.Bus that records emitted events synchronously.
+type testCaptureBus struct {
+	mu     sync.Mutex
+	events []notify.Event
+}
+
+func (b *testCaptureBus) Emit(ev notify.Event) {
+	b.mu.Lock()
+	b.events = append(b.events, ev)
+	b.mu.Unlock()
+}
+func (b *testCaptureBus) Subscribe(_ func(notify.Event)) {}
+func (b *testCaptureBus) Close()                         {}
+
+func (b *testCaptureBus) eventsOfType(typ string) []notify.Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []notify.Event
+	for _, ev := range b.events {
+		if ev.Type == typ {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestSaveMemoryTool_EmitsMemoryChanged: when MemoryToolDeps.Bus is non-nil,
+// save_memory emits exactly one EventMemoryChanged after a successful store.
+func TestSaveMemoryTool_EmitsMemoryChanged(t *testing.T) {
+	st := newTestMemoryStore(t)
+	rb := &testCaptureBus{}
+
+	deps := MemoryToolDeps{Store: st, Bus: rb}
+	tools := BuildMemoryTools(deps)
+	smt := tools["save_memory"]
+
+	ctx := WithScope(context.Background(), "scope-test")
+	result := execTool(t, smt, ctx, map[string]string{
+		"content": "User prefers Go over Python.",
+		"topic":   "preferences",
+	})
+	if result.IsError {
+		t.Fatalf("save_memory failed: %s", result.Content)
+	}
+
+	memEvs := rb.eventsOfType(notify.EventMemoryChanged)
+	if len(memEvs) != 1 {
+		t.Fatalf("expected 1 EventMemoryChanged, got %d", len(memEvs))
+	}
+	ev := memEvs[0]
+	if ev.Meta["scope_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[scope_id] must not be empty")
+	}
+	if ev.Meta["entry_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[entry_id] must not be empty")
+	}
+}
+
+// TestSaveMemoryTool_NilBus_NoPanic: save_memory with nil Bus must not panic
+// and must still save the entry successfully.
+func TestSaveMemoryTool_NilBus_NoPanic(t *testing.T) {
+	st := newTestMemoryStore(t)
+
+	// Bus is nil (zero value of MemoryToolDeps.Bus field).
+	deps := MemoryToolDeps{Store: st}
+	tools := BuildMemoryTools(deps)
+	smt := tools["save_memory"]
+
+	ctx := WithScope(context.Background(), "scope-test")
+	result := execTool(t, smt, ctx, map[string]string{
+		"content": "User works in Berlin.",
+	})
+	if result.IsError {
+		t.Fatalf("save_memory with nil bus failed: %s", result.Content)
 	}
 }

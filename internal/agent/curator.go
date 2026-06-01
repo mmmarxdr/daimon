@@ -13,6 +13,7 @@ import (
 
 	"daimon/internal/config"
 	"daimon/internal/content"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/store"
 )
@@ -71,7 +72,13 @@ type Curator struct {
 	dedupCfg    config.DeduplicationConfig
 	model       string         // cheap model resolved at construction time
 	fillerRe    *regexp.Regexp // compiled filler pattern
+	bus         notify.Bus     // optional; nil = no EventMemoryChanged emitted (ADR-5)
 }
+
+// SetBus wires a notify.Bus into the Curator so it emits EventMemoryChanged
+// after every successful AppendMemory call. Call after NewCurator, before Run.
+// Mirrors the WithBus/SetBus pattern used by other agent components.
+func (c *Curator) SetBus(b notify.Bus) { c.bus = b }
 
 // NewCurator constructs a Curator.
 // Returns nil if curationCfg.Enabled is false.
@@ -440,6 +447,15 @@ func (c *Curator) Curate(ctx context.Context, scope, userMsg, response, convID s
 
 	if err := c.store.AppendMemory(ctx, scope, entry); err != nil {
 		return err
+	}
+
+	// ADR-5: emit EventMemoryChanged on successful AppendMemory (bare signal).
+	if c.bus != nil {
+		c.bus.Emit(notify.Event{
+			Type:   notify.EventMemoryChanged,
+			Origin: notify.OriginAgent,
+			Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+		})
 	}
 
 	slog.Debug("curator: memory saved",

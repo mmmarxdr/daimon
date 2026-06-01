@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"daimon/internal/config"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/store"
 )
@@ -602,4 +603,89 @@ func TestCurator_ClassifyParseFailure_DoesNotPersist(t *testing.T) {
 	if st.appendCount() != 0 {
 		t.Errorf("expected NO Append on parse failure, got %d", st.appendCount())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Seam 4 — ADR-5: Curator bus injection + EventMemoryChanged emit
+// ---------------------------------------------------------------------------
+
+// TestCurator_EmitsMemoryChanged: Curator with a non-nil bus emits exactly one
+// EventMemoryChanged after a successful AppendMemory call.
+func TestCurator_EmitsMemoryChanged(t *testing.T) {
+	prov := &curatorMockProvider{
+		response: classifyJSON(8, "fact", "topic", "title"),
+	}
+	st := &curatorMockStore{}
+	rb := &captureBus{}
+
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c.SetBus(rb)
+
+	if err := c.Curate(context.Background(), "scope-1", "user msg", longResponse(200), "conv-1"); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+
+	memEvs := filterEvents(rb.events, notify.EventMemoryChanged)
+	if len(memEvs) != 1 {
+		t.Fatalf("expected 1 EventMemoryChanged, got %d", len(memEvs))
+	}
+	ev := memEvs[0]
+	if ev.Meta["scope_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[scope_id] must not be empty")
+	}
+	if ev.Meta["entry_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[entry_id] must not be empty")
+	}
+}
+
+// TestCurator_NilBus_NoPanic: Curator with bus==nil must not panic and must
+// not emit any event.
+func TestCurator_NilBus_NoPanic(t *testing.T) {
+	prov := &curatorMockProvider{
+		response: classifyJSON(8, "fact", "topic", "title"),
+	}
+	st := &curatorMockStore{}
+
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	// bus is nil by default — no SetBus call
+
+	// Must not panic.
+	if err := c.Curate(context.Background(), "scope-1", "user msg", longResponse(200), "conv-1"); err != nil {
+		t.Fatalf("Curate: %v", err)
+	}
+	if st.appendCount() == 0 {
+		t.Error("expected AppendMemory to be called")
+	}
+}
+
+// TestCurator_FailedAppendMemory_NoEvent: when AppendMemory returns an error,
+// EventMemoryChanged must NOT be emitted.
+func TestCurator_FailedAppendMemory_NoEvent(t *testing.T) {
+	prov := &curatorMockProvider{
+		response: classifyJSON(8, "fact", "topic", "title"),
+	}
+	st := &curatorMockStore{appendErr: fmt.Errorf("store write failure")}
+	rb := &captureBus{}
+
+	c := NewCurator(curatorStaticProvFn(prov), st, nil, nil, enabledCurationCfg(), disabledDedupCfg())
+	c.SetBus(rb)
+
+	// Curate returns an error because AppendMemory failed.
+	_ = c.Curate(context.Background(), "scope-1", "user msg", longResponse(200), "conv-1")
+
+	memEvs := filterEvents(rb.events, notify.EventMemoryChanged)
+	if len(memEvs) != 0 {
+		t.Errorf("expected 0 EventMemoryChanged on failed AppendMemory, got %d", len(memEvs))
+	}
+}
+
+// filterEvents returns all events with the given type from a slice.
+func filterEvents(events []notify.Event, evType string) []notify.Event {
+	var out []notify.Event
+	for _, ev := range events {
+		if ev.Type == evType {
+			out = append(out, ev)
+		}
+	}
+	return out
 }

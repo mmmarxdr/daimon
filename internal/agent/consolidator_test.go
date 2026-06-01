@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"daimon/internal/config"
+	"daimon/internal/notify"
 	"daimon/internal/provider"
 	"daimon/internal/store"
 )
@@ -461,4 +462,96 @@ func (p *callCountProvider) Chat(_ context.Context, _ provider.ChatRequest) (*pr
 	n := p.count
 	p.mu.Unlock()
 	return p.onCall(n)
+}
+
+// ---------------------------------------------------------------------------
+// Seam 4 — ADR-5: Consolidator bus injection + EventMemoryChanged emit
+// ---------------------------------------------------------------------------
+
+// consolidatorStaticProvFn wraps a fixed provider.Provider for consolidator tests.
+func consolidatorStaticProvFn(p provider.Provider) func() provider.Provider {
+	return func() provider.Provider { return p }
+}
+
+// makeConsolidatableStore creates a mock store with enough entries for
+// the Consolidator to trigger a consolidation (>= MinEntriesPerTopic entries on same topic).
+func makeConsolidatableStore(topic string, count int) *consolidatorMockStore {
+	st := &consolidatorMockStore{}
+	for i := 0; i < count; i++ {
+		st.entries = append(st.entries, store.MemoryEntry{
+			ID:      fmt.Sprintf("entry-%d", i),
+			ScopeID: "scope-1",
+			Topic:   topic,
+			Content: fmt.Sprintf("memory content %d", i),
+			Type:    "fact",
+		})
+	}
+	return st
+}
+
+// makeConsolidator builds a Consolidator with the given provider and store.
+func makeConsolidator(prov provider.Provider, st store.Store) *Consolidator {
+	cfg := config.ConsolidationConfig{
+		Enabled:            true,
+		MinEntriesPerTopic: 3,
+		IntervalHours:      1,
+	}
+	return NewConsolidator(consolidatorStaticProvFn(prov), st, nil, nil, cfg)
+}
+
+// TestConsolidator_EmitsMemoryChanged: when the Consolidator successfully writes
+// a merged memory entry, it emits EventMemoryChanged on the bus.
+func TestConsolidator_EmitsMemoryChanged(t *testing.T) {
+	prov := &callCountProvider{
+		onCall: func(_ int) (*provider.ChatResponse, error) {
+			return &provider.ChatResponse{Content: "Merged memory about the user."}, nil
+		},
+	}
+	st := makeConsolidatableStore("topic-a", 4)
+	rb := &captureBus{}
+
+	c := makeConsolidator(prov, st)
+	if c == nil {
+		t.Fatal("expected non-nil Consolidator")
+	}
+	c.SetBus(rb)
+
+	// Call consolidateScope directly (same package — valid white-box test).
+	_, _, err := c.consolidateScope(context.Background(), "scope-1")
+	if err != nil {
+		t.Fatalf("consolidateScope: %v", err)
+	}
+
+	memEvs := filterEvents(rb.events, notify.EventMemoryChanged)
+	if len(memEvs) == 0 {
+		t.Fatal("expected at least 1 EventMemoryChanged after successful consolidation")
+	}
+	ev := memEvs[0]
+	if ev.Meta["scope_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[scope_id] must not be empty")
+	}
+}
+
+// TestConsolidator_NilBus_NoPanic: Consolidator with bus==nil must not panic.
+func TestConsolidator_NilBus_NoPanic(t *testing.T) {
+	prov := &callCountProvider{
+		onCall: func(_ int) (*provider.ChatResponse, error) {
+			return &provider.ChatResponse{Content: "Merged memory about the user."}, nil
+		},
+	}
+	st := makeConsolidatableStore("topic-b", 4)
+
+	c := makeConsolidator(prov, st)
+	if c == nil {
+		t.Fatal("expected non-nil Consolidator")
+	}
+	// bus is nil — no SetBus call; must not panic
+	_, _, err := c.consolidateScope(context.Background(), "scope-1")
+	if err != nil {
+		t.Fatalf("consolidateScope: %v", err)
+	}
+	// No assertion needed beyond no panic; consolidation should still write entries.
+	if st.appendCount() == 0 {
+		t.Error("expected at least one AppendMemory call from consolidation")
+	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"daimon/internal/notify"
 	"daimon/internal/store"
 )
 
@@ -57,6 +58,7 @@ type MemoryToolDeps struct {
 	Store         store.Store
 	EnqueueEnrich func(entry store.MemoryEntry)   // nil if enricher disabled
 	EnqueueEmbed  func(id, scope, content string) // nil if embedding disabled
+	Bus           notify.Bus                      // optional; nil = no EventMemoryChanged emitted (ADR-5)
 }
 
 // BuildMemoryTools constructs the four memory tools and returns them keyed by name.
@@ -178,6 +180,15 @@ func (t *saveMemoryTool) Execute(ctx context.Context, params json.RawMessage) (T
 
 	if err := t.deps.Store.AppendMemory(ctx, scope, entry); err != nil {
 		return ToolResult{IsError: true, Content: fmt.Sprintf("failed to save memory: %v", err)}, nil
+	}
+
+	// ADR-5: emit EventMemoryChanged on successful AppendMemory (bare signal).
+	if t.deps.Bus != nil {
+		t.deps.Bus.Emit(notify.Event{
+			Type:   notify.EventMemoryChanged,
+			Origin: notify.OriginAgent,
+			Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+		})
 	}
 
 	if t.deps.EnqueueEnrich != nil {
