@@ -47,6 +47,7 @@ type subRecord struct {
 	budget     skill.BudgetConfig
 	cost       float64 // cumulative USD
 	turns      int
+	tokens     int // cumulative input+output tokens (ADR-4)
 	softWarned bool
 
 	status     string // "running" | "completed" | "failed" | "cancelled"
@@ -456,6 +457,13 @@ func (m *SubagentManager) budgetMonitor(rec *subRecord) {
 			rec.mu.Lock()
 			rec.cost += turnCost
 			rec.turns++
+			// ADR-4: accumulate token counts from Meta keys.
+			if n, err := strconv.Atoi(ev.Meta["input_tokens"]); err == nil {
+				rec.tokens += n
+			}
+			if n, err := strconv.Atoi(ev.Meta["output_tokens"]); err == nil {
+				rec.tokens += n
+			}
 
 			softHit := !rec.softWarned && rec.budget.MaxCostUSD > 0 &&
 				rec.cost >= 0.8*rec.budget.MaxCostUSD
@@ -507,6 +515,7 @@ func (m *SubagentManager) finalize(rec *subRecord, status, reason string) {
 	rec.failReason = reason
 	cost := rec.cost
 	turns := rec.turns
+	tokens := rec.tokens // ADR-4: captured under rec.mu alongside cost/turns
 	summary := rec.subChannel.FinalAssistant()
 	rec.result = &SubagentResult{
 		Status:  status,
@@ -545,6 +554,7 @@ func (m *SubagentManager) finalize(rec *subRecord, status, reason string) {
 		"parent_conv_id": rec.parentConvID,
 		"cost_usd":       fmt.Sprintf("%.4f", cost),
 		"turns":          strconv.Itoa(turns),
+		"tokens":         strconv.Itoa(tokens), // ADR-4: authoritative total; "0" on zero-turn completion
 	}
 
 	evType := notify.EventSubagentCompleted

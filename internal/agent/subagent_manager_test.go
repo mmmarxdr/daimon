@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -949,6 +950,214 @@ func TestSpawnTimeout_PositiveBudget_CtxCancelledAfterTimeout(t *testing.T) {
 		// Good — context expired as expected.
 	case <-time.After(200 * time.Millisecond):
 		t.Error("expected subagent context to be cancelled after 50ms timeout, but it is still live after 200ms")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Seam 3 — ADR-4: subRecord.tokens accumulator + EventSubagentCompleted Meta
+// ---------------------------------------------------------------------------
+
+// TestSubagentTokens_Accumulate: feed budgetMonitor a sequence of EventTurnCompleted
+// events and assert rec.tokens equals the running sum. Malformed/absent Meta must not
+// increment.
+func TestSubagentTokens_Accumulate(t *testing.T) {
+	tests := []struct {
+		name       string
+		events     []map[string]string // Meta maps to feed as EventTurnCompleted
+		wantTokens int
+	}{
+		{
+			name: "three normal turns",
+			events: []map[string]string{
+				{"input_tokens": "100", "output_tokens": "50", "cost_usd": "0.001"},
+				{"input_tokens": "80", "output_tokens": "40", "cost_usd": "0.001"},
+				{"input_tokens": "90", "output_tokens": "45", "cost_usd": "0.001"},
+			},
+			wantTokens: 100 + 50 + 80 + 40 + 90 + 45,
+		},
+		{
+			name: "malformed token keys produce no increment",
+			events: []map[string]string{
+				{"input_tokens": "abc", "output_tokens": "xyz", "cost_usd": "0.0"},
+			},
+			wantTokens: 0,
+		},
+		{
+			name: "absent token keys produce no increment",
+			events: []map[string]string{
+				{"cost_usd": "0.001"},
+			},
+			wantTokens: 0,
+		},
+		{
+			name: "mixed valid and invalid",
+			events: []map[string]string{
+				{"input_tokens": "200", "output_tokens": "100", "cost_usd": "0.001"},
+				{"input_tokens": "bad", "output_tokens": "50", "cost_usd": "0.001"},
+				{"input_tokens": "30", "cost_usd": "0.001"},
+			},
+			wantTokens: 200 + 100 + 50 + 30, // "bad" input skipped, "50" valid output, "30" valid input with no output
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a subRecord directly (white-box test) and drive budgetMonitor.
+			subCtx, cancel := context.WithCancel(context.Background())
+			subCh := channel.NewSubagentChannel("test-budget-monitor")
+			rec := &subRecord{
+				id:         "test-id",
+				status:     "running",
+				budget:     skill.BudgetConfig{MaxCostUSD: 100, MaxTurns: 100},
+				events:     make(chan notify.Event, 16),
+				done:       make(chan struct{}),
+				ctx:        subCtx,
+				cancel:     cancel,
+				subChannel: subCh,
+			}
+			// Minimal SubagentManager with a no-op store and nil bus.
+			m := &SubagentManager{
+				store: &mockStore{},
+			}
+
+			// Feed events before starting monitor (buffered channel).
+			for _, meta := range tc.events {
+				rec.events <- notify.Event{
+					Type:   notify.EventTurnCompleted,
+					Origin: notify.OriginAgent,
+					Meta:   meta,
+				}
+			}
+			// Close the channel so budgetMonitor exits cleanly after draining.
+			close(rec.events)
+
+			// Run budgetMonitor synchronously (it exits when rec.events is closed).
+			m.budgetMonitor(rec)
+
+			rec.mu.Lock()
+			gotTokens := rec.tokens
+			rec.mu.Unlock()
+
+			if gotTokens != tc.wantTokens {
+				t.Errorf("rec.tokens = %d, want %d", gotTokens, tc.wantTokens)
+			}
+		})
+	}
+}
+
+// TestSubagentCompleted_PublishesTokensMeta: after finalize, the emitted
+// EventSubagentCompleted.Meta["tokens"] equals the accumulated total.
+// Zero-turn case emits "0" (not absent).
+//
+// Approach: use a controlled child factory where runFn blocks until all token
+// events have been emitted, then sends the final assistant message. This prevents
+// FinalAssistant() returning "done" before all token events are accumulated.
+func TestSubagentCompleted_PublishesTokensMeta(t *testing.T) {
+	tests := []struct {
+		name      string
+		turnMetas []map[string]string // EventTurnCompleted events to emit
+		wantStr   string
+	}{
+		{
+			name: "three turns accumulate to 405",
+			turnMetas: []map[string]string{
+				{"input_tokens": "100", "output_tokens": "50", "cost_usd": "0.0001"},
+				{"input_tokens": "80", "output_tokens": "40", "cost_usd": "0.0001"},
+				{"input_tokens": "90", "output_tokens": "45", "cost_usd": "0.0001"},
+			},
+			wantStr: "405",
+		},
+		{
+			name:    "zero turns emits 0 not absent",
+			wantStr: "0",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			rb := newBusRecorder()
+			t.Cleanup(func() { rb.Close() })
+			st := &mockStore{}
+
+			// sendDone gates when the fake child sends its final message.
+			sendDone := make(chan struct{})
+
+			m := &SubagentManager{
+				bus:         rb,
+				store:       st,
+				mu:          sync.RWMutex{},
+				subs:        make(map[string]*subRecord),
+				callerIsSub: make(map[string]bool),
+			}
+			m.newChildAgent = func(
+				_ skill.ExecutableSkillDef,
+				_ string,
+				subCtx context.Context,
+				subCh *channel.SubagentChannel,
+				_ map[string]tool.Tool,
+				_ store.Store,
+			) (*Agent, error) {
+				inbox := make(chan channel.IncomingMessage, 10)
+				_ = subCh.Start(context.Background(), inbox)
+				go func() {
+					<-sendDone // wait until all token events have been emitted
+					_ = subCh.Send(context.Background(), channel.OutgoingMessage{Text: "done"})
+					_ = subCh.Stop()
+				}()
+				return nil, nil
+			}
+			m.installBusSubscription()
+
+			def := defaultDef("worker")
+			def.Budget = skill.BudgetConfig{MaxCostUSD: 1000, MaxTurns: 1000, Timeout: 10 * time.Second}
+
+			handle, err := m.Spawn(context.Background(), def, "do work", SpawnModeAsync, "parent-conv")
+			if err != nil {
+				t.Fatalf("Spawn: %v", err)
+			}
+
+			// Emit all token EventTurnCompleted events while child is still running.
+			for _, meta := range tc.turnMetas {
+				rb.Emit(notify.Event{
+					Type:      notify.EventTurnCompleted,
+					Origin:    notify.OriginAgent,
+					ChannelID: handle.rec.subChannel.ID(),
+					Timestamp: time.Now(),
+					Meta:      meta,
+				})
+			}
+
+			// Allow budgetMonitor to drain all token events (it is async).
+			time.Sleep(50 * time.Millisecond)
+
+			// Signal child to send final message and stop. Then emit one more
+			// EventTurnCompleted so budgetMonitor wakes and checks FinalAssistant().
+			close(sendDone)
+			time.Sleep(20 * time.Millisecond)
+			rb.Emit(notify.Event{
+				Type:      notify.EventTurnCompleted,
+				Origin:    notify.OriginAgent,
+				ChannelID: handle.rec.subChannel.ID(),
+				Timestamp: time.Now(),
+				Meta:      map[string]string{"cost_usd": "0"},
+			})
+
+			ev, found := rb.waitForEvent(notify.EventSubagentCompleted, 3*time.Second)
+			if !found {
+				t.Fatal("EventSubagentCompleted not emitted within timeout")
+			}
+
+			tokensStr, ok := ev.Meta["tokens"]
+			if !ok {
+				t.Fatal("EventSubagentCompleted.Meta[\"tokens\"] not present")
+			}
+			if tokensStr != tc.wantStr {
+				t.Errorf("Meta[\"tokens\"] = %q, want %q", tokensStr, tc.wantStr)
+			}
+			if _, err := strconv.Atoi(tokensStr); err != nil {
+				t.Errorf("strconv.Atoi(Meta[\"tokens\"]) failed: %v", err)
+			}
+		})
 	}
 }
 
