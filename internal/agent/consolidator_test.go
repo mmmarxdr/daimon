@@ -530,6 +530,9 @@ func TestConsolidator_EmitsMemoryChanged(t *testing.T) {
 	if ev.Meta["scope_id"] == "" {
 		t.Error("EventMemoryChanged.Meta[scope_id] must not be empty")
 	}
+	if ev.Meta["entry_id"] == "" {
+		t.Error("EventMemoryChanged.Meta[entry_id] must not be empty")
+	}
 }
 
 // TestConsolidator_NilBus_NoPanic: Consolidator with bus==nil must not panic.

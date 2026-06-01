@@ -181,6 +181,9 @@ func TestProcessMessage_TokensUsage_FieldsMatchTotals(t *testing.T) {
 
 // TestEmitTokensUsage_PopulatesCategoryFields: when contextMgr has a cached
 // breakdown, EventTokensUsage carries matching SysToks/MsgToks/ToolToks.
+// White-box: seeds lastUsage/hasBreakdown directly (same package). The
+// ContextManager is configured with strategy "none" so Manage() does not
+// overwrite the seeded values, giving us a deterministic round-trip assertion.
 func TestEmitTokensUsage_PopulatesCategoryFields(t *testing.T) {
 	rb := &recordingBus{}
 
@@ -192,15 +195,23 @@ func TestEmitTokensUsage_PopulatesCategoryFields(t *testing.T) {
 	ch := &mockChannel{}
 	st := &mockStore{}
 
-	// Use a real ContextManager with "smart" strategy and small window so it
-	// populates the cache on the first Manage() call, then read those values.
+	// Build a ContextManager whose Manage() path is "none" so it does NOT
+	// overwrite lastUsage. Then seed a known per-category breakdown directly.
 	cmCfg := config.ContextConfig{
-		MaxTokens:        200000,
-		CompactThreshold: 0.9,
-		Strategy:         "smart",
-		FallbackCtxSize:  200000,
+		Strategy:        "none",
+		FallbackCtxSize: 200000,
 	}
 	ctxMgr := NewContextManager(cmCfg, func() provider.Provider { return prov }, nil)
+
+	// Seed known values directly (same-package white-box access is valid here).
+	const wantSys, wantMsg, wantTool = 1500, 4200, 800
+	ctxMgr.lastUsage = TokenUsage{
+		SystemPrompt: wantSys,
+		Messages:     wantMsg,
+		Tools:        wantTool,
+		Total:        wantSys + wantMsg + wantTool,
+	}
+	ctxMgr.hasBreakdown = true
 
 	ag := New(
 		defaultCfg(), defaultLimits(), config.FilterConfig{},
@@ -220,20 +231,15 @@ func TestEmitTokensUsage_PopulatesCategoryFields(t *testing.T) {
 	}
 	ev := usageEvs[0]
 
-	// After a smart Manage() call, breakdown should be set.
-	// We can't predict exact values but they must be non-negative.
-	if ev.SysToks < 0 {
-		t.Errorf("SysToks = %d, want >= 0", ev.SysToks)
+	// Exact round-trip: the seeded breakdown must survive through the emit path.
+	if ev.SysToks != wantSys {
+		t.Errorf("SysToks = %d, want %d", ev.SysToks, wantSys)
 	}
-	if ev.MsgToks < 0 {
-		t.Errorf("MsgToks = %d, want >= 0", ev.MsgToks)
+	if ev.MsgToks != wantMsg {
+		t.Errorf("MsgToks = %d, want %d", ev.MsgToks, wantMsg)
 	}
-	if ev.ToolToks < 0 {
-		t.Errorf("ToolToks = %d, want >= 0", ev.ToolToks)
-	}
-	// For smart strategy, at least SystemPrompt or Messages must be > 0
-	if ev.SysToks == 0 && ev.MsgToks == 0 {
-		t.Error("smart strategy: expected at least SysToks or MsgToks > 0 in category breakdown")
+	if ev.ToolToks != wantTool {
+		t.Errorf("ToolToks = %d, want %d", ev.ToolToks, wantTool)
 	}
 }
 
