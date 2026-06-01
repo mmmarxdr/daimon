@@ -27,6 +27,13 @@ type Event struct {
 	DurationMs int64   `json:"duration_ms,omitempty"`
 	CostUSD    float64 `json:"cost_usd,omitempty"`
 	IsError    bool    `json:"is_error,omitempty"`
+
+	// Per-category context-window fill (ADR-2). REPLACE semantics: each
+	// EventTokensUsage is a snapshot of the current window, not a delta.
+	// Zero when the smart strategy did not run (legacy/none paths).
+	SysToks  int `json:"sys_toks,omitempty"`
+	MsgToks  int `json:"msg_toks,omitempty"`
+	ToolToks int `json:"tool_toks,omitempty"`
 }
 
 // Bus is the central event distribution interface. It is safe for concurrent use.

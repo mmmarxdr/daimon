@@ -1012,6 +1012,13 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			}),
 		})
 		// REQ-9.2: one per-turn coalesced agent.tokens.usage event on the bus.
+		// ADR-3: populate per-category breakdown from LastUsage() when smart strategy ran.
+		var sysT, msgT, toolT int
+		if a.contextMgr != nil {
+			if u, ok := a.contextMgr.LastUsage(); ok {
+				sysT, msgT, toolT = u.SystemPrompt, u.Messages, u.Tools
+			}
+		}
 		a.bus.Emit(notify.Event{
 			Type:       notify.EventTokensUsage,
 			Origin:     notify.OriginAgent,
@@ -1019,6 +1026,9 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			Timestamp:  time.Now(),
 			TokenCount: totalOutputTokens,
 			CostUSD:    turnCostUSD,
+			SysToks:    sysT,
+			MsgToks:    msgT,
+			ToolToks:   toolT,
 			Meta: mergeSubagentMeta(conv, map[string]string{
 				"conv_id":       conv.ID,
 				"input_tokens":  strconv.Itoa(totalInputTokens),

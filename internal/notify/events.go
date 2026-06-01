@@ -43,6 +43,13 @@ const (
 	// Never emitted by todo_list (read-only). Must NOT be in StreamingSkipSet.
 	EventTodolistChanged = "agent.todolist.changed"
 
+	// Memory mutation event (ADR-5, tui-backend-seams).
+	// Emitted after every successful AppendMemory call via Curator,
+	// Consolidator, MemoryToolDeps, or the legacy loop path.
+	// Bare signal: Meta carries scope_id + entry_id only.
+	// NOT in StreamingSkipSet — memory changes are notification-rule candidates.
+	EventMemoryChanged = "agent.memory.changed"
+
 	// Streaming / tool-lifecycle event types (agent-stream-events change, REQ-12).
 	//
 	// Bus-routed events (structured boundaries, ~5–50 per turn):
@@ -78,6 +85,9 @@ var KnownEventTypes = map[string]bool{
 
 	// Todolist mutation event (todolist-tool, REQ-7).
 	EventTodolistChanged: true,
+
+	// Memory mutation event (ADR-5, tui-backend-seams).
+	EventMemoryChanged: true,
 
 	// Bus-routed streaming boundary events (REQ-12).
 	// These are registered for completeness / validation tooling but are

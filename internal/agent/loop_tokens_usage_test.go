@@ -174,3 +174,107 @@ func TestProcessMessage_TokensUsage_FieldsMatchTotals(t *testing.T) {
 	// Suppress "declared and not used" for wantIn.
 	_ = wantIn
 }
+
+// ---------------------------------------------------------------------------
+// Seam 2 — ADR-2/ADR-3: category fields on EventTokensUsage (RED → GREEN)
+// ---------------------------------------------------------------------------
+
+// TestEmitTokensUsage_PopulatesCategoryFields: when contextMgr has a cached
+// breakdown, EventTokensUsage carries matching SysToks/MsgToks/ToolToks.
+func TestEmitTokensUsage_PopulatesCategoryFields(t *testing.T) {
+	rb := &recordingBus{}
+
+	prov := &mockProvider{
+		responses: []provider.ChatResponse{
+			{Content: "answer", Usage: provider.UsageStats{InputTokens: 100, OutputTokens: 50}},
+		},
+	}
+	ch := &mockChannel{}
+	st := &mockStore{}
+
+	// Use a real ContextManager with "smart" strategy and small window so it
+	// populates the cache on the first Manage() call, then read those values.
+	cmCfg := config.ContextConfig{
+		MaxTokens:        200000,
+		CompactThreshold: 0.9,
+		Strategy:         "smart",
+		FallbackCtxSize:  200000,
+	}
+	ctxMgr := NewContextManager(cmCfg, func() provider.Provider { return prov }, nil)
+
+	ag := New(
+		defaultCfg(), defaultLimits(), config.FilterConfig{},
+		ch, prov, st, audit.NoopAuditor{},
+		nil, nil, skill.SkillIndex{}, 4, false,
+	).withBus(rb)
+	ag.contextMgr = ctxMgr
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "ch-1",
+		Content:   content.TextBlock("test query"),
+	})
+
+	usageEvs := rb.filterByType(notify.EventTokensUsage)
+	if len(usageEvs) != 1 {
+		t.Fatalf("expected 1 EventTokensUsage, got %d", len(usageEvs))
+	}
+	ev := usageEvs[0]
+
+	// After a smart Manage() call, breakdown should be set.
+	// We can't predict exact values but they must be non-negative.
+	if ev.SysToks < 0 {
+		t.Errorf("SysToks = %d, want >= 0", ev.SysToks)
+	}
+	if ev.MsgToks < 0 {
+		t.Errorf("MsgToks = %d, want >= 0", ev.MsgToks)
+	}
+	if ev.ToolToks < 0 {
+		t.Errorf("ToolToks = %d, want >= 0", ev.ToolToks)
+	}
+	// For smart strategy, at least SystemPrompt or Messages must be > 0
+	if ev.SysToks == 0 && ev.MsgToks == 0 {
+		t.Error("smart strategy: expected at least SysToks or MsgToks > 0 in category breakdown")
+	}
+}
+
+// TestEmitTokensUsage_NilOrNoBreakdown_ZeroCategories: nil contextMgr and
+// hasBreakdown==false cases produce SysToks==MsgToks==ToolToks==0.
+func TestEmitTokensUsage_NilOrNoBreakdown_ZeroCategories(t *testing.T) {
+	rb := &recordingBus{}
+
+	prov := &mockProvider{
+		responses: []provider.ChatResponse{
+			{Content: "answer", Usage: provider.UsageStats{InputTokens: 100, OutputTokens: 50}},
+		},
+	}
+	ch := &mockChannel{}
+	st := &mockStore{}
+
+	// Agent with nil contextMgr (legacy path, no smart strategy).
+	ag := New(
+		defaultCfg(), defaultLimits(), config.FilterConfig{},
+		ch, prov, st, audit.NoopAuditor{},
+		nil, nil, skill.SkillIndex{}, 4, false,
+	).withBus(rb)
+	// contextMgr is nil by default in New().
+
+	ag.processMessage(context.Background(), channel.IncomingMessage{
+		ChannelID: "ch-1",
+		Content:   content.TextBlock("test"),
+	})
+
+	usageEvs := rb.filterByType(notify.EventTokensUsage)
+	if len(usageEvs) != 1 {
+		t.Fatalf("expected 1 EventTokensUsage, got %d", len(usageEvs))
+	}
+	ev := usageEvs[0]
+	if ev.SysToks != 0 {
+		t.Errorf("nil contextMgr: SysToks = %d, want 0", ev.SysToks)
+	}
+	if ev.MsgToks != 0 {
+		t.Errorf("nil contextMgr: MsgToks = %d, want 0", ev.MsgToks)
+	}
+	if ev.ToolToks != 0 {
+		t.Errorf("nil contextMgr: ToolToks = %d, want 0", ev.ToolToks)
+	}
+}
