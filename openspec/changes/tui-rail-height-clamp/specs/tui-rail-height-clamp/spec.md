@@ -128,20 +128,30 @@ order (remainder front-loading, surplus reflow direction). For
 
 ---
 
-### Requirement TR-HC-2: Per-panel truncation contract
+### Requirement TR-HC-2: Per-panel truncation contract (judgment-day fix)
 
-Each panel MUST use its assigned `height` (renamed from `_ int`) as
-`renderBudget` and apply the following contract:
+Each panel MUST use its assigned `height` as `budget` and apply the
+**uniform per-panel box-budget contract**:
 
 ```
-contentRowBudget = renderBudget - 2 (border rows) - 1 (header row)
+maxContent = budget - 2   (rows available inside the border)
 ```
 
-| Assigned budget | Behavior                                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| `>= 4`          | header + up to `contentRowBudget - 1` data rows + `+N more` if cut; or all data rows if they fit |
-| `== 3`          | header + `+N more` only (`contentRowBudget = 0`, zero data rows shown)                           |
-| `<= 2`          | returns `""` (TR-0-C; physically impossible box)                                                 |
+| Assigned budget | Behavior                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| `>= 4`          | header + up to `maxContent - 1` data rows + `+N more` if cut; or all data rows if they fit |
+| `== 3`          | **header ONLY** (`maxContent = 1`, adding any row yields 4 rows > budget)                  |
+| `<= 2`          | returns `""` (TR-0-C; physically impossible box; `maxContent <= 0`)                        |
+
+**Arithmetic proof (budget==3):** `maxContent = 3 - 2 = 1`. The border
+occupies 2 rows (top + bottom). The 1 remaining row holds the header.
+Adding `+N more` would require 2 content rows → rendered box = 4 rows >
+budget 3. Therefore `+N more` MUST NOT appear at budget==3; the panel
+renders the header row only.
+
+**Arithmetic proof (budget==4):** `maxContent = 4 - 2 = 2`. `maxContent -
+1 = 1` data slot. If data exists: show 1 data row + `+N more`. Box = 4 =
+budget ✓.
 
 **Header is MANDATORY.** `rows[0]` (the `panelHeader` / `panelHeaderWithBadge`
 line) MUST NEVER be dropped regardless of budget.
@@ -174,20 +184,22 @@ be `dimLabel`. Truncation MUST use `ansi.Truncate(..., inner, "…")`.
 #### Scenario: Budget >= 4 — partial data rows + +N more
 
 - GIVEN `todolistPanel` with 8 items (after cap), assigned `budget=6`
-  (`contentRowBudget = 6-2-1 = 3`)
+  (`maxContent = 6-2 = 4`, `maxDataRows = 3`, show 2 + "+N more")
 - WHEN `Render(32, 6)` is called
 - THEN the output contains the header row
-- AND exactly 2 data rows are shown (`contentRowBudget - 1 = 2`)
+- AND exactly 2 data rows are shown (`maxDataRows - 1 = 2`)
 - AND the output contains `"  +6 more"` (`N = 8 - 2 = 6`)
 
-#### Scenario: Budget == 3 — header + +N more only
+#### Scenario: Budget == 3 — header ONLY (judgment-day fix)
 
-- GIVEN `contextMeterPanel` with smart-strategy data (6 natural rows),
+- GIVEN `contextMeterPanel` with smart-strategy data (5 natural data rows),
   assigned `budget=3`
 - WHEN `Render(32, 3)` is called
 - THEN the output contains the panel header
 - AND zero data rows are shown
-- AND the output contains `"  +N more"` for all hidden data rows
+- AND `"  +N more"` does NOT appear (`maxContent=1`; adding it would yield 4
+  rows > budget 3)
+- AND `lipgloss.Height(output) == 3`
 
 #### Scenario: Budget <= 2 — returns ""
 
@@ -258,13 +270,14 @@ alongside `panelMinHeight = 4`.
 - AND the output contains `"  +10 more"` (`N = 12 - 2`)
 - AND exactly ONE `+N more` line appears (no stacked notices)
 
-#### Scenario: Budget == 3 with cap — header + +N more only
+#### Scenario: Budget == 3 with cap — header ONLY (judgment-day fix)
 
 - GIVEN `todolistPanel` with 12 items, assigned `budget=3`
 - WHEN `Render(32, 3)` is called
 - THEN the output contains the panel header
 - AND zero item rows are shown
-- AND the output contains `"  +12 more"` (totalItems=12, shown=0)
+- AND `"  +N more"` does NOT appear (`maxContent=1`; any extra row overflows)
+- AND `lipgloss.Height(output) == 3`
 
 ---
 
@@ -280,8 +293,10 @@ differ; at the tight heights `h=8` and `h=12` the context-meter is floored
 to `""` (budget ≤ 2), so both strategies produce IDENTICAL output.
 
 The `h=12` golden MUST match the §5 worked example exactly: budgets
-`[3, 2, 2, 2]`, only todolist renders (header + `+6 more`), the other
-three return `""`.
+`[3, 2, 2, 2]`, only todolist renders (**header ONLY** — budget==3 means
+`maxContent=1`, so no data rows and no `+N more`), the other three return
+`""`. (The pre-fix spec incorrectly stated "header + `+6 more`"; the corrected
+arithmetic shows that "+N more" at budget==3 produces 4 rows > 3 — overflow.)
 
 The `h=24` golden MUST show all four panels near-natural with minimal
 truncation.
@@ -296,13 +311,14 @@ The core assertion `lipgloss.Height(rail.Render(screen, w, h)) <= h` MUST
 be asserted as a table-driven unit test independent of the golden files,
 covering `h ∈ {8, 12, 24}` for both `screenChat` and `screenDiff`.
 
-#### Scenario: h=12 golden matches worked example
+#### Scenario: h=12 golden matches worked example (judgment-day fix)
 
 - GIVEN all four `screenChat` panels populated (natural heights as in §5)
   and `termenv.TrueColor` forced
 - WHEN `rail.Render(screenChat, 32, 12)` is called
 - THEN the output matches the `h=12` golden file exactly
-- AND only todolist renders (header + `"  +6 more"`), three panels return `""`
+- AND only todolist renders with **header only** (budget==3 → `maxContent=1`
+  → no data rows, no `+N more`); three panels return `""`
 - AND `lipgloss.Height(output) <= 12`
 
 #### Scenario: Smart and legacy are identical at h=12 (both floored)

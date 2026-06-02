@@ -43,6 +43,54 @@ func renderMoreRow(n, inner int, s tuiStyles) string {
 	return ansi.Truncate(s.dimLabel.Render(fmt.Sprintf("  +%d more", n)), inner, "…")
 }
 
+// clampPanelContent implements the uniform per-panel box-budget contract
+// (judgment-day fix). It takes the pre-rendered header row, the ordered data
+// rows, the panel width, the assigned height budget, and the panel styles.
+//
+// The invariant it enforces:
+//
+//	maxContent = budget - 2  (rows available inside the border)
+//	  maxContent <= 0  → return "" (cannot fit a border)
+//	  maxContent == 1  → header ONLY (box = 3 rows = budget ✓)
+//	  maxContent >= 2  → header + up to (maxContent-1) data rows + "+N more" if cut
+//
+// The total count hidden by truncation is len(dataRows) - showCount;
+// callers may add additional cap-hidden items to the returned `hidden` value
+// before emitting "+N more" (see todolistPanel / memoryPeekPanel).
+//
+// Returns the fully wrapped box string (via wrapPanelBox) or "" when the
+// budget is too small. Pure — no side effects.
+func clampPanelContent(headerRow string, dataRows []string, totalHidden int, width, budget int, inner int, s tuiStyles) string {
+	maxContent := budget - 2 // rows available inside the border
+	if maxContent <= 0 {
+		return ""
+	}
+	if maxContent == 1 {
+		// budget==3: header ONLY — adding any row would overflow to 4 rows > budget.
+		return wrapPanelBox(headerRow, width, s)
+	}
+	// budget>=4: header + up to (maxContent-1) data rows + "+N more" if cut.
+	maxDataRows := maxContent - 1
+	shown := dataRows
+	hidden := totalHidden
+	if len(dataRows) > maxDataRows {
+		// Reserve last slot of maxDataRows for "+N more".
+		showCount := maxDataRows - 1
+		if showCount < 0 {
+			showCount = 0
+		}
+		hidden += len(dataRows) - showCount
+		shown = dataRows[:showCount]
+	}
+	rows := make([]string, 0, 1+len(shown)+1)
+	rows = append(rows, headerRow)
+	rows = append(rows, shown...)
+	if hidden > 0 {
+		rows = append(rows, renderMoreRow(hidden, inner, s))
+	}
+	return wrapPanelBox(strings.Join(rows, "\n"), width, s)
+}
+
 // wrapPanelBox wraps the given content string in a bordered box using s.panelBorder.
 //
 // Width math (lipgloss v1.1.0 verified):
@@ -243,12 +291,13 @@ func (p *telemetryPanel) accumulate(ev notify.Event) {
 
 // Render implements Panel. Returns "" when no EventTokensUsage has been received.
 //
-// Height contract (design ADR-2):
+// Height contract — uniform per-panel box-budget (judgment-day fix):
 //
 //	budget := height (0 = natural/unconstrained)
-//	  budget <= 2  → return ""
-//	  budget == 3  → header + renderMoreRow (0 data rows)
-//	  budget >= 4  → header + as many assembled rows as fit (tail truncated) + renderMoreRow if cut
+//	maxContent = budget - 2  (rows available inside the border)
+//	  maxContent <= 0 (budget <= 2)  → return ""
+//	  maxContent == 1 (budget == 3)  → header ONLY (1 content row → box = 3 = budget ✓)
+//	  maxContent >= 2 (budget >= 4)  → header + up to (maxContent-1) data rows + "+N more" if cut
 //	The already-assembled rows slice (aggregate first, tool rows, subagent rows) is
 //	truncated from the tail so the aggregate block survives first.
 func (p *telemetryPanel) Render(width, height int) string {
@@ -285,39 +334,9 @@ func (p *telemetryPanel) Render(width, height int) string {
 	// Per-subagent rows: first-seen order, cap 3.
 	dataRows = append(dataRows, p.renderSubagentRows(inner)...)
 
-	// Apply height budget gating (ADR-2). height==0 means natural.
+	// Apply height budget gating via uniform contract. height==0 means natural.
 	if height > 0 {
-		if height <= 2 {
-			return ""
-		}
-		contentRowBudget := height - 2 - 1 // border(2) + header(1)
-		if contentRowBudget == 0 {
-			// budget==3: header + +N more only.
-			rows := []string{
-				ansi.Truncate(headerRow, inner, "…"),
-				renderMoreRow(len(dataRows), inner, p.styles),
-			}
-			return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
-		}
-		// budget>=4: show as many data rows as fit, tail-truncated.
-		maxShow := contentRowBudget - 1 // reserve 1 for +N more if cutting
-		if maxShow < 0 {
-			maxShow = 0
-		}
-		shown := dataRows
-		var hidden int
-		if len(dataRows) > contentRowBudget {
-			// Truncate tail; reserve last slot for +N more.
-			shown = dataRows[:maxShow]
-			hidden = len(dataRows) - maxShow
-		}
-		rows := make([]string, 0, 1+len(shown)+1)
-		rows = append(rows, ansi.Truncate(headerRow, inner, "…"))
-		rows = append(rows, shown...)
-		if hidden > 0 {
-			rows = append(rows, renderMoreRow(hidden, inner, p.styles))
-		}
-		return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
+		return clampPanelContent(ansi.Truncate(headerRow, inner, "…"), dataRows, 0, width, height, inner, p.styles)
 	}
 
 	// Natural render (height==0): show all rows.
@@ -444,14 +463,14 @@ func (p *todolistPanel) setList(list tool.TodoList) {
 
 // Render implements Panel. Returns "" when there are no todo items.
 //
-// Height contract (design ADR-2, ADR-4):
+// Height contract — uniform per-panel box-budget (judgment-day fix):
 //
 //	budget := height (0 = natural/unconstrained)
-//	Step 1: cap items to todolistMaxItems (=10) — height-independent.
-//	Step 2: gate on contentRowBudget = budget - 2 (border) - 1 (header).
-//	  budget <= 2  → return ""
-//	  budget == 3  → header + renderMoreRow(hidden, inner, styles)
-//	  budget >= 4  → header + min(contentRowBudget-1, len) data rows + renderMoreRow if cut
+//	Step 1: cap items to todolistMaxItems (=10) — height-independent (ADR-4).
+//	Step 2: maxContent = budget - 2 (rows available inside the border).
+//	  maxContent <= 0 (budget <= 2)  → return ""
+//	  maxContent == 1 (budget == 3)  → header ONLY (no "+N more"; that would overflow)
+//	  maxContent >= 2 (budget >= 4)  → header + up to (maxContent-1) item rows + "+N more" if cut
 //	Reconciled single +N more: N = totalItems - shownItems.
 func (p *todolistPanel) Render(width, height int) string {
 	if len(p.list.Items) == 0 {
@@ -482,56 +501,9 @@ func (p *todolistPanel) Render(width, height int) string {
 	badge := fmt.Sprintf("%d/%d · auto", done, totalItems)
 	headerRow := ansi.Truncate(p.styles.panelHeaderWithBadgeWidth("todo", badge, inner), inner, "…")
 
-	// Step 2: apply height budget gating (ADR-2).
-	// height==0 means "natural" — no truncation.
-	if height > 0 {
-		if height <= 2 {
-			return ""
-		}
-		contentRowBudget := height - 2 - 1 // border(2) + header(1)
-		if contentRowBudget == 0 {
-			// budget==3: header + +N more only.
-			hidden := totalItems // all items hidden
-			rows := []string{headerRow, renderMoreRow(hidden, inner, p.styles)}
-			return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
-		}
-		// budget>=4: show up to contentRowBudget-1 data rows (reserve 1 for +N more if cut).
-		maxShow := contentRowBudget - 1
-		if maxShow < 0 {
-			maxShow = 0
-		}
-		if len(items) <= contentRowBudget {
-			// All capped items fit — no height clamp needed.
-			maxShow = len(items)
-		}
-		shownItems := maxShow
-		if shownItems > len(items) {
-			shownItems = len(items)
-		}
-
-		rows := []string{headerRow}
-		for _, item := range items[:shownItems] {
-			var marker string
-			switch item.Status {
-			case "done", "completed":
-				marker = p.styles.accent.Render("✓")
-			case "in_progress":
-				marker = p.styles.amber.Render("●")
-			default:
-				marker = p.styles.dimLabel.Render("○")
-			}
-			rows = append(rows, ansi.Truncate(marker+" "+item.Content, inner, "…"))
-		}
-		// Single reconciled +N more (covers both cap and clamp hidden items).
-		hidden := totalItems - shownItems
-		if hidden > 0 {
-			rows = append(rows, renderMoreRow(hidden, inner, p.styles))
-		}
-		return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
-	}
-
-	// Natural render (height==0): apply cap but no height truncation.
-	rows := []string{headerRow}
+	// Pre-render all capped item rows (shared by height-gated and natural paths).
+	capHidden := totalItems - len(items) // items hidden by cap (height-independent)
+	dataRows := make([]string, 0, len(items))
 	for _, item := range items {
 		var marker string
 		switch item.Status {
@@ -542,10 +514,20 @@ func (p *todolistPanel) Render(width, height int) string {
 		default:
 			marker = p.styles.dimLabel.Render("○")
 		}
-		rows = append(rows, ansi.Truncate(marker+" "+item.Content, inner, "…"))
+		dataRows = append(dataRows, ansi.Truncate(marker+" "+item.Content, inner, "…"))
 	}
-	// If cap was applied, show +N more for cap overflow.
-	capHidden := totalItems - len(items)
+
+	// Step 2: apply height budget gating via uniform contract. height==0 means natural.
+	// capHidden is passed as totalHidden so the single reconciled "+N more" counts
+	// both cap-hidden items and clamp-hidden items (ADR-4 reconciliation).
+	if height > 0 {
+		return clampPanelContent(headerRow, dataRows, capHidden, width, height, inner, p.styles)
+	}
+
+	// Natural render (height==0): apply cap but no height truncation.
+	rows := make([]string, 0, 1+len(dataRows)+1)
+	rows = append(rows, headerRow)
+	rows = append(rows, dataRows...)
 	if capHidden > 0 {
 		rows = append(rows, renderMoreRow(capHidden, inner, p.styles))
 	}
@@ -739,13 +721,18 @@ func (p *contextMeterPanel) accumulate(ev notify.Event) {
 
 // Render implements Panel. Returns "" until at least one token event is received.
 //
-// Height contract (design ADR-2):
+// Height contract — uniform per-panel box-budget (judgment-day fix):
 //
 //	budget := height (0 = natural/unconstrained)
-//	  budget <= 2  → return ""
-//	  budget == 3  → header + renderMoreRow (0 data rows)
-//	  budget >= 4  → header + bar + pct (always) + category rows tail-first to budget + renderMoreRow if cut
-//	The bar is NEVER split — if budget can't fit bar+pct, this is the ==3 case.
+//	maxContent = budget - 2  (rows available inside the border)
+//	  maxContent <= 0 (budget <= 2)  → return ""
+//	  maxContent == 1 (budget == 3)  → header ONLY
+//	  maxContent >= 2 (budget >= 4)  → header + up to (maxContent-1) data rows + "+N more" if cut
+//
+// dataRows = [barRow, pctRow, ...categoryRows] — assembled in order, clamped tail-first.
+// bar and pct are NOT mandatory at constrained budgets; they are just the first two data rows.
+// The uniform contract applies: whatever fits in maxContent-1 data slots is shown,
+// tail rows (category first, then pct, then bar) are dropped when space is tight.
 func (p *contextMeterPanel) Render(width, height int) string {
 	if !p.hasData {
 		return ""
@@ -798,50 +785,22 @@ func (p *contextMeterPanel) Render(width, height int) string {
 			ansi.Truncate(p.styles.dimLabel.Render(toolLine), inner, "…"),
 		}
 	}
-	// Total natural data rows: bar + pct + category.
-	totalDataRows := 2 + len(categoryRows)
 
-	// Apply height budget gating (ADR-2). height==0 means natural.
+	// Assemble all data rows in priority order: bar, pct, then category rows.
+	// This is the full ordered slice; the clamp trims from the tail.
+	allDataRows := make([]string, 0, 2+len(categoryRows))
+	allDataRows = append(allDataRows, barRow, pctRow)
+	allDataRows = append(allDataRows, categoryRows...)
+
+	// Apply height budget gating via uniform contract. height==0 means natural.
 	if height > 0 {
-		if height <= 2 {
-			return ""
-		}
-		contentRowBudget := height - 2 - 1 // border(2) + header(1)
-		if contentRowBudget == 0 {
-			// budget==3: header + +N more only.
-			rows := []string{headerRow, renderMoreRow(totalDataRows, inner, p.styles)}
-			return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
-		}
-		// budget>=4: bar+pct always shown (they are the panel's core), then
-		// category rows tail-first to fit remaining budget.
-		// contentRowBudget rows available; reserve 1 for +N more if cutting.
-		rows := []string{headerRow, barRow, pctRow}
-		shownData := 2 // bar + pct always shown
-		remaining := contentRowBudget - 2
-		if remaining < 0 {
-			remaining = 0
-		}
-		// Show as many category rows as fit (tail truncated).
-		catToShow := len(categoryRows)
-		if catToShow > remaining {
-			catToShow = remaining
-			if catToShow > 0 {
-				// Reserve 1 for +N more when cutting.
-				catToShow--
-			}
-		}
-		rows = append(rows, categoryRows[:catToShow]...)
-		shownData += catToShow
-		hidden := totalDataRows - shownData
-		if hidden > 0 {
-			rows = append(rows, renderMoreRow(hidden, inner, p.styles))
-		}
-		return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
+		return clampPanelContent(headerRow, allDataRows, 0, width, height, inner, p.styles)
 	}
 
 	// Natural render (height==0): show all rows.
-	rows := []string{headerRow, barRow, pctRow}
-	rows = append(rows, categoryRows...)
+	rows := make([]string, 0, 1+len(allDataRows))
+	rows = append(rows, headerRow)
+	rows = append(rows, allDataRows...)
 	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }
 
@@ -1139,12 +1098,13 @@ func (p *memoryPeekPanel) setEntries(entries []store.MemoryEntry) {
 // entry rows. Each row shows Title; falls back to Content when Title is empty.
 // All lines are ANSI-truncated to inner width (width-4 per wrapPanelBox convention).
 //
-// Height contract (design ADR-2):
+// Height contract — uniform per-panel box-budget (judgment-day fix):
 //
 //	budget := height (0 = natural/unconstrained)
-//	  budget <= 2  → return ""
-//	  budget == 3  → header + renderMoreRow
-//	  budget >= 4  → header + entry rows (tail-truncated to budget) + renderMoreRow if cut
+//	maxContent = budget - 2  (rows available inside the border)
+//	  maxContent <= 0 (budget <= 2)  → return ""
+//	  maxContent == 1 (budget == 3)  → header ONLY
+//	  maxContent >= 2 (budget >= 4)  → header + up to (maxContent-1) entry rows + "+N more" if cut
 //	maxRows=5 cap is applied before height truncation; height truncation is applied second.
 func (p *memoryPeekPanel) Render(width, height int) string {
 	if len(p.entries) == 0 {
@@ -1176,43 +1136,22 @@ func (p *memoryPeekPanel) Render(width, height int) string {
 		dataRows = append(dataRows, ansi.Truncate(p.styles.dimLabel.Render("• "+text), inner, "…"))
 	}
 
-	// Apply height budget gating (ADR-2). height==0 means natural.
+	// capHidden: entries hidden by the maxRows=5 cap (reconciled into "+N more").
+	capHidden := totalEntries - len(dataRows)
+
+	// Apply height budget gating via uniform contract. height==0 means natural.
+	// capHidden is passed as totalHidden so the single "+N more" counts both
+	// cap-hidden and clamp-hidden entries (ADR-4 reconciliation).
 	if height > 0 {
-		if height <= 2 {
-			return ""
-		}
-		contentRowBudget := height - 2 - 1 // border(2) + header(1)
-		if contentRowBudget == 0 {
-			// budget==3: header + +N more only.
-			rows := []string{headerRow, renderMoreRow(totalEntries, inner, p.styles)}
-			return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
-		}
-		// budget>=4: show as many entry rows as fit, tail-truncated.
-		maxShow := contentRowBudget - 1 // reserve 1 for +N more if cutting
-		if maxShow < 0 {
-			maxShow = 0
-		}
-		shown := dataRows
-		var hidden int
-		if len(dataRows) > contentRowBudget {
-			shown = dataRows[:maxShow]
-			hidden = totalEntries - maxShow
-		} else if totalEntries > len(dataRows) {
-			// Cap was applied; the remaining are cap-hidden.
-			hidden = totalEntries - len(dataRows)
-		}
-		rows := make([]string, 0, 1+len(shown)+1)
-		rows = append(rows, headerRow)
-		rows = append(rows, shown...)
-		if hidden > 0 {
-			rows = append(rows, renderMoreRow(hidden, inner, p.styles))
-		}
-		return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
+		return clampPanelContent(headerRow, dataRows, capHidden, width, height, inner, p.styles)
 	}
 
 	// Natural render (height==0): show capped rows, no height truncation.
-	rows := make([]string, 0, 1+len(dataRows))
+	rows := make([]string, 0, 1+len(dataRows)+1)
 	rows = append(rows, headerRow)
 	rows = append(rows, dataRows...)
+	if capHidden > 0 {
+		rows = append(rows, renderMoreRow(capHidden, inner, p.styles))
+	}
 	return wrapPanelBox(strings.Join(rows, "\n"), width, p.styles)
 }

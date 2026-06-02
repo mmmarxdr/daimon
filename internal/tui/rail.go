@@ -104,10 +104,9 @@ func (r *rail) Render(screen screenState, width, height int) string {
 	budgets := assignBudgets(naturals, avail)
 
 	// Pass 2: re-render each panel at its assigned budget.
-	// Per ADR-2 (design §2): budget <= panelMinHeight-2 cannot hold a
-	// bordered header (2 border rows consume the entire budget), so a
-	// compliant panel returns "". Skip the render call to avoid wasted work.
-	// Budgets of panelMinHeight-1 (== 3) still render: header + "+N more".
+	// Per the uniform box-budget contract (judgment-day fix): budget <= 2 cannot
+	// hold a bordered box (2 border rows + 0 content), so compliant panels return "".
+	// Budget == 3 renders header only (1 content row → box = 3 rows = budget ✓).
 	const boxFloor = panelMinHeight - 2 // == 2; panels with budget <= this return ""
 	parts := make([]string, 0, len(populated))
 	for i, e := range populated {
@@ -120,7 +119,21 @@ func (r *rail) Render(screen screenState, width, height int) string {
 			parts = append(parts, s)
 		}
 	}
-	return strings.Join(parts, "\n")
+	result := strings.Join(parts, "\n")
+
+	// Defense-in-depth safety clamp (ANSI-safe): if the stacked result somehow
+	// still exceeds `height`, keep only the first `height` lines. Each
+	// lipgloss-styled line is self-contained (ANSI escapes never span "\n"),
+	// so splitting on "\n" and rejoining is always safe. With the per-panel fix
+	// above this should never fire, but it guarantees the bound unconditionally.
+	if height > 0 && lipgloss.Height(result) > height {
+		lines := strings.SplitN(result, "\n", height+1)
+		if len(lines) > height {
+			lines = lines[:height]
+		}
+		result = strings.Join(lines, "\n")
+	}
+	return result
 }
 
 // assignBudgets distributes avail rows across n panels using a deterministic

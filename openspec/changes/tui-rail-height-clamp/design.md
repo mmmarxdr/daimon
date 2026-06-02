@@ -160,14 +160,27 @@ row + 2 border = 4 rendered rows** to show anything meaningful. We pin
 `panels.go`. Below 4 a panel cannot show a header AND one row inside a box.
 
 Pure-(b) policy has **NO panel-drop**. So when the assigned budget is below the
-minimum, the panel still renders — degenerately — per this contract:
+minimum, the panel still renders — degenerately — per the **uniform per-panel
+box-budget contract** (judgment-day fix; the original design had an arithmetic
+error at budget==3):
 
-| Assigned budget (rendered rows) | What renders                                                                        |
-| ------------------------------- | ----------------------------------------------------------------------------------- |
-| `>= 4`                          | header + as many data rows as fit + (`+N more` if cut)                              |
-| `== 3`                          | header + `+N more` (NO data row — header + overflow notice + 2 border)              |
-| `<= 2`                          | the panel renders `""` (cannot even fit a bordered header; contributes zero height) |
+```
+maxContent = budget - 2   (rows available inside the border)
+```
 
+| Assigned budget | `maxContent` | What renders                                                                        |
+| --------------- | ------------ | ----------------------------------------------------------------------------------- |
+| `>= 4`          | `>= 2`       | header + up to `maxContent-1` data rows + (`+N more` if cut)                        |
+| `== 3`          | `== 1`       | **header ONLY** — one content row → rendered box = 3 rows = budget ✓                |
+| `<= 2`          | `<= 0`       | the panel renders `""` (cannot even fit a bordered header; contributes zero height) |
+
+> **Why budget==3 is header-only (not header+"+N more"):** The border adds 2
+> rows (top + bottom). At budget=3, `maxContent = 3 - 2 = 1`. The single
+> content slot holds the header. Adding `+N more` would require 2 content rows
+> → rendered box = 4 rows > budget 3 → overflow. The original design incorrectly
+> stated "header + overflow notice + 2 border" which sums to 4 for a budget of 3.
+> The corrected contract: budget==3 → header ONLY, no `+N more`.
+>
 > The `<= 2` case returns `""` rather than a broken half-box. This is the ONE
 > place pure-(b) sheds a panel, and it is forced (a 2-row box is physically
 > impossible: 2 border rows leave 0 content rows). It is NOT priority-drop — it
@@ -180,12 +193,12 @@ minimum, the panel still renders — degenerately — per this contract:
 **Decision — truncation contract (per panel).** Each panel computes:
 
 ```
-inner            = width - 4                       (existing convention)
-renderBudget     = the rows assigned by rail.Render (ADR-1)
-contentRowBudget = renderBudget - 2 (border) - 1 (header)
+inner      = width - 4                       (existing convention)
+budget     = the rows assigned by rail.Render (ADR-1)
+maxContent = budget - 2                      (rows inside the border)
 ```
 
-- If `len(dataRows) <= contentRowBudget`: render header + all data rows (no `+N
+- If `len(dataRows) <= maxContent-1`: render header + all data rows (no `+N
 more`). This is the surplus case — the panel reports its natural height back
   (ADR-3) and reflow gives the spare to a neighbor.
 - If `len(dataRows) > contentRowBudget`: render header + the **first
@@ -463,14 +476,22 @@ heights measured in pass 1:
 
 Budgets `[3,2,2,2]`, sum 6, plus 3 separators = 9 ≤ 12. ✓
 
-At budget 3 todolist renders header + `+N more` (`contentRowBudget = 3-2-1 = 0`,
-so 0 data rows → all 6 items hidden → `+6 more`). At budget 2 the other three
-hit the `<= 2` degenerate rule and render `""`. Result: only todolist shows
-(header + `+6 more`), total 3 rendered rows + 0 separators (others empty) = fits
-trivially. This exposes the harsh-degradation reality at `h=12` with 4 panels and
-is EXACTLY why the priority-drop hybrid (option e) is the deferred follow-on. The
-golden at `h=12` pins this. A roomier golden at `h=24` (avail=21) shows all four
-near-natural; `h=8` shows the most aggressive clamp.
+At budget 3 todolist renders **header ONLY** (`maxContent = 3-2 = 1`; one
+content slot holds the header; adding `+N more` would yield 4 rows > budget 3 —
+overflow). At budget 2 the other three hit the `<= 2` degenerate rule and
+render `""`. Result: only todolist shows (header only), total 3 rendered rows +
+0 separators (others empty) = 3 ≤ 12. ✓
+
+> **Correction from original design:** The original §5 prose stated
+> "header + overflow notice + 2 border" = 4 rows for a budget of 3. That
+> arithmetic was wrong — it sums to 4 > 3. The judgment-day fix corrects this:
+> budget==3 → `maxContent=1` → header only, no `+N more`. The golden at `h=12`
+> pins the corrected output (header-only box, 3 rows).
+
+This exposes the harsh-degradation reality at `h=12` with 4 panels and is
+EXACTLY why the priority-drop hybrid (option e) is the deferred follow-on. A
+roomier golden at `h=24` (avail=21) shows all four near-natural; `h=8` shows
+the most aggressive clamp.
 
 **Golden boundary set (SPEC-PHASE CONFIRM):** `h=8` (aggressive), `h=12`
 (boundary, worked above), `h=24` (comfortable). Force `termenv.TrueColor` for

@@ -1839,9 +1839,10 @@ func TestTodolist_HeightTruncation_BudgetGe4(t *testing.T) {
 	}
 }
 
-// b.2: todolistPanel with 6 items, Render(32, 3): header present, 0 data rows,
-// output contains "+N more" for all 6 items.
-// (spec TR-HC-2 "Budget == 3 — header + +N more only")
+// b.2: todolistPanel with 6 items, Render(32, 3): header ONLY — no data rows,
+// no "+N more" (judgment-day fix: budget==3 → maxContent=1 → header only;
+// adding "+N more" would make 2 content rows → box = 4 rows > budget).
+// (spec TR-HC-2 "Budget == 3 — header ONLY" — corrected contract)
 func TestTodolist_HeightTruncation_Budget3(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -1850,10 +1851,10 @@ func TestTodolist_HeightTruncation_Budget3(t *testing.T) {
 	p := newTodolistPanel(newTuiStyles())
 	p.setList(tool.TodoList{Items: makeItems(6)})
 
-	got := p.Render(32, 3) // budget=3, contentRowBudget=0, 0 data rows
+	got := p.Render(32, 3) // budget=3, maxContent=1, header ONLY
 
 	if got == "" {
-		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header only)")
 	}
 	// Header must be present.
 	if !strings.Contains(got, "TODO") {
@@ -1864,9 +1865,13 @@ func TestTodolist_HeightTruncation_Budget3(t *testing.T) {
 	if itemRows != 0 {
 		t.Errorf("Render(32, 3): got %d item rows, want 0 (budget==3 shows no data rows)\n%s", itemRows, got)
 	}
-	// "+N more" must appear.
-	if !strings.Contains(got, "more") {
-		t.Errorf("Render(32, 3): expected '+N more' in output:\n%s", got)
+	// No "+N more" — it would overflow the budget (add a 2nd content row → 4 rows > 3).
+	if strings.Contains(got, "more") {
+		t.Errorf("Render(32, 3): must NOT contain '+N more' at budget==3 (would overflow); got:\n%s", got)
+	}
+	// Box must be exactly 3 rows tall (border top + header + border bottom).
+	if h := lipgloss.Height(got); h != 3 {
+		t.Errorf("Render(32, 3): lipgloss.Height=%d, want 3 (budget==3 guarantee)\n%s", h, got)
 	}
 }
 
@@ -1947,9 +1952,9 @@ func TestTodolist_Cap_12Items_Budget6(t *testing.T) {
 	}
 }
 
-// b.6: todolistPanel with 12 items, Render(32, 3): header + 0 item rows,
-// output contains "  +12 more".
-// (spec TR-HC-3 "Budget == 3 with cap")
+// b.6: todolistPanel with 12 items, Render(32, 3): header ONLY — no item rows,
+// no "+N more" (judgment-day fix: budget==3 → header only; "+N more" would overflow).
+// (spec TR-HC-3 "Budget == 3 with cap" — corrected contract)
 func TestTodolist_Cap_Budget3_With12Items(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -1958,10 +1963,10 @@ func TestTodolist_Cap_Budget3_With12Items(t *testing.T) {
 	p := newTodolistPanel(newTuiStyles())
 	p.setList(tool.TodoList{Items: makeItems(12)})
 
-	got := p.Render(32, 3) // budget=3, contentRowBudget=0, 0 data rows
+	got := p.Render(32, 3) // budget=3, maxContent=1, header ONLY
 
 	if got == "" {
-		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header only)")
 	}
 	// Header must be present.
 	if !strings.Contains(got, "TODO") {
@@ -1972,15 +1977,20 @@ func TestTodolist_Cap_Budget3_With12Items(t *testing.T) {
 	if itemRows != 0 {
 		t.Errorf("Render(32, 3): got %d item rows, want 0\n%s", itemRows, got)
 	}
-	// "+12 more" since totalItems=12, shown=0.
-	if !strings.Contains(got, "  +12 more") {
-		t.Errorf("Render(32, 3): expected '  +12 more' in output:\n%s", got)
+	// No "+N more" at budget==3 — it would overflow (2 content rows → 4 > 3).
+	if strings.Contains(got, "more") {
+		t.Errorf("Render(32, 3): must NOT contain '+N more' (would overflow budget); got:\n%s", got)
+	}
+	// Box must be exactly 3 rows.
+	if h := lipgloss.Height(got); h != 3 {
+		t.Errorf("Render(32, 3): lipgloss.Height=%d, want 3\n%s", h, got)
 	}
 }
 
-// b.7: contextMeterPanel (smart strategy, 6 natural rows), Render(32, 3):
-// header present, 0 data rows, output contains "+N more".
-// (spec TR-HC-2 "Budget == 3 — header + +N more only")
+// b.7: contextMeterPanel (smart strategy, 5 natural data rows), Render(32, 3):
+// header ONLY — no data rows, no "+N more" (judgment-day fix: budget==3 →
+// maxContent=1 → header only; adding any data row would overflow to 4 rows > 3).
+// (spec TR-HC-2 "Budget == 3 — header ONLY" — corrected contract)
 func TestContextMeter_HeightTruncation_Budget3_SmartStrategy(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -1995,10 +2005,10 @@ func TestContextMeter_HeightTruncation_Budget3_SmartStrategy(t *testing.T) {
 		ToolToks: 500,
 	})
 
-	got := p.Render(32, 3) // budget=3, contentRowBudget=0
+	got := p.Render(32, 3) // budget=3, maxContent=1, header ONLY
 
 	if got == "" {
-		t.Fatal("Render(32, 3): got empty string, want non-empty (header + +N more)")
+		t.Fatal("Render(32, 3): got empty string, want non-empty (header only)")
 	}
 	// Header must be present.
 	if !strings.Contains(got, "CONTEXT") {
@@ -2011,9 +2021,13 @@ func TestContextMeter_HeightTruncation_Budget3_SmartStrategy(t *testing.T) {
 			t.Errorf("Render(32, 3): must NOT contain %q (budget==3, no data rows):\n%s", row, got)
 		}
 	}
-	// "+N more" must appear.
-	if !strings.Contains(got, "more") {
-		t.Errorf("Render(32, 3): expected '+N more' in output:\n%s", got)
+	// No "+N more" at budget==3 — it would overflow (2 content rows → 4 > 3).
+	if strings.Contains(got, "more") {
+		t.Errorf("Render(32, 3): must NOT contain '+N more' (would overflow budget); got:\n%s", got)
+	}
+	// Box must be exactly 3 rows.
+	if h := lipgloss.Height(got); h != 3 {
+		t.Errorf("Render(32, 3): lipgloss.Height=%d, want 3\n%s", h, got)
 	}
 }
 
@@ -2296,6 +2310,137 @@ func buildWorkedExampleRail_Smart(t *testing.T) rail {
 }
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// judgment-day-fix: TestRailRender_HeightGuarantee_Sweep — regression guard
+//
+// This test was added AFTER the judgment-day audit identified that the central
+// guarantee lipgloss.Height(rail.Render(screen,w,h)) <= h is VIOLATED in normal
+// use. Root cause: budget==3 emitted header+"+N more" (4 rows for a 3-row
+// budget), and contextMeterPanel unconditionally emitted bar+pct at budget>=4
+// when those 2 data rows alone consumed the entire contentRowBudget.
+//
+// The sweep covers h=3..30 for both screenChat and screenDiff with varying
+// numbers of populated panels, ensuring the guarantee holds everywhere —
+// not just at the fixed {8,12,24} boundary set used by the golden tests.
+// ---------------------------------------------------------------------------
+
+// buildSweepRailChat builds a fully-populated screenChat rail with n panels
+// active (1..4). Panels: todolist=1, context-meter=2, telemetry=3, memory=4.
+func buildSweepRailChat(t *testing.T, numPopulated int, smartStrategy bool) rail {
+	t.Helper()
+	s := newTuiStyles()
+	r := newRail(s)
+	r = copyRailWith(r, func(panels map[panelID]Panel) {
+		// Always populate todolist (panel 1).
+		if p, ok := panels[panelTodolist].(*todolistPanel); ok {
+			cp := *p
+			cp.setList(tool.TodoList{Items: makeItems(6)})
+			panels[panelTodolist] = &cp
+		}
+		if numPopulated < 2 {
+			return
+		}
+		// Panel 2: context-meter.
+		if p, ok := panels[panelContextMeter].(*contextMeterPanel); ok {
+			cp := *p
+			if smartStrategy {
+				cp.setLimit(128000)
+				cp.accumulate(notify.Event{Type: notify.EventTokensUsage, SysToks: 1000, MsgToks: 2000, ToolToks: 500})
+			} else {
+				cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 42000})
+			}
+			panels[panelContextMeter] = &cp
+		}
+		if numPopulated < 3 {
+			return
+		}
+		// Panel 3: telemetry.
+		if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+			cp := *p
+			cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 5000, CostUSD: 0.01})
+			cp.accumulate(notify.Event{Type: notify.EventToolStart, ToolName: "bash"})
+			panels[panelTelemetry] = &cp
+		}
+		if numPopulated < 4 {
+			return
+		}
+		// Panel 4: memory-peek.
+		if p, ok := panels[panelMemoryPeek].(*memoryPeekPanel); ok {
+			cp := *p
+			cp.setEntries([]store.MemoryEntry{{Title: "entry-1"}, {Title: "entry-2"}})
+			panels[panelMemoryPeek] = &cp
+		}
+	})
+	return r
+}
+
+// TestRailRender_HeightGuarantee_Sweep asserts lipgloss.Height(result) <= h
+// for every combination of screen, numPopulated panels, strategy, and h in 3..30.
+// This is the regression guard that would have caught the judgment-day overflow bugs.
+func TestRailRender_HeightGuarantee_Sweep(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	type railCase struct {
+		name   string
+		build  func(t *testing.T) rail
+		screen screenState
+	}
+
+	cases := []railCase{}
+	for _, smart := range []bool{false, true} {
+		stratName := "legacy"
+		if smart {
+			stratName = "smart"
+		}
+		for n := 1; n <= 4; n++ {
+			numPopulated := n
+			isSmart := smart
+			cases = append(cases, railCase{
+				name:   fmt.Sprintf("screenChat/%s/%dpanels", stratName, numPopulated),
+				screen: screenChat,
+				build: func(t *testing.T) rail {
+					return buildSweepRailChat(t, numPopulated, isSmart)
+				},
+			})
+		}
+	}
+	// Also sweep screenDiff with telemetry populated.
+	cases = append(cases, railCase{
+		name:   "screenDiff/telemetry",
+		screen: screenDiff,
+		build: func(t *testing.T) rail {
+			s := newTuiStyles()
+			r := newRail(s)
+			r = copyRailWith(r, func(panels map[panelID]Panel) {
+				if p, ok := panels[panelTelemetry].(*telemetryPanel); ok {
+					cp := *p
+					cp.accumulate(notify.Event{Type: notify.EventTokensUsage, TokenCount: 3000, CostUSD: 0.005})
+					panels[panelTelemetry] = &cp
+				}
+			})
+			return r
+		},
+	})
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.build(t)
+			for h := 3; h <= 30; h++ {
+				result := r.Render(tc.screen, 32, h)
+				got := lipgloss.Height(result)
+				if got > h {
+					t.Errorf("h=%d: lipgloss.Height(result)=%d > h (OVERFLOW); first failing case; result:\n%s",
+						h, got, result)
+					return // stop at first failure to keep output readable
+				}
+			}
+		})
+	}
+}
 
 // TestResumeListPanel_PrecomputedAgo verifies that after setSessions, the panel's
 // ago slice is populated and that Render reads from it rather than calling
