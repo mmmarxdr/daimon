@@ -1784,6 +1784,82 @@ func TestRenderMoreRow_ExactFormat(t *testing.T) {
 	}
 }
 
+// TestClampPanelContent_NeverExceedsBudget guards the per-panel box-budget
+// contract DIRECTLY at the helper level — NOT behind rail.Render's defense
+// clamp, which would mask a per-panel overflow (judgment-day R2 W2). It also
+// catches the cap-hidden +1 overflow (R2 W1): when data rows fill the available
+// slots AND totalHidden>0, the "+N more" row must still fit inside the budget.
+func TestClampPanelContent_NeverExceedsBudget(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+	const width, inner = 32, 27
+	for budget := 0; budget <= 20; budget++ {
+		for nData := 0; nData <= 15; nData++ {
+			for _, hidden := range []int{0, 1, 5} {
+				data := make([]string, nData)
+				for i := range data {
+					data[i] = fmt.Sprintf("row %d", i)
+				}
+				got := clampPanelContent("HDR", data, hidden, width, budget, inner, s)
+				if got == "" {
+					continue // budget<=2 → "" (height 0, within budget)
+				}
+				if h := lipgloss.Height(got); h > budget {
+					t.Errorf("clampPanelContent(budget=%d, nData=%d, hidden=%d): height %d > budget:\n%s",
+						budget, nData, hidden, h, got)
+				}
+				if !strings.Contains(got, "HDR") {
+					t.Errorf("clampPanelContent(budget=%d, nData=%d, hidden=%d): header dropped:\n%s",
+						budget, nData, hidden, got)
+				}
+			}
+		}
+	}
+}
+
+// TestCapPanels_HeightContract_RealRender exercises the REAL panel Render path
+// (not just the helper) with cap-heavy data at the exact budgets the
+// judgment-day R2 W1 repro flagged: a cap panel whose post-cap rows fill the
+// available slots while cap-hidden items remain must still fit its budget.
+func TestCapPanels_HeightContract_RealRender(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+
+	s := newTuiStyles()
+
+	// todolist: 12 items (cap→10, 2 cap-hidden) across budgets 3..20.
+	todo := newTodolistPanel(s)
+	todo.setList(tool.TodoList{Items: makeItems(12)})
+	// memoryPeek: 8 entries (cap→5, 3 cap-hidden) across budgets 3..20.
+	mem := newMemoryPeekPanel(s)
+	entries := make([]store.MemoryEntry, 8)
+	for i := range entries {
+		entries[i] = store.MemoryEntry{Title: fmt.Sprintf("mem-%d", i)}
+	}
+	mem.setEntries(entries)
+
+	for budget := 3; budget <= 20; budget++ {
+		for _, tc := range []struct {
+			name string
+			out  string
+		}{
+			{"todolist", todo.Render(32, budget)},
+			{"memoryPeek", mem.Render(32, budget)},
+		} {
+			if tc.out == "" {
+				continue
+			}
+			if h := lipgloss.Height(tc.out); h > budget {
+				t.Errorf("%s.Render(32, %d): height %d > budget:\n%s", tc.name, budget, h, tc.out)
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // tui-rail-height-clamp PR-b RED tests — per-panel truncation + todolist cap
 // ---------------------------------------------------------------------------

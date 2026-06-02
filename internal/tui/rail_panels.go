@@ -69,18 +69,25 @@ func clampPanelContent(headerRow string, dataRows []string, totalHidden int, wid
 		// budget==3: header ONLY — adding any row would overflow to 4 rows > budget.
 		return wrapPanelBox(headerRow, width, s)
 	}
-	// budget>=4: header + up to (maxContent-1) data rows + "+N more" if cut.
-	maxDataRows := maxContent - 1
-	shown := dataRows
+	// budget>=4: header takes 1 row; the remaining (maxContent-1) rows hold
+	// data rows plus an optional "+N more" row. The "+N more" row MUST be
+	// counted against the budget — including when ALL data rows fit but the
+	// cap already hid some items (totalHidden>0). Otherwise the box overflows
+	// by one row (judgment-day R2 W1).
+	avail := maxContent - 1 // rows for data + optional "+N more"
 	hidden := totalHidden
-	if len(dataRows) > maxDataRows {
-		// Reserve last slot of maxDataRows for "+N more".
-		showCount := maxDataRows - 1
-		if showCount < 0 {
-			showCount = 0
-		}
-		hidden += len(dataRows) - showCount
-		shown = dataRows[:showCount]
+	needMore := hidden > 0 || len(dataRows) > avail
+	dataSlots := avail
+	if needMore {
+		dataSlots = avail - 1 // reserve one row for "+N more"
+	}
+	if dataSlots < 0 {
+		dataSlots = 0
+	}
+	shown := dataRows
+	if len(dataRows) > dataSlots {
+		shown = dataRows[:dataSlots]
+		hidden = totalHidden + (len(dataRows) - dataSlots)
 	}
 	rows := make([]string, 0, 1+len(shown)+1)
 	rows = append(rows, headerRow)
