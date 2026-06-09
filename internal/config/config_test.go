@@ -2154,3 +2154,97 @@ func TestApplyDefaults_PruneExplicitlyDisabled_Preserved(t *testing.T) {
 		t.Errorf("RetentionDays: got %d, want 7", cfg.Conversations.Prune.RetentionDays)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 4.1 — MiniMax config: IsKnownProvider + validate (CONFIG-MM-1/2)
+// ---------------------------------------------------------------------------
+
+func TestIsKnownProvider_MiniMax(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"minimax", true},
+		{"anthropic", true},
+		{"openai", true},
+		{"ollama", true},
+		{"unknown-provider", false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsKnownProvider(tc.name)
+			if got != tc.want {
+				t.Errorf("IsKnownProvider(%q) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidate_MiniMaxV2WithAPIKey(t *testing.T) {
+	// CM-1b: v2 active-provider minimax + api_key → valid.
+	cfg := &Config{
+		Providers: map[string]ProviderCredentials{
+			"minimax": {APIKey: "sk-cp-abc123", BaseURL: "https://api.minimax.io/v1"},
+		},
+		Models: ModelsConfig{Default: ModelRef{Provider: "minimax", Model: "MiniMax-Text-01"}},
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.validate(); err != nil {
+		t.Errorf("expected no error for minimax with api_key, got: %v", err)
+	}
+}
+
+func TestValidate_MiniMaxV2EmptyAPIKeyFails(t *testing.T) {
+	// CM-2b: minimax + empty api_key → error referencing api_key.
+	cfg := &Config{
+		Providers: map[string]ProviderCredentials{
+			"minimax": {APIKey: "", BaseURL: "https://api.minimax.io/v1"},
+		},
+		Models: ModelsConfig{Default: ModelRef{Provider: "minimax", Model: "MiniMax-Text-01"}},
+	}
+	cfg.ApplyDefaults()
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("expected validation error for minimax with empty api_key, got nil")
+	}
+	if !strings.Contains(err.Error(), "api_key") {
+		t.Errorf("expected error to contain 'api_key', got: %v", err)
+	}
+}
+
+func TestValidate_MiniMaxV1Legacy(t *testing.T) {
+	// CM-1c: v1 legacy provider.type=minimax + api_key → valid after migration.
+	cfg := &Config{
+		Provider: &ProviderConfig{
+			Type:   "minimax",
+			Model:  "MiniMax-Text-01",
+			APIKey: "sk-cp-abc123",
+		},
+	}
+	cfg.ApplyDefaults()
+	// After ApplyDefaults + migration, Provider should be migrated to v2.
+	// validate() checks the v2 shape; if Provider pointer remains, it checks that too.
+	if err := cfg.validate(); err != nil {
+		t.Errorf("expected no error for v1 minimax with api_key, got: %v", err)
+	}
+}
+
+func TestValidate_MiniMaxFallback(t *testing.T) {
+	// CM-1d: fallback.type=minimax + api_key → valid.
+	cfg := &Config{
+		Providers: map[string]ProviderCredentials{
+			"anthropic": {APIKey: "sk-ant-test"},
+		},
+		Models:  ModelsConfig{Default: ModelRef{Provider: "anthropic", Model: "claude-sonnet-4-6"}},
+		Fallback: &FallbackConfig{
+			Type:   "minimax",
+			Model:  "MiniMax-Text-01",
+			APIKey: "sk-cp-abc123",
+		},
+	}
+	cfg.ApplyDefaults()
+	if err := cfg.validate(); err != nil {
+		t.Errorf("expected no error for fallback minimax with api_key, got: %v", err)
+	}
+}

@@ -80,7 +80,7 @@ type ModelRef struct {
 }
 
 // KnownProviders is the list of provider names accepted by the system.
-var KnownProviders = []string{"anthropic", "openai", "gemini", "openrouter", "ollama"}
+var KnownProviders = []string{"anthropic", "openai", "gemini", "openrouter", "minimax", "ollama"}
 
 // IsKnownProvider returns true iff name is one of KnownProviders.
 func IsKnownProvider(name string) bool {
@@ -1114,7 +1114,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("provider.api_key is required")
 		}
 		switch activeProv {
-		case "anthropic", "gemini", "openrouter", "openai", "ollama", "test", "test_provider":
+		case "anthropic", "gemini", "openrouter", "openai", "ollama", "minimax", "test", "test_provider":
 			// valid
 		default:
 			return fmt.Errorf("unknown provider.type: %s", activeProv)
@@ -1124,7 +1124,7 @@ func (c *Config) validate() error {
 	// v1 legacy Provider pointer — only present during migration window; validate if present.
 	if c.Provider != nil && c.Provider.Type != "" {
 		switch c.Provider.Type {
-		case "anthropic", "gemini", "openrouter", "openai", "ollama", "test", "test_provider":
+		case "anthropic", "gemini", "openrouter", "openai", "ollama", "minimax", "test", "test_provider":
 			// valid
 		default:
 			return fmt.Errorf("unknown provider.type: %s", c.Provider.Type)
@@ -1139,7 +1139,7 @@ func (c *Config) validate() error {
 			return fmt.Errorf("provider.fallback.model is required")
 		}
 		switch c.Fallback.Type {
-		case "anthropic", "gemini", "openrouter", "openai", "ollama", "test", "test_provider", "":
+		case "anthropic", "gemini", "openrouter", "openai", "ollama", "minimax", "test", "test_provider", "":
 			// valid
 		default:
 			return fmt.Errorf("unknown provider.fallback.type: %s", c.Fallback.Type)

@@ -31,6 +31,12 @@ func NewFromConfig(cfg config.ProviderConfig) (Provider, error) {
 			return nil, fmt.Errorf("failed to initialize ollama provider: %w", err)
 		}
 		return p, nil
+	case "minimax":
+		p, err := NewMiniMaxProvider(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize minimax provider: %w", err)
+		}
+		return p, nil
 	default:
 		return nil, fmt.Errorf("unknown provider type %q", cfg.Type)
 	}
