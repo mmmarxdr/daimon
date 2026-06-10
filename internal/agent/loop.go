@@ -75,6 +75,20 @@ func userScope(channelID, senderID string) string {
 	return channelID + ":" + senderID
 }
 
+// webMemScope returns the memory scope for a given (channelID, senderID) pair.
+// For the web channel every conversation has a unique channelID of the form
+// "web:<uuid8>", but all conversations belong to the same single user (daimon
+// is self-hosted / single-user), so memory must be shared across them. We
+// collapse the per-connection ID to the constant "web".
+// All other channels already carry a stable per-user scope via userScope, so
+// they are returned unchanged.
+func webMemScope(channelID, senderID string) string {
+	if strings.HasPrefix(channelID, "web:") {
+		return "web"
+	}
+	return userScope(channelID, senderID)
+}
+
 // minMessagesForTitle is the turn threshold for auto-title generation.
 // Three complete user/assistant exchanges == 6 messages in provider format.
 const minMessagesForTitle = 6
@@ -179,11 +193,15 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 
 	// Resolve convID: explicit ConversationID on the incoming message
 	// (populated by the web channel when `?conversation_id=` was sent on
-	// the WS upgrade) overrides the userScope derivation. The scope used
-	// for memory/RAG search is the convID minus the "conv_" prefix, which
-	// is exactly what userScope would have produced for the pair
-	// (ChannelID, SenderID) — keeping the invariant that memory scope and
-	// convID encode the same identity.
+	// the WS upgrade) overrides the userScope derivation. `scope` is the
+	// convID minus the "conv_" prefix and identifies this conversation; it
+	// is used for per-conversation records (audit/output indexing).
+	//
+	// NOTE: `scope` is NOT the memory scope. For single-conversation channels
+	// (telegram/whatsapp/cli) convID == "conv_" + userScope, so scope happens
+	// to equal the per-user identity — but the web channel mints a unique
+	// convID per "new chat", so scope is per-conversation there. Long-term
+	// memory must be per-user, so it uses memScope (below), not scope.
 	convID := msg.ConversationID
 	if convID == "" {
 		// WU7 (REQ-1): /resume can override the active conv for this (channel, sender).
@@ -195,6 +213,12 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		}
 	}
 	scope := strings.TrimPrefix(convID, "conv_")
+
+	// memScope is the identity under which long-term memory is stored/recalled.
+	// For the web channel, conversations are per-thread (unique convID) but all
+	// belong to the same single user, so memory must be shared across them via a
+	// stable constant. Other channels already carry a stable per-user scope.
+	memScope := webMemScope(msg.ChannelID, msg.SenderID)
 
 	conv, err := a.store.LoadConversation(ctx, convID)
 	if err != nil {
@@ -271,7 +295,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 	// The ContextManager is always present after New() — strategy controls behavior.
 	// Memory search uses UserText (not TextOnly) so a long extracted attachment
 	// body does not dominate the cosine query and pull unrelated memories.
-	memories, _ := a.store.SearchMemory(ctx, scope, msg.Content.UserText(), a.config.MemoryResults)
+	memories, _ := a.store.SearchMemory(ctx, memScope, msg.Content.UserText(), a.config.MemoryResults)
 
 	// RAG: search for relevant document chunks when a DocumentStore is wired.
 	// When HyDE is enabled (and a hypothesis function is provided), we run a
@@ -602,24 +626,24 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 				if a.curator != nil {
 					// Smart memory: Curator classifies, deduplicates, and selectively persists.
 					userText := msg.Content.TextOnly()
-					if curateErr := a.curator.Curate(ctx, scope, userText, resp.Content, convID); curateErr != nil {
+					if curateErr := a.curator.Curate(ctx, memScope, userText, resp.Content, convID); curateErr != nil {
 						slog.Warn("memory curation failed, falling back to raw save", "error", curateErr)
 						// Fallback: save unconditionally (legacy behaviour).
 						entry := store.MemoryEntry{
 							ID:         uuid.New().String(),
-							ScopeID:    scope,
+							ScopeID:    memScope,
 							Content:    resp.Content,
 							Source:     convID,
 							Importance: 5,
 							CreatedAt:  time.Now(),
 						}
 						// ADR-5: best-effort emit on curator-fallback path (~loop.go:616).
-						if appendErr := a.store.AppendMemory(ctx, scope, entry); appendErr == nil {
+						if appendErr := a.store.AppendMemory(ctx, memScope, entry); appendErr == nil {
 							if a.bus != nil {
 								a.bus.Emit(notify.Event{
 									Type:   notify.EventMemoryChanged,
 									Origin: notify.OriginAgent,
-									Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+									Meta:   map[string]string{"scope_id": memScope, "entry_id": entry.ID},
 								})
 							}
 						}
@@ -628,22 +652,22 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 					// Legacy path: save every response unconditionally.
 					entry := store.MemoryEntry{
 						ID:         uuid.New().String(),
-						ScopeID:    scope,
+						ScopeID:    memScope,
 						Content:    resp.Content,
 						Source:     convID,
 						Importance: 5,
 						CreatedAt:  time.Now(),
 					}
-					if err := a.store.AppendMemory(ctx, scope, entry); err != nil {
+					if err := a.store.AppendMemory(ctx, memScope, entry); err != nil {
 						slog.Warn("failed to append memory", "error", err)
 					} else {
-						slog.Debug("memory appended", "scope_id", scope)
+						slog.Debug("memory appended", "scope_id", memScope)
 						// ADR-5: emit EventMemoryChanged on successful legacy-path AppendMemory.
 						if a.bus != nil {
 							a.bus.Emit(notify.Event{
 								Type:   notify.EventMemoryChanged,
 								Origin: notify.OriginAgent,
-								Meta:   map[string]string{"scope_id": scope, "entry_id": entry.ID},
+								Meta:   map[string]string{"scope_id": memScope, "entry_id": entry.ID},
 							})
 						}
 						if a.enricher != nil {
@@ -651,7 +675,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						}
 						// Async embedding — fire and forget.
 						if a.embeddingWorker != nil {
-							a.embeddingWorker.Enqueue(entry.ID, scope, entry.Content)
+							a.embeddingWorker.Enqueue(entry.ID, memScope, entry.Content)
 						}
 					}
 				}
@@ -795,7 +819,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 								toolTimeout = 30 * time.Second
 							}
 							toolCtx, tCancel := context.WithTimeout(loopCtx, toolTimeout)
-							toolCtx = tool.WithScope(toolCtx, scope)
+							toolCtx = tool.WithScope(toolCtx, memScope)
 							toolCtx = tool.WithConvID(toolCtx, conv.ID)
 							// WU6: inject per-(channel,sender) effective cwd so the shell
 							// tool uses the /cd override rather than the static config cwd.
