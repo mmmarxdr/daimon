@@ -456,7 +456,14 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 		slog.Info("degradation", "provider_name", prov.Name(), "block_types", typesList)
 	}
 
+	// iterationsRun tracks the actual number of LLM iterations the turn ran so
+	// the turn_end telemetry frame can report a real count. maxIters is
+	// math.MaxInt32 when no cap is configured (the default), so it must NEVER be
+	// reported to the UI — the frontend renders it verbatim as the "iter N" pill
+	// (DAIM-22: leaked "iter 2147483647").
+	iterationsRun := 0
 	for i := 0; i < maxIters; i++ {
+		iterationsRun = i + 1
 		req := provider.ChatRequest{
 			SystemPrompt: systemPrompt,
 			Messages:     conv.Messages,
@@ -523,7 +530,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 						"elapsed_ms":          time.Since(turnStart).Milliseconds(),
 						"total_input_tokens":  totalInputTokens,
 						"total_output_tokens": totalOutputTokens,
-						"iterations":          i,
+						"iterations":          iterationsRun,
 						"conversation_id":     conv.ID,
 						"stop_reason":         "turn_timeout",
 					})
@@ -1024,7 +1031,7 @@ func (a *Agent) processMessage(ctx context.Context, msg channel.IncomingMessage)
 			"elapsed_ms":          time.Since(turnStart).Milliseconds(),
 			"total_input_tokens":  totalInputTokens,
 			"total_output_tokens": totalOutputTokens,
-			"iterations":          maxIters,
+			"iterations":          iterationsRun,
 		})
 	}
 
