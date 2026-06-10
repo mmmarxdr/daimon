@@ -35,6 +35,12 @@ type openaiStreamChunk struct {
 	} `json:"usage,omitempty"`
 }
 
+// openaiStreamOptions mirrors OpenAI's stream_options object. include_usage
+// asks the endpoint to append a final usage-only chunk to the SSE stream.
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
 // openaiStreamToolCall represents a single tool call delta in a streaming chunk.
 // The first chunk for an index carries ID and function.name; subsequent chunks
 // carry only function.arguments increments.
@@ -120,7 +126,8 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 	}
 	apiReq := struct {
 		openaiRequest
-		Stream bool `json:"stream"`
+		Stream        bool                 `json:"stream"`
+		StreamOptions *openaiStreamOptions `json:"stream_options,omitempty"`
 	}{
 		openaiRequest: openaiRequest{
 			Model:    streamModel,
@@ -128,6 +135,10 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ChatRequest) (*Stre
 			Tools:    tools,
 		},
 		Stream: true,
+		// OpenAI-compatible endpoints (OpenAI, MiniMax) omit the usage frame
+		// from the SSE stream unless include_usage is requested explicitly.
+		// Without this, chat telemetry reports "0 in / 0 out" tokens.
+		StreamOptions: &openaiStreamOptions{IncludeUsage: true},
 	}
 	if req.MaxTokens > 0 {
 		apiReq.MaxTokens = req.MaxTokens
