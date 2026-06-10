@@ -86,6 +86,17 @@ channel:
 #   allowed_users:
 #     - REPLACE_ME                # your Telegram numeric user ID (use @userinfobot to find it)
 
+# -- WhatsApp Cloud API -------------------------------------------------------
+# channel:
+#   type: whatsapp
+#   phone_number_id: "REPLACE_ME"   # from Meta for Developers → WhatsApp → API Setup
+#   access_token: "REPLACE_ME"      # permanent system user token
+#   verify_token: "REPLACE_ME"      # arbitrary secret used for webhook verification GET
+#   app_secret: "REPLACE_ME"        # Meta App Secret — used to verify X-Hub-Signature-256
+#   webhook_port: 8080              # port the webhook HTTP server listens on
+#   webhook_path: /webhook          # URL path Meta will POST events to
+#   allowed_phones: []              # optional allowlist; empty means accept all senders
+
 # -----------------------------------------------------------------------------
 # Tools
 # -----------------------------------------------------------------------------

@@ -439,6 +439,7 @@ type ChannelConfig struct {
 	PhoneNumberID string   `yaml:"phone_number_id" json:"phone_number_id"`
 	AccessToken   string   `yaml:"access_token"    json:"access_token"`
 	VerifyToken   string   `yaml:"verify_token"    json:"verify_token"`
+	AppSecret     string   `yaml:"app_secret"      json:"app_secret"`
 	WebhookPort   int      `yaml:"webhook_port"    json:"webhook_port"` // default 8080
 	WebhookPath   string   `yaml:"webhook_path"    json:"webhook_path"` // default /webhook
 	AllowedPhones []string `yaml:"allowed_phones"  json:"allowed_phones"`
@@ -1162,6 +1163,9 @@ func (c *Config) validate() error {
 		}
 		if c.Channel.VerifyToken == "" {
 			return fmt.Errorf("channel.verify_token is required for whatsapp channel")
+		}
+		if c.Channel.AppSecret == "" {
+			return fmt.Errorf("channel.app_secret is required for whatsapp channel")
 		}
 	}
 

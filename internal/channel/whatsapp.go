@@ -3,6 +3,9 @@ package channel
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +26,7 @@ type WhatsAppChannel struct {
 	phoneNumberID string
 	accessToken   string
 	verifyToken   string
+	appSecret     string
 	port          int
 	webhookPath   string
 	allowedPhones map[string]bool
@@ -50,6 +54,9 @@ func NewWhatsAppChannel(cfg config.ChannelConfig, media config.MediaConfig, medi
 	if cfg.VerifyToken == "" {
 		return nil, fmt.Errorf("whatsapp: verify_token is required")
 	}
+	if cfg.AppSecret == "" {
+		return nil, fmt.Errorf("whatsapp: app_secret is required")
+	}
 
 	// For efficiency, parse allowlist into a constant-time lookup map.
 	allowedPhones := make(map[string]bool)
@@ -70,6 +77,7 @@ func NewWhatsAppChannel(cfg config.ChannelConfig, media config.MediaConfig, medi
 		phoneNumberID: cfg.PhoneNumberID,
 		accessToken:   cfg.AccessToken,
 		verifyToken:   cfg.VerifyToken,
+		appSecret:     cfg.AppSecret,
 		port:          port,
 		webhookPath:   webhookPath,
 		allowedPhones: allowedPhones,
@@ -177,15 +185,17 @@ type whatsappPayload struct {
 					PhoneNumberID string `json:"phone_number_id"`
 				} `json:"metadata"`
 				Messages []struct {
-					ID        string           `json:"id"`
-					From      string           `json:"from"`
-					Type      string           `json:"type"`
-					Timestamp string           `json:"timestamp"`
-					Text      struct{ Body string `json:"body"` } `json:"text"`
-					Image     whatsappMediaRef `json:"image"`
-					Audio     whatsappMediaRef `json:"audio"`
-					Video     whatsappMediaRef `json:"video"`
-					Document  whatsappMediaRef `json:"document"`
+					ID        string `json:"id"`
+					From      string `json:"from"`
+					Type      string `json:"type"`
+					Timestamp string `json:"timestamp"`
+					Text      struct {
+						Body string `json:"body"`
+					} `json:"text"`
+					Image    whatsappMediaRef `json:"image"`
+					Audio    whatsappMediaRef `json:"audio"`
+					Video    whatsappMediaRef `json:"video"`
+					Document whatsappMediaRef `json:"document"`
 				} `json:"messages"`
 			} `json:"value"`
 		} `json:"changes"`
@@ -194,14 +204,38 @@ type whatsappPayload struct {
 
 // handleIncoming processes an inbound webhook POST from Meta.
 func (w *WhatsAppChannel) handleIncoming(rw http.ResponseWriter, r *http.Request, inbox chan<- IncomingMessage, ctx context.Context) {
-	// Meta requires a fast 200 OK; always acknowledge immediately.
-	rw.WriteHeader(http.StatusOK)
-
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB cap
 	if err != nil {
 		slog.Error("whatsapp: failed to read request body", "error", err)
+		http.Error(rw, "bad request", http.StatusBadRequest)
 		return
 	}
+
+	// Verify X-Hub-Signature-256 before processing any payload.
+	// Format: "sha256=<hex(HMAC-SHA256(appSecret, rawBody))>"
+	sigHeader := r.Header.Get("X-Hub-Signature-256")
+	if !strings.HasPrefix(sigHeader, "sha256=") {
+		slog.Warn("whatsapp: missing or malformed X-Hub-Signature-256 header")
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	expectedHex := strings.TrimPrefix(sigHeader, "sha256=")
+	expectedBytes, decodeErr := hex.DecodeString(expectedHex)
+	if decodeErr != nil {
+		slog.Warn("whatsapp: invalid hex in X-Hub-Signature-256 header", "error", decodeErr)
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	mac := hmac.New(sha256.New, []byte(w.appSecret))
+	mac.Write(body)
+	if !hmac.Equal(mac.Sum(nil), expectedBytes) {
+		slog.Warn("whatsapp: X-Hub-Signature-256 mismatch — rejecting request")
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Signature verified — acknowledge to Meta and process the payload.
+	rw.WriteHeader(http.StatusOK)
 
 	var payload whatsappPayload
 	if err := json.Unmarshal(body, &payload); err != nil {
