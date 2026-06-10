@@ -3,7 +3,11 @@ package channel
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +16,8 @@ import (
 
 	"daimon/internal/config"
 )
+
+const testAppSecret = "test-app-secret-value"
 
 // newTestWhatsAppChannel builds a WhatsAppChannel with sensible test defaults.
 func newTestWhatsAppChannel(allowedPhones []string) *WhatsAppChannel {
@@ -23,11 +29,19 @@ func newTestWhatsAppChannel(allowedPhones []string) *WhatsAppChannel {
 		phoneNumberID: "TEST_PHONE_ID",
 		accessToken:   "TEST_TOKEN",
 		verifyToken:   "TEST_VERIFY_TOKEN",
+		appSecret:     testAppSecret,
 		port:          8080,
 		webhookPath:   "/webhook",
 		allowedPhones: phones,
 		client:        &http.Client{Timeout: 5 * time.Second},
 	}
+}
+
+// computeHMAC returns the sha256= prefixed signature as Meta computes it.
+func computeHMAC(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	return fmt.Sprintf("sha256=%s", hex.EncodeToString(mac.Sum(nil)))
 }
 
 // --- Webhook verification ---
@@ -111,6 +125,7 @@ func TestWhatsAppChannel_IncomingMessage_TextParsed(t *testing.T) {
 
 	body := buildWebhookPayload("15551234567", "text", "Hello World")
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", computeHMAC(testAppSecret, body))
 	rw := httptest.NewRecorder()
 
 	w.handleIncoming(rw, req, inbox, ctx)
@@ -147,6 +162,7 @@ func TestWhatsAppChannel_Allowlist_AllowedPhonePasses(t *testing.T) {
 
 	body := buildWebhookPayload("15551234567", "text", "Hello")
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", computeHMAC(testAppSecret, body))
 	rw := httptest.NewRecorder()
 
 	w.handleIncoming(rw, req, inbox, ctx)
@@ -166,11 +182,12 @@ func TestWhatsAppChannel_Allowlist_BlockedPhoneDropped(t *testing.T) {
 
 	body := buildWebhookPayload("19999999999", "text", "Unauthorized")
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", computeHMAC(testAppSecret, body))
 	rw := httptest.NewRecorder()
 
 	w.handleIncoming(rw, req, inbox, ctx)
 
-	// Still 200 OK (Meta must always receive 200)
+	// Still 200 OK (Meta must always receive 200 for authenticated requests)
 	if rw.Code != http.StatusOK {
 		t.Errorf("expected 200 even for blocked phone, got %d", rw.Code)
 	}
@@ -194,6 +211,7 @@ func TestWhatsAppChannel_UnsupportedTypeIgnored(t *testing.T) {
 
 	body := buildWebhookPayload("15551234567", "sticker", "")
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", computeHMAC(testAppSecret, body))
 	rw := httptest.NewRecorder()
 
 	w.handleIncoming(rw, req, inbox, ctx)
@@ -216,6 +234,7 @@ func TestWhatsAppChannel_MediaDisabled_ImageEnqueuesNotice(t *testing.T) {
 
 	body := buildWebhookPayload("15551234567", "image", "")
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", computeHMAC(testAppSecret, body))
 	rw := httptest.NewRecorder()
 
 	w.handleIncoming(rw, req, inbox, ctx)
@@ -227,6 +246,121 @@ func TestWhatsAppChannel_MediaDisabled_ImageEnqueuesNotice(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("expected notice message to be enqueued for image with media disabled")
+	}
+}
+
+// --- HMAC signature verification ---
+
+// TestWhatsAppChannel_HMAC_ValidSignature verifies that a request with a correct
+// X-Hub-Signature-256 header is accepted (200) and the message reaches the inbox.
+func TestWhatsAppChannel_HMAC_ValidSignature(t *testing.T) {
+	w := newTestWhatsAppChannel(nil)
+	inbox := make(chan IncomingMessage, 1)
+	ctx := context.Background()
+
+	body := buildWebhookPayload("15551234567", "text", "secure message")
+	sig := computeHMAC(testAppSecret, body)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", sig)
+	rw := httptest.NewRecorder()
+
+	w.handleIncoming(rw, req, inbox, ctx)
+
+	if rw.Code != http.StatusOK {
+		t.Errorf("expected 200 for valid signature, got %d", rw.Code)
+	}
+
+	select {
+	case msg := <-inbox:
+		if msg.Text() != "secure message" {
+			t.Errorf("expected 'secure message', got %q", msg.Text())
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timed out waiting for message in inbox after valid HMAC")
+	}
+}
+
+// TestWhatsAppChannel_HMAC_TamperedBody verifies that a request where the body
+// differs from what the HMAC was computed over is rejected with 401.
+func TestWhatsAppChannel_HMAC_TamperedBody(t *testing.T) {
+	w := newTestWhatsAppChannel(nil)
+	inbox := make(chan IncomingMessage, 1)
+	ctx := context.Background()
+
+	original := buildWebhookPayload("15551234567", "text", "original")
+	tampered := buildWebhookPayload("attacker", "text", "injected")
+
+	// Signature computed over original body, but actual body is tampered.
+	sig := computeHMAC(testAppSecret, original)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(tampered))
+	req.Header.Set("X-Hub-Signature-256", sig)
+	rw := httptest.NewRecorder()
+
+	w.handleIncoming(rw, req, inbox, ctx)
+
+	if rw.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for tampered body, got %d", rw.Code)
+	}
+
+	select {
+	case msg := <-inbox:
+		t.Fatalf("tampered request should not deliver a message, got %+v", msg)
+	case <-time.After(50 * time.Millisecond):
+		// expected
+	}
+}
+
+// TestWhatsAppChannel_HMAC_MissingHeader verifies that a request with no
+// X-Hub-Signature-256 header is rejected with 401.
+func TestWhatsAppChannel_HMAC_MissingHeader(t *testing.T) {
+	w := newTestWhatsAppChannel(nil)
+	inbox := make(chan IncomingMessage, 1)
+	ctx := context.Background()
+
+	body := buildWebhookPayload("15551234567", "text", "no sig")
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	// No X-Hub-Signature-256 header.
+	rw := httptest.NewRecorder()
+
+	w.handleIncoming(rw, req, inbox, ctx)
+
+	if rw.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for missing signature header, got %d", rw.Code)
+	}
+
+	select {
+	case msg := <-inbox:
+		t.Fatalf("unsigned request should not deliver a message, got %+v", msg)
+	case <-time.After(50 * time.Millisecond):
+		// expected
+	}
+}
+
+// TestWhatsAppChannel_HMAC_MalformedHeader verifies that a header value that
+// does not start with "sha256=" is rejected with 401.
+func TestWhatsAppChannel_HMAC_MalformedHeader(t *testing.T) {
+	w := newTestWhatsAppChannel(nil)
+	inbox := make(chan IncomingMessage, 1)
+	ctx := context.Background()
+
+	body := buildWebhookPayload("15551234567", "text", "bad header")
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("X-Hub-Signature-256", "notasha256header")
+	rw := httptest.NewRecorder()
+
+	w.handleIncoming(rw, req, inbox, ctx)
+
+	if rw.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for malformed signature header, got %d", rw.Code)
+	}
+
+	select {
+	case msg := <-inbox:
+		t.Fatalf("malformed header request should not deliver a message, got %+v", msg)
+	case <-time.After(50 * time.Millisecond):
+		// expected
 	}
 }
 
@@ -394,6 +528,7 @@ func TestNewWhatsAppChannel_MissingFields(t *testing.T) {
 			cfg: config.ChannelConfig{
 				AccessToken: "tok",
 				VerifyToken: "vtok",
+				AppSecret:   "secret",
 			},
 		},
 		{
@@ -401,6 +536,7 @@ func TestNewWhatsAppChannel_MissingFields(t *testing.T) {
 			cfg: config.ChannelConfig{
 				PhoneNumberID: "pid",
 				VerifyToken:   "vtok",
+				AppSecret:     "secret",
 			},
 		},
 		{
@@ -408,6 +544,15 @@ func TestNewWhatsAppChannel_MissingFields(t *testing.T) {
 			cfg: config.ChannelConfig{
 				PhoneNumberID: "pid",
 				AccessToken:   "tok",
+				AppSecret:     "secret",
+			},
+		},
+		{
+			name: "missing app_secret",
+			cfg: config.ChannelConfig{
+				PhoneNumberID: "pid",
+				AccessToken:   "tok",
+				VerifyToken:   "vtok",
 			},
 		},
 	}
