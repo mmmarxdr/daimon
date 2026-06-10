@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -14,8 +15,9 @@ import (
 )
 
 type HTTPFetchTool struct {
-	config config.HTTPToolConfig
-	client *http.Client
+	config   config.HTTPToolConfig
+	client   *http.Client
+	resolver func(string) ([]net.IP, error) // injectable for tests; nil uses net.LookupIP
 }
 
 func NewHTTPFetchTool(cfg config.HTTPToolConfig) *HTTPFetchTool {
@@ -87,10 +89,16 @@ func (t *HTTPFetchTool) Execute(ctx context.Context, params json.RawMessage) (To
 		return ToolResult{IsError: true, Content: fmt.Sprintf("invalid URL: %v", err)}, nil
 	}
 
+	// Blocked domain list is checked first (name-based, no DNS needed).
 	for _, d := range t.config.BlockedDomains {
 		if strings.EqualFold(parsedURL.Host, d) || strings.HasSuffix(strings.ToLower(parsedURL.Host), "."+strings.ToLower(d)) {
 			return ToolResult{IsError: true, Content: fmt.Sprintf("domain %s is blocked", parsedURL.Host)}, nil
 		}
+	}
+
+	// SSRF guard: scheme allowlist + private-IP / DNS-rebinding block.
+	if err := validateFetchURL(input.URL, t.resolver); err != nil {
+		return ToolResult{IsError: true, Content: err.Error()}, nil
 	}
 
 	var reqBody io.Reader
@@ -107,7 +115,17 @@ func (t *HTTPFetchTool) Execute(ctx context.Context, params json.RawMessage) (To
 		req.Header.Set(k, v)
 	}
 
-	resp, err := t.client.Do(req)
+	// Re-validate every redirect target through the SSRF guard so an
+	// attacker-controlled server cannot redirect us to a private/IMDS address.
+	client := *t.client
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return validateFetchURL(req.URL.String(), t.resolver)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return ToolResult{IsError: true, Content: "HTTP request timed out"}, nil

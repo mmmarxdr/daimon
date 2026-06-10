@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,8 +21,9 @@ import (
 // from a URL and returns it as Markdown. For JS-heavy pages it optionally falls
 // back to the Jina Reader API.
 type WebFetchTool struct {
-	config config.WebFetchConfig
-	client *http.Client
+	config   config.WebFetchConfig
+	client   *http.Client
+	resolver func(string) ([]net.IP, error) // injectable for tests; nil uses net.LookupIP
 }
 
 // NewWebFetchTool constructs a WebFetchTool from the supplied config.
@@ -90,20 +92,21 @@ func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (Too
 		extractContent = *input.ExtractContent
 	}
 
-	// Validate URL.
 	parsedURL, err := url.Parse(input.URL)
 	if err != nil {
 		return ToolResult{IsError: true, Content: fmt.Sprintf("invalid URL: %v", err)}, nil
 	}
-	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return ToolResult{IsError: true, Content: fmt.Sprintf("unsupported URL scheme %q: only http/https are allowed", parsedURL.Scheme)}, nil
-	}
 
-	// Blocked domain check.
+	// Blocked domain list is checked first (name-based, no DNS needed).
 	for _, d := range t.config.BlockedDomains {
 		if strings.EqualFold(parsedURL.Host, d) || strings.HasSuffix(strings.ToLower(parsedURL.Host), "."+strings.ToLower(d)) {
 			return ToolResult{IsError: true, Content: fmt.Sprintf("domain %s is blocked", parsedURL.Host)}, nil
 		}
+	}
+
+	// SSRF guard: scheme allowlist + private-IP / DNS-rebinding block.
+	if err := validateFetchURL(input.URL, t.resolver); err != nil {
+		return ToolResult{IsError: true, Content: err.Error()}, nil
 	}
 
 	// Determine max response size.
@@ -120,7 +123,17 @@ func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (Too
 	}
 	req.Header.Set("User-Agent", "daimon/1.0")
 
-	resp, err := t.client.Do(req)
+	// Re-validate every redirect target through the SSRF guard so an
+	// attacker-controlled server cannot redirect us to a private/IMDS address.
+	client := *t.client
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return validateFetchURL(req.URL.String(), t.resolver)
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return ToolResult{IsError: true, Content: "web_fetch request timed out"}, nil
@@ -248,7 +261,15 @@ func (t *WebFetchTool) fetchViaJina(ctx context.Context, targetURL string) (stri
 		req.Header.Set("Authorization", "Bearer "+t.config.JinaAPIKey)
 	}
 
-	resp, err := t.client.Do(req)
+	jinaClient := *t.client
+	jinaClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("stopped after 10 redirects")
+		}
+		return validateFetchURL(req.URL.String(), t.resolver)
+	}
+
+	resp, err := jinaClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("jina request failed: %w", err)
 	}
