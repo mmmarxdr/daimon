@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -212,5 +214,51 @@ func TestOpenAIProvider_ChatStreamHTTPError(t *testing.T) {
 	}
 	if !errIs(err, ErrAuth) {
 		t.Errorf("expected ErrAuth, got: %v", err)
+	}
+}
+
+// TestOpenAIProvider_ChatStreamRequestsUsage asserts the streaming request opts
+// into usage reporting via stream_options.include_usage. OpenAI-compatible
+// endpoints (including MiniMax) omit the usage frame entirely unless this flag
+// is set, which left chat telemetry showing "0 in / 0 out" tokens.
+func TestOpenAIProvider_ChatStreamRequestsUsage(t *testing.T) {
+	var capturedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	cfg := config.ProviderConfig{Type: "openai", Model: "gpt-4o", APIKey: "test-key", BaseURL: srv.URL}
+	p, err := NewOpenAIProvider(cfg)
+	if err != nil {
+		t.Fatalf("NewOpenAIProvider: %v", err)
+	}
+
+	sr, err := p.ChatStream(context.Background(), ChatRequest{
+		Messages: []ChatMessage{{Role: "user", Content: content.TextBlock("Hi")}},
+	})
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	for range sr.Events { // drain to ensure the request completed
+	}
+
+	var body struct {
+		Stream        bool `json:"stream"`
+		StreamOptions *struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
+	}
+	if err := json.Unmarshal(capturedBody, &body); err != nil {
+		t.Fatalf("unmarshal request body: %v (body=%s)", err, capturedBody)
+	}
+	if !body.Stream {
+		t.Error("expected stream:true in request body")
+	}
+	if body.StreamOptions == nil || !body.StreamOptions.IncludeUsage {
+		t.Errorf("expected stream_options.include_usage:true, got %+v (body=%s)", body.StreamOptions, capturedBody)
 	}
 }
