@@ -720,7 +720,7 @@ func TestHTTPFetchTool_Success(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {
@@ -752,7 +752,7 @@ func TestHTTPFetchTool_Success(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q,"method":"post","body":"test=1","headers":{"X-Custom":"val"}}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {
@@ -780,7 +780,7 @@ func TestHTTPFetchTool_Success(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q,"method":"get"}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {
@@ -808,7 +808,7 @@ func TestHTTPFetchTool_ContextTimeout(t *testing.T) {
 	defer ts.Close()
 	defer close(block)
 
-	ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+	ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
@@ -837,10 +837,10 @@ func TestHTTPFetchTool_Truncation(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	ht := NewHTTPFetchTool(config.HTTPToolConfig{
+	ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{
 		Timeout:         5 * time.Second,
 		MaxResponseSize: "1KB",
-	})
+	}), localhostPassResolver)
 	params := fmt.Sprintf(`{"url":%q}`, ts.URL)
 	result, err := ht.Execute(context.Background(), json.RawMessage(params))
 	if err != nil {
@@ -914,7 +914,7 @@ func TestHTTPFetchTool_ErrorCases(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {
@@ -943,7 +943,7 @@ func TestHTTPFetchTool_ErrorCases(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second})
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{Timeout: 5 * time.Second}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {
@@ -962,10 +962,10 @@ func TestHTTPFetchTool_ErrorCases(t *testing.T) {
 		}))
 		defer ts.Close()
 
-		ht := NewHTTPFetchTool(config.HTTPToolConfig{
+		ht := withHTTPFetchResolver(NewHTTPFetchTool(config.HTTPToolConfig{
 			Timeout:         5 * time.Second,
 			MaxResponseSize: "", // empty → defaults to 2MB inside Execute
-		})
+		}), localhostPassResolver)
 		params := fmt.Sprintf(`{"url":%q}`, ts.URL)
 		result, err := ht.Execute(context.Background(), json.RawMessage(params))
 		if err != nil {

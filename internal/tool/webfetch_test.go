@@ -101,10 +101,10 @@ func TestWebFetchTool_Tier1_Extraction(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{
+	tool := withWebFetchResolver(NewWebFetchTool(config.WebFetchConfig{
 		Enabled: boolPtr(true),
 		Timeout: 10 * time.Second,
-	})
+	}), localhostPassResolver)
 
 	params, _ := json.Marshal(map[string]interface{}{
 		"url":             srv.URL,
@@ -140,10 +140,10 @@ func TestWebFetchTool_RawMode(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{
+	tool := withWebFetchResolver(NewWebFetchTool(config.WebFetchConfig{
 		Enabled: boolPtr(true),
 		Timeout: 10 * time.Second,
-	})
+	}), localhostPassResolver)
 
 	params, _ := json.Marshal(map[string]interface{}{
 		"url":             srv.URL,
@@ -242,7 +242,7 @@ func TestWebFetchTool_JinaFallback(t *testing.T) {
 		Timeout:     10 * time.Second,
 		JinaEnabled: true,
 	}
-	tool := NewWebFetchTool(cfg)
+	tool := withWebFetchResolver(NewWebFetchTool(cfg), localhostPassResolver)
 
 	// Override the HTTP client with a custom transport that rewrites Jina URLs
 	// to our local mock server.
@@ -285,11 +285,11 @@ func TestWebFetchTool_Truncation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tool := NewWebFetchTool(config.WebFetchConfig{
+	tool := withWebFetchResolver(NewWebFetchTool(config.WebFetchConfig{
 		Enabled:         boolPtr(true),
 		Timeout:         5 * time.Second,
 		MaxResponseSize: "1KB", // 1024 bytes — body is 2000 bytes
-	})
+	}), localhostPassResolver)
 
 	params, _ := json.Marshal(map[string]interface{}{
 		"url":             srv.URL,
