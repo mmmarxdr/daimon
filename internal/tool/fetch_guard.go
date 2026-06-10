@@ -53,6 +53,10 @@ func validateFetchURL(rawURL string, resolver func(string) ([]net.IP, error)) er
 	return nil
 }
 
+// cgnatBlock is the carrier-grade NAT range defined by RFC 6598 (100.64.0.0/10).
+// addr.IsPrivate() does not cover this range, so it is checked explicitly.
+var cgnatBlock = netip.MustParsePrefix("100.64.0.0/10")
+
 // checkIPAllowed returns an error if ip falls in any range that must not be
 // reachable from an agent-initiated fetch request.
 func checkIPAllowed(ip net.IP) error {
@@ -77,6 +81,9 @@ func checkIPAllowed(ip net.IP) error {
 		// NOTE: IsPrivate does NOT include loopback or link-local — those are
 		// checked above.
 		return fmt.Errorf("blocked: resolved IP %s is a private address", addr)
+	case cgnatBlock.Contains(addr):
+		// RFC 6598: 100.64.0.0/10 — carrier-grade NAT, not covered by IsPrivate.
+		return fmt.Errorf("blocked: resolved IP %s is in CGNAT range (RFC 6598)", addr)
 	case addr.IsUnspecified():
 		// 0.0.0.0 or ::.
 		return fmt.Errorf("blocked: resolved IP %s is an unspecified address", addr)

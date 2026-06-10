@@ -242,6 +242,90 @@ func TestValidateFetchURL_PublicURLPasses(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// T-GUARD-6 — CGNAT range (RFC 6598) 100.64.0.0/10 is blocked
+// ---------------------------------------------------------------------------
+
+func TestCheckIPAllowed_CGNATRange(t *testing.T) {
+	cases := []struct {
+		name    string
+		ip      string
+		wantErr bool
+		errSub  string
+	}{
+		{
+			name:    "100.64.1.1 rejected (CGNAT start)",
+			ip:      "100.64.1.1",
+			wantErr: true,
+			errSub:  "CGNAT",
+		},
+		{
+			name:    "100.127.255.255 rejected (CGNAT end)",
+			ip:      "100.127.255.255",
+			wantErr: true,
+			errSub:  "CGNAT",
+		},
+		{
+			name:    "100.64.0.0 rejected (CGNAT network address)",
+			ip:      "100.64.0.0",
+			wantErr: true,
+			errSub:  "CGNAT",
+		},
+		{
+			name:    "93.184.216.34 passes (public IP)",
+			ip:      "93.184.216.34",
+			wantErr: false,
+		},
+		{
+			name:    "100.63.255.255 passes (just below CGNAT range)",
+			ip:      "100.63.255.255",
+			wantErr: false,
+		},
+		{
+			name:    "100.128.0.0 passes (just above CGNAT range)",
+			ip:      "100.128.0.0",
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ip := net.ParseIP(tc.ip)
+			if ip == nil {
+				t.Fatalf("test setup: could not parse IP %q", tc.ip)
+			}
+			err := checkIPAllowed(ip)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for IP %q, got nil", tc.ip)
+				}
+				if tc.errSub != "" && !strings.Contains(err.Error(), tc.errSub) {
+					t.Errorf("expected error to contain %q, got: %v", tc.errSub, err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error for IP %q: %v", tc.ip, err)
+				}
+			}
+		})
+	}
+}
+
+// TestValidateFetchURL_CGNATRange confirms that a hostname that resolves to a
+// CGNAT address is rejected end-to-end (guard + resolver path).
+func TestValidateFetchURL_CGNATRange(t *testing.T) {
+	resolver := stubLookupIP(map[string][]net.IP{
+		"cgnat.internal": {net.ParseIP("100.64.1.1")},
+	})
+	err := validateFetchURL("http://cgnat.internal/data", resolver)
+	if err == nil {
+		t.Fatal("expected CGNAT address to be blocked, got nil")
+	}
+	if !strings.Contains(err.Error(), "CGNAT") {
+		t.Errorf("expected 'CGNAT' in error message, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // T-GUARD-5 — invalid / empty URL handled gracefully
 // ---------------------------------------------------------------------------
 

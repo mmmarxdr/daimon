@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -305,6 +306,54 @@ func TestWebFetchTool_Truncation(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "truncated") {
 		t.Errorf("expected truncation notice in result, got:\n%s", result.Content)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.9 — Redirect to private/IMDS IP is blocked (FIX 1 — redirect bypass)
+// ---------------------------------------------------------------------------
+
+// TestWebFetchTool_RedirectToPrivateIPBlocked verifies that a 302 redirect
+// from an attacker-controlled server pointing at a private/IMDS IP is caught
+// by the SSRF guard and does not succeed.
+func TestWebFetchTool_RedirectToPrivateIPBlocked(t *testing.T) {
+	// Simulate a server that redirects to an internal IP.
+	attackerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer attackerSrv.Close()
+
+	// Stub resolver: attacker host passes, IMDS host resolves to the link-local IP.
+	imdsResolver := func(host string) ([]net.IP, error) {
+		switch host {
+		case "127.0.0.1", "::1", "localhost":
+			return nil, nil // allow loopback for httptest server
+		case "169.254.169.254":
+			return []net.IP{net.ParseIP("169.254.169.254")}, nil
+		default:
+			return nil, nil // allow attacker server host
+		}
+	}
+
+	tool := withWebFetchResolver(NewWebFetchTool(config.WebFetchConfig{
+		Enabled: boolPtr(true),
+		Timeout: 5 * time.Second,
+	}), imdsResolver)
+
+	params, _ := json.Marshal(map[string]interface{}{
+		"url":             attackerSrv.URL,
+		"extract_content": false,
+	})
+
+	result, err := tool.Execute(context.Background(), params)
+	if err != nil {
+		t.Fatalf("unexpected hard error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("expected redirect to private IP to be blocked, but got success: %s", result.Content)
+	}
+	if !strings.Contains(result.Content, "blocked") && !strings.Contains(result.Content, "link-local") {
+		t.Errorf("expected 'blocked' or 'link-local' in error, got: %s", result.Content)
 	}
 }
 
