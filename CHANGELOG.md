@@ -8,6 +8,50 @@ Releases follow [semver](https://semver.org). Pre-1.0 minors may break configura
 
 ## [Unreleased]
 
+## [v0.13.0] — Tool-output collapse + security & agent fixes
+
+### Breaking
+
+- **WhatsApp `channel.app_secret` is now required.** Existing WhatsApp configs
+  must add `channel.app_secret` or startup fails. The incoming webhook now
+  HMAC-verifies the `X-Hub-Signature-256` header. (PR #66)
+
+### New
+
+- **Collapsible tool output in the web chat.** A tool call now shows an inline
+  output peek — the first 4 lines plus a "… +N lines (click to expand)"
+  affordance — instead of hiding output until expanded. Runs of 5+ consecutive
+  tool calls collapse into a single "⚙ N tools" group (collapsed by default,
+  with a live "running" pill and an error count). (daimon-frontend PR #12)
+
+### Fixed
+
+- **Agent over-iteration on shell/file tasks (DAIM-23).** `batch_exec` now
+  surfaces the actual (bounded) command output to the model instead of a
+  3-line/100-character preview, so the agent no longer re-runs commands to see
+  output it already produced. Full output stays retrievable via `search_output`.
+  (PR #70)
+- **Turn footer showed `iter 2147483647` (DAIM-22).** The `turn_end` telemetry
+  frame now reports the real iteration count instead of the no-cap
+  `math.MaxInt32` sentinel. (PR #69)
+- **Web memory recall broken across conversations.** All web conversations now
+  share a stable memory scope, so a memory saved in one chat is recalled in
+  another. (PR #68)
+- **SSRF in `http_fetch` / `web_fetch`.** Added an http/https scheme allowlist, a
+  private/loopback/link-local IP block after DNS resolution, and a redirect
+  guard. (PR #65)
+- **Streaming token counts showed `0 in / 0 out`.** OpenAI-compatible providers
+  (OpenAI, MiniMax) now receive `stream_options.include_usage`. (PR #64)
+
+### Security
+
+- Added **`SECURITY.md`** documenting the threat model and known limitations.
+  (PR #67)
+
+---
+
+## [v0.12.0]
+
 ### Breaking
 
 - **Cron command rename**: `/cancel` → `/task-cancel` and `/cancel-confirm` →
