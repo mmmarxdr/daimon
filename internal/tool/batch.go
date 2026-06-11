@@ -12,6 +12,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// maxBatchCmdOutputRunes bounds how much of each command's output (stdout+stderr)
+// is surfaced inline in the batch summary. Large enough to show a directory
+// listing or a small/medium file so the model does NOT re-run commands to see
+// output it already produced (DAIM-23: over-iteration on shell/file flows), but
+// capped so a multi-command batch can't flood the context window. The full,
+// untruncated output is always available via search_output (indexed per command).
+const maxBatchCmdOutputRunes = 8000
+
 // BatchExecToolConfig configures the BatchExecTool.
 type BatchExecToolConfig struct {
 	MaxOutputBytes int           // Maximum output bytes per command (default 1MB)
@@ -46,7 +54,7 @@ func (t *BatchExecTool) Name() string {
 
 // Description returns the tool description.
 func (t *BatchExecTool) Description() string {
-	return "Execute multiple shell commands sequentially. Each command's output is indexed for later search. Stop on first error if stop_on_error is true."
+	return "Execute multiple shell commands sequentially. Each command's output (stdout+stderr, bounded) is returned inline in the result AND indexed for later full-text retrieval via search_output — read it directly, no need to re-run the command to see it. Stop on first error if stop_on_error is true."
 }
 
 // Schema returns the JSON schema for the tool parameters.
@@ -192,13 +200,16 @@ func (t *BatchExecTool) Execute(ctx context.Context, params json.RawMessage) (To
 			}
 		case result.Metrics.ExitCode == 0:
 			successCount++
-			lines := strings.Split(strings.TrimSpace(result.Summary), "\n")
-			preview := trimPreviewRunes(strings.Join(lines[:min(3, len(lines))], "; "), 100)
-			summaryLines = append(summaryLines, fmt.Sprintf("[%d] OK: %s", i+1, preview))
+			output := strings.TrimSpace(result.Summary)
+			if output == "" {
+				summaryLines = append(summaryLines, fmt.Sprintf("[%d] OK (no output)", i+1))
+			} else {
+				summaryLines = append(summaryLines, fmt.Sprintf("[%d] OK:\n%s", i+1, trimPreviewRunes(output, maxBatchCmdOutputRunes)))
+			}
 		default:
 			errorOccurred = true
 			errorCount++
-			summaryLines = append(summaryLines, fmt.Sprintf("[%d] EXITED %d: %s", i+1, result.Metrics.ExitCode, result.Summary))
+			summaryLines = append(summaryLines, fmt.Sprintf("[%d] EXITED %d: %s", i+1, result.Metrics.ExitCode, trimPreviewRunes(strings.TrimSpace(result.Summary), maxBatchCmdOutputRunes)))
 			if input.StopOnError {
 				return finalizeBatch(input.Commands, summaryLines, successCount, errorCount, errorOccurred), nil
 			}

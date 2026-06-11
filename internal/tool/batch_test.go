@@ -6,13 +6,44 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
-	"github.com/google/uuid"
 	"daimon/internal/store"
+	"github.com/google/uuid"
 )
+
+// TestBatchExec_SurfacesFullCommandOutput — DAIM-23. On success, batch_exec must
+// surface the ACTUAL command output to the model, not a 3-line/100-char preview.
+// When the model can't see the output it asked for (e.g. a directory listing),
+// it re-runs more commands to get it — the over-iteration this fix targets.
+func TestBatchExec_SurfacesFullCommandOutput(t *testing.T) {
+	mockStore := &mockOutputStoreForBatch{}
+	tool := NewBatchExecTool(mockStore, BatchExecToolConfig{
+		MaxOutputBytes: 1024 * 1024,
+		Timeout:        30 * time.Second,
+	})
+
+	// A single command producing 5 distinct lines of output. The model must
+	// see ALL of them in the result, not just the first three.
+	params := json.RawMessage(`{"commands": ["echo line1; echo line2; echo line3; echo line4; echo line5"]}`)
+
+	result, err := tool.Execute(context.Background(), params)
+	if err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error: %s", result.Content)
+	}
+
+	for _, want := range []string{"line1", "line2", "line3", "line4", "line5"} {
+		if !strings.Contains(result.Content, want) {
+			t.Errorf("batch_exec must surface full command output to the model; missing %q.\nGot:\n%s", want, result.Content)
+		}
+	}
+}
 
 // TestBatchExecTool_Execute tests the BatchExecTool executes commands sequentially
 // and indexes outputs.
@@ -247,37 +278,37 @@ func TestTrimPreviewRunes(t *testing.T) {
 		name        string
 		input       string
 		maxRunes    int
-		wantTrimmed bool   // whether "..." suffix expected
-		wantRunes   int    // expected rune count of result (excluding "...")
-		wantValid   bool   // utf8.ValidString
+		wantTrimmed bool // whether "..." suffix expected
+		wantRunes   int  // expected rune count of result (excluding "...")
+		wantValid   bool // utf8.ValidString
 	}{
 		{
-			name: "empty",
+			name:  "empty",
 			input: "", maxRunes: 100,
 			wantTrimmed: false, wantRunes: 0, wantValid: true,
 		},
 		{
-			name: "short",
+			name:  "short",
 			input: "hello", maxRunes: 100,
 			wantTrimmed: false, wantRunes: 5, wantValid: true,
 		},
 		{
-			name: "exact-100",
+			name:  "exact-100",
 			input: exact100, maxRunes: 100,
 			wantTrimmed: false, wantRunes: 100, wantValid: true,
 		},
 		{
-			name: "101-ascii",
+			name:  "101-ascii",
 			input: s101ASCII, maxRunes: 100,
 			wantTrimmed: true, wantRunes: 100, wantValid: true,
 		},
 		{
-			name: "101-multibyte",
+			name:  "101-multibyte",
 			input: s101Multi, maxRunes: 100,
 			wantTrimmed: true, wantRunes: 100, wantValid: true,
 		},
 		{
-			name: "single-emoji",
+			name:  "single-emoji",
 			input: emoji, maxRunes: 100,
 			wantTrimmed: false, wantRunes: 1, wantValid: true,
 		},
