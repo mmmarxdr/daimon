@@ -2,10 +2,7 @@
 
 **The lightweight agent that gives your LLM hands, eyes, and a voice.**
 
-<!-- SCREENSHOT: web dashboard chat view OR the TUI in action.
-     Recommended size: 1600x900, .png, commit it to docs/assets/daimon.png -->
-
-<img width="1541" height="925" alt="image" src="https://github.com/user-attachments/assets/ba522b15-055e-4d18-bb8f-d6d853f239d2" />
+<img alt="Daimon web dashboard — the agent running a shell tool and answering" src="docs/assets/chat-tools.png" />
 
 
 > **Note.** As of v0.4.0 the CLI binary is `daimon`. If you were using
@@ -55,6 +52,19 @@ A Daimon is an intermediary that does the work — exactly what an AI agent is.
   shell commands, sandboxed filesystem, audit log.
 - **Single binary** — one file, cross-platform (Linux, macOS, Windows).
   No Docker, no Node, no runtime deps.
+
+## See it in action
+
+<table>
+  <tr>
+    <td width="50%"><img alt="Dashboard overview" src="docs/assets/overview.png" /><br /><sub><b>Overview</b> — cost, tokens, conversations, and memory at a glance.</sub></td>
+    <td width="50%"><img alt="Persistent memory recall" src="docs/assets/chat-memory.png" /><br /><sub><b>Persistent memory</b> — recalls what you told it in an earlier chat.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="Memory page" src="docs/assets/memory.png" /><br /><sub><b>Memory</b> — everything it remembers, clustered and editable.</sub></td>
+    <td width="50%"><img alt="Live log stream" src="docs/assets/logs.png" /><br /><sub><b>Live logs</b> — every tool call and model invocation as it happens.</sub></td>
+  </tr>
+</table>
 
 ## Inspiration
 
